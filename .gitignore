@@ -1,0 +1,15 @@
+bin/
+obj/
+
+**/bin/
+**/obj/
+
+.vs/
+.vscode/
+
+*.user
+*.suo
+*.log
+
+outputs/
+work/
