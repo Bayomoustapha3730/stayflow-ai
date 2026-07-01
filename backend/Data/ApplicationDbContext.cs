@@ -8,6 +8,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Property> Properties => Set<Property>();
+    public DbSet<Amenity> Amenities => Set<Amenity>();
+    public DbSet<HouseRule> HouseRules => Set<HouseRule>();
+    public DbSet<LocalRecommendation> LocalRecommendations => Set<LocalRecommendation>();
+    public DbSet<EmergencyContact> EmergencyContacts => Set<EmergencyContact>();
     public DbSet<Guest> Guests => Set<Guest>();
     public DbSet<KnowledgeBaseItem> KnowledgeBaseItems => Set<KnowledgeBaseItem>();
     public DbSet<Conversation> Conversations => Set<Conversation>();

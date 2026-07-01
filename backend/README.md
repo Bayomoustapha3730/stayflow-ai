@@ -48,6 +48,11 @@ dotnet run
 - `POST /companies` - create company
 - `PUT /companies/{id}` - update company
 - `DELETE /companies/{id}` - soft delete company
+- `GET /properties` - paginated property list with optional `companyId` and `search`
+- `GET /properties/{id}` - property details with amenities, house rules, local recommendations, emergency contacts, and AI knowledge base items
+- `POST /properties` - create property profile and nested concierge content
+- `PUT /properties/{id}` - update property profile and replace nested concierge content
+- `DELETE /properties/{id}` - soft delete property profile and nested concierge content
 - `POST /auth/login` - JWT login
 - `POST /auth/refresh` - refresh token rotation
 - `POST /auth/password-reset` - generate password reset token

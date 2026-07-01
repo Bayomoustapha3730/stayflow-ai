@@ -6,6 +6,8 @@ public static class ServiceCollectionExtensions
     {
         services.AddScoped<Repositories.ICompanyRepository, Repositories.CompanyRepository>();
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
+        services.AddScoped<Repositories.IPropertyRepository, Repositories.PropertyRepository>();
+        services.AddScoped<Services.IPropertyService, Services.PropertyService>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();
         services.AddScoped<Services.IPasswordHasher, Services.Pbkdf2PasswordHasher>();
         services.AddScoped<Services.IJwtTokenService, Services.JwtTokenService>();

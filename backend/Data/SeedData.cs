@@ -35,6 +35,7 @@ public static class SeedData
             City = "Nairobi",
             CountryCode = "KE",
             TimeZone = "Africa/Nairobi",
+            Description = "Demo short-stay apartment configured for StayFlow AI onboarding.",
             IsActive = true,
             CreatedAt = SeededAt,
             UpdatedAt = SeededAt

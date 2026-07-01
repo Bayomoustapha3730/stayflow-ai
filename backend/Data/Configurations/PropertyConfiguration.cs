@@ -14,9 +14,11 @@ public sealed class PropertyConfiguration : IEntityTypeConfiguration<Property>
 
         builder.Property(property => property.Name).HasMaxLength(180).IsRequired();
         builder.Property(property => property.AddressLine1).HasMaxLength(240).IsRequired();
+        builder.Property(property => property.AddressLine2).HasMaxLength(240);
         builder.Property(property => property.City).HasMaxLength(120).IsRequired();
         builder.Property(property => property.CountryCode).HasMaxLength(2).IsRequired();
         builder.Property(property => property.TimeZone).HasMaxLength(80).IsRequired();
+        builder.Property(property => property.Description).HasMaxLength(2000);
 
         builder.HasOne(property => property.Company)
             .WithMany(company => company.Properties)
