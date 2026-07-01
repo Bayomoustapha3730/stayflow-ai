@@ -1,5 +1,5 @@
 using System.Net;
-using System.Text.Json;
+using StayFlow.Api.Common;
 
 namespace StayFlow.Api.Middleware;
 
@@ -33,17 +33,24 @@ public sealed class GlobalExceptionHandlingMiddleware(
 
         context.Response.Clear();
         context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
-        context.Response.ContentType = "application/problem+json";
+        context.Response.ContentType = "application/json";
 
-        var problem = new
-        {
-            type = "https://httpstatuses.com/500",
-            title = "An unexpected error occurred.",
-            status = context.Response.StatusCode,
-            detail = environment.IsDevelopment() ? exception.Message : null,
-            traceId = context.TraceIdentifier
-        };
+        var errors = environment.IsDevelopment()
+            ? new[] { exception.Message }
+            : [];
 
-        await JsonSerializer.SerializeAsync(context.Response.Body, problem);
+        var response = ApiResponse<object>.Fail(
+            "An unexpected error occurred.",
+            errors,
+            GetCorrelationId(context));
+
+        await context.Response.WriteAsJsonAsync(response);
+    }
+
+    private static string GetCorrelationId(HttpContext context)
+    {
+        return context.Items.TryGetValue(CorrelationIdMiddleware.HeaderName, out var correlationId)
+            ? correlationId?.ToString() ?? context.TraceIdentifier
+            : context.TraceIdentifier;
     }
 }
