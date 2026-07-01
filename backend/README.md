@@ -43,6 +43,11 @@ dotnet run
 - `GET /health` - health check endpoint
 - `GET /openapi/v1.json` - OpenAPI document in development
 - `GET /api/status` - lightweight backend status endpoint
+- `GET /companies` - paginated company list with optional `search`
+- `GET /companies/{id}` - company details
+- `POST /companies` - create company
+- `PUT /companies/{id}` - update company
+- `DELETE /companies/{id}` - soft delete company
 
 ## Database
 
@@ -58,6 +63,12 @@ Apply migrations to the configured PostgreSQL database:
 dotnet tool run dotnet-ef database update --project backend/backend.csproj --startup-project backend/backend.csproj
 ```
 
+Run tests:
+
+```bash
+dotnet test tests/StayFlow.Api.Tests/StayFlow.Api.Tests.csproj
+```
+
 ## Notes
 
-Business modules have intentionally not been added yet. This project only contains the backend foundation.
+Authentication is intentionally not implemented yet. Company management is the first business module.
