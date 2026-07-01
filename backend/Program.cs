@@ -7,6 +7,7 @@ builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddApplicationDatabase(builder.Configuration);
 builder.Services.AddApplicationServices();
+builder.Services.AddApplicationAuthentication(builder.Configuration);
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
@@ -19,6 +20,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseMiddleware<PermissionAuthorizationMiddleware>();
 
 app.MapControllers();
 app.MapHealthChecks("/health");

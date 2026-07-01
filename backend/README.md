@@ -48,6 +48,15 @@ dotnet run
 - `POST /companies` - create company
 - `PUT /companies/{id}` - update company
 - `DELETE /companies/{id}` - soft delete company
+- `POST /auth/login` - JWT login
+- `POST /auth/refresh` - refresh token rotation
+- `POST /auth/password-reset` - generate password reset token
+- `POST /auth/password-reset/confirm` - reset password
+- `POST /auth/email-verification/confirm` - verify email
+- `GET /auth/me` - current authenticated user
+- `GET /roles` - role list
+- `POST /roles` - create role
+- `POST /roles/{roleId}/permissions` - assign permission to role
 
 ## Database
 
@@ -71,4 +80,4 @@ dotnet test tests/StayFlow.Api.Tests/StayFlow.Api.Tests.csproj
 
 ## Notes
 
-Authentication is intentionally not implemented yet. Company management is the first business module.
+Authentication uses JWT bearer tokens, refresh token rotation, PBKDF2 password hashing, account lockout, and role/permission tables. Outbound email delivery is not implemented yet, so reset and verification endpoints currently return generated tokens for development workflow only.
