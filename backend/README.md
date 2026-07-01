@@ -44,6 +44,20 @@ dotnet run
 - `GET /openapi/v1.json` - OpenAPI document in development
 - `GET /api/status` - lightweight backend status endpoint
 
+## Database
+
+Restore the local EF Core tool before working with migrations:
+
+```bash
+dotnet tool restore
+```
+
+Apply migrations to the configured PostgreSQL database:
+
+```bash
+dotnet tool run dotnet-ef database update --project backend/backend.csproj --startup-project backend/backend.csproj
+```
+
 ## Notes
 
 Business modules have intentionally not been added yet. This project only contains the backend foundation.
