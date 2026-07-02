@@ -13,8 +13,14 @@ This folder contains the working documentation for StayFlow AI. Documentation sh
 - [`testing`](testing/README.md) - testing strategy and quality practices.
 - [`product`](product/README.md) - product requirements and roadmap notes.
 - [`business`](business/README.md) - business context, market notes, and operating assumptions.
+- [`developer`](developer/README.md) - developer handbook, engineering standards, and contribution guidance.
 - [`sprints`](sprints/README.md) - sprint planning and delivery tracking.
 - [`decisions`](decisions/README.md) - architecture decision records.
 - [`prompts`](prompts/README.md) - AI prompts and development workflow notes.
+
+## Key Templates
+
+- [`sprints/Sprint-Template.md`](sprints/Sprint-Template.md) - sprint planning and retrospective template.
+- [`../.github/pull_request_template.md`](../.github/pull_request_template.md) - pull request template for code and documentation changes.
 
 Use concise Markdown, include dates where relevant, and prefer linking to source files, migrations, or issues rather than duplicating implementation details.

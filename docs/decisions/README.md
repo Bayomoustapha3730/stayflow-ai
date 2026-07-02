@@ -10,4 +10,17 @@ Use it for:
 - Security and compliance decisions.
 - Changes to platform direction or module boundaries.
 
-Decision records should include context, the decision, alternatives considered, consequences, and the date the decision was made.
+## Template
+
+- [ADR Template](ADR-Template.md)
+
+## Initial ADRs
+
+- [ADR-0001: Use ASP.NET Core for the Backend API](ADR-0001-use-aspnet-core.md)
+- [ADR-0002: Use PostgreSQL as the Primary Database](ADR-0002-use-postgresql.md)
+- [ADR-0003: Use OpenAI for AI Concierge Capabilities](ADR-0003-use-openai.md)
+- [ADR-0004: Use WhatsApp Cloud API for Guest Messaging](ADR-0004-use-whatsapp-cloud-api.md)
+- [ADR-0005: Use Clean Architecture Principles](ADR-0005-use-clean-architecture.md)
+- [ADR-0006: Use Multi-Tenant SaaS Design](ADR-0006-use-multi-tenant-saas-design.md)
+
+Decision records should include status, context, the decision, consequences, alternatives considered, and the date the decision was made.

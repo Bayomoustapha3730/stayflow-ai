@@ -9,12 +9,10 @@ Project documentation is organized under [`/docs`](docs/README.md):
 - [`docs/architecture`](docs/architecture/README.md) - system design, backend structure, integration boundaries, and architectural diagrams.
 - [`docs/api`](docs/api/README.md) - API contracts, endpoint behavior, request/response examples, and integration notes.
 - [`docs/database`](docs/database/README.md) - data model documentation, migrations, seed data, and database conventions.
-- [`docs/ui-ux`](docs/ui-ux/README.md) - user experience principles, interface patterns, and design guidance.
 - [`docs/security`](docs/security/README.md) - security architecture, controls, threat modeling, and operational practices.
-- [`docs/deployment`](docs/deployment/README.md) - deployment environments, release process, and infrastructure operations.
-- [`docs/testing`](docs/testing/README.md) - testing strategy, quality gates, and verification workflows.
 - [`docs/product`](docs/product/README.md) - product requirements, feature scope, user journeys, and roadmap notes.
 - [`docs/business`](docs/business/README.md) - business model, market context, partnerships, and operating assumptions.
+- [`docs/developer`](docs/developer/README.md) - developer handbook, engineering standards, and contribution workflow.
 - [`docs/sprints`](docs/sprints/README.md) - sprint plans, delivery notes, backlog slices, and implementation progress.
 - [`docs/decisions`](docs/decisions/README.md) - architecture decision records and major product or engineering tradeoffs.
 - [`docs/prompts`](docs/prompts/README.md) - AI development prompts, prompt history, and reusable prompt patterns.
