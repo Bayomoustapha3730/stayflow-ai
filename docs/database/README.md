@@ -12,3 +12,12 @@ Use it for:
 - Data retention, soft delete, and audit field conventions.
 
 Database documentation should complement Entity Framework Core migrations and model configurations without duplicating every implementation detail.
+
+## Database Topics
+
+- [Entity Relationship Diagram](ERD.md)
+- [Tables](TABLES.md)
+- [Indexes](INDEXES.md)
+- [Migrations](MIGRATIONS.md)
+- [Performance](PERFORMANCE.md)
+- [Multitenancy](MULTITENANCY.md)
