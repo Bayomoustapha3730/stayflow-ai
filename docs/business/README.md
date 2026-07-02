@@ -11,3 +11,12 @@ Use it for:
 - Operational metrics, risks, and growth hypotheses.
 
 Business documentation should support product and engineering decisions with clear commercial context.
+
+## Business Topics
+
+- [Business Plan](Business-Plan.md)
+- [Revenue Model](Revenue-Model.md)
+- [Go To Market](Go-To-Market.md)
+- [Marketing](Marketing.md)
+- [Financial Projections](Financial-Projections.md)
+- [Investor Strategy](Investor-Strategy.md)
