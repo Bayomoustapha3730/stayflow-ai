@@ -22,6 +22,7 @@ Product documentation should keep implementation work connected to customer valu
 - [Functional Requirements](FunctionalRequirements.md)
 - [Non-Functional Requirements](NonFunctionalRequirements.md)
 - [Success Metrics](SuccessMetrics.md)
+- [Property Product Documentation](property/README.md)
 - [User Journeys](User-Journeys.md)
 - [Pricing](Pricing.md)
 - [Competitive Analysis](Competitive-Analysis.md)
