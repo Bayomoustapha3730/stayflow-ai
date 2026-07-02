@@ -25,6 +25,7 @@ Product documentation should keep implementation work connected to customer valu
 - [Property Product Documentation](property/README.md)
 - [Guest Product Documentation](guest/README.md)
 - [Reservation Product Documentation](reservation/README.md)
+- [AI Product Documentation](ai/README.md)
 - [User Journeys](User-Journeys.md)
 - [Pricing](Pricing.md)
 - [Competitive Analysis](Competitive-Analysis.md)
