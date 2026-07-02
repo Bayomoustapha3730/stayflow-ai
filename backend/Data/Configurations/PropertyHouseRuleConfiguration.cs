@@ -4,17 +4,17 @@ using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Data.Configurations;
 
-public sealed class HouseRuleConfiguration : IEntityTypeConfiguration<HouseRule>
+public sealed class PropertyHouseRuleConfiguration : IEntityTypeConfiguration<PropertyHouseRule>
 {
-    public void Configure(EntityTypeBuilder<HouseRule> builder)
+    public void Configure(EntityTypeBuilder<PropertyHouseRule> builder)
     {
-        builder.ToTable("HouseRules");
+        builder.ToTable("PropertyHouseRules");
         builder.HasKey(rule => rule.Id);
         builder.Property(rule => rule.Title).HasMaxLength(160).IsRequired();
         builder.Property(rule => rule.Description).HasMaxLength(1000).IsRequired();
 
         builder.HasOne(rule => rule.Property)
-            .WithMany(property => property.HouseRules)
+            .WithMany(property => property.PropertyHouseRules)
             .HasForeignKey(rule => rule.PropertyId)
             .OnDelete(DeleteBehavior.Cascade);
 

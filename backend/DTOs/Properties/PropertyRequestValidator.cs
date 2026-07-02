@@ -10,14 +10,19 @@ public static class PropertyRequestValidator
             result.Errors.Add("CompanyId is required.");
         }
 
-        ValidateCollections(request.Amenities, request.HouseRules, request.LocalRecommendations, request.EmergencyContacts, request.KnowledgeBaseItems, result);
+        ValidateCollections(request.PropertyAmenities, request.PropertyHouseRules, request.PropertyRecommendations, request.PropertyEmergencyContacts, request.PropertyKnowledgeArticles, result);
         return result;
     }
 
     public static PropertyValidationResult Validate(UpdatePropertyRequest request)
     {
         var result = ValidateCore(request.Name, request.AddressLine1, request.City, request.CountryCode, request.TimeZone);
-        ValidateCollections(request.Amenities, request.HouseRules, request.LocalRecommendations, request.EmergencyContacts, request.KnowledgeBaseItems, result);
+        if (request.CompanyId == Guid.Empty)
+        {
+            result.Errors.Add("CompanyId is required.");
+        }
+
+        ValidateCollections(request.PropertyAmenities, request.PropertyHouseRules, request.PropertyRecommendations, request.PropertyEmergencyContacts, request.PropertyKnowledgeArticles, result);
         return result;
     }
 
@@ -39,19 +44,19 @@ public static class PropertyRequestValidator
     }
 
     private static void ValidateCollections(
-        IReadOnlyCollection<AmenityRequest> amenities,
-        IReadOnlyCollection<HouseRuleRequest> houseRules,
-        IReadOnlyCollection<LocalRecommendationRequest> recommendations,
-        IReadOnlyCollection<EmergencyContactRequest> contacts,
-        IReadOnlyCollection<PropertyKnowledgeBaseItemRequest> knowledgeBaseItems,
+        IReadOnlyCollection<PropertyAmenityRequest> propertyAmenities,
+        IReadOnlyCollection<PropertyHouseRuleRequest> propertyHouseRules,
+        IReadOnlyCollection<PropertyRecommendationRequest> recommendations,
+        IReadOnlyCollection<PropertyEmergencyContactRequest> contacts,
+        IReadOnlyCollection<PropertyKnowledgeArticleRequest> propertyKnowledgeArticles,
         PropertyValidationResult result)
     {
-        foreach (var amenity in amenities)
+        foreach (var amenity in propertyAmenities)
         {
             AddRequired(result, amenity.Name, "Amenity name", 120);
         }
 
-        foreach (var rule in houseRules)
+        foreach (var rule in propertyHouseRules)
         {
             AddRequired(result, rule.Title, "House rule title", 160);
             AddRequired(result, rule.Description, "House rule description", 1000);
@@ -70,10 +75,10 @@ public static class PropertyRequestValidator
             AddRequired(result, contact.PhoneNumber, "Emergency contact phone number", 32);
         }
 
-        foreach (var item in knowledgeBaseItems)
+        foreach (var item in propertyKnowledgeArticles)
         {
-            AddRequired(result, item.Title, "Knowledge base title", 200);
-            AddRequired(result, item.Content, "Knowledge base content", 5000);
+            AddRequired(result, item.Title, "Knowledge article title", 200);
+            AddRequired(result, item.Content, "Knowledge article content", 5000);
         }
     }
 

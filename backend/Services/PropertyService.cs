@@ -10,6 +10,11 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
 {
     public async Task<ApiResponse<PagedResult<PropertySummaryDto>>> GetAsync(PropertyQueryParameters query, CancellationToken cancellationToken)
     {
+        if (query.CompanyId is null || query.CompanyId == Guid.Empty)
+        {
+            return ApiResponse<PagedResult<PropertySummaryDto>>.Fail("CompanyId is required.", ["CompanyId is required."]);
+        }
+
         var properties = await propertyRepository.GetAsync(query, cancellationToken);
 
         return ApiResponse<PagedResult<PropertySummaryDto>>.Ok(new PagedResult<PropertySummaryDto>
@@ -21,9 +26,14 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
         });
     }
 
-    public async Task<ApiResponse<PropertyDto>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<ApiResponse<PropertyDto>> GetByIdAsync(Guid id, Guid companyId, CancellationToken cancellationToken)
     {
-        var property = await propertyRepository.GetByIdAsync(id, cancellationToken);
+        if (companyId == Guid.Empty)
+        {
+            return ApiResponse<PropertyDto>.Fail("CompanyId is required.", ["CompanyId is required."]);
+        }
+
+        var property = await propertyRepository.GetByIdAsync(id, companyId, cancellationToken);
         return property is null
             ? ApiResponse<PropertyDto>.Fail("Property was not found.")
             : ApiResponse<PropertyDto>.Ok(MapToDto(property));
@@ -56,7 +66,7 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
             IsActive = true
         };
 
-        ReplaceChildren(property, request.Amenities, request.HouseRules, request.LocalRecommendations, request.EmergencyContacts, request.KnowledgeBaseItems);
+        ReplaceChildren(property, request.PropertyAmenities, request.PropertyHouseRules, request.PropertyRecommendations, request.PropertyEmergencyContacts, request.PropertyKnowledgeArticles);
 
         await propertyRepository.AddAsync(property, cancellationToken);
         await AddAuditLogAsync("Created", property, cancellationToken);
@@ -73,7 +83,7 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
             return ApiResponse<PropertyDto>.Fail("Property validation failed.", validation.Errors);
         }
 
-        var property = await propertyRepository.GetByIdAsync(id, cancellationToken);
+        var property = await propertyRepository.GetByIdAsync(id, request.CompanyId, cancellationToken);
         if (property is null)
         {
             return ApiResponse<PropertyDto>.Fail("Property was not found.");
@@ -88,7 +98,7 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
         property.Description = NormalizeOptional(request.Description);
         property.IsActive = request.IsActive;
 
-        ReplaceChildren(property, request.Amenities, request.HouseRules, request.LocalRecommendations, request.EmergencyContacts, request.KnowledgeBaseItems);
+        ReplaceChildren(property, request.PropertyAmenities, request.PropertyHouseRules, request.PropertyRecommendations, request.PropertyEmergencyContacts, request.PropertyKnowledgeArticles);
 
         await AddAuditLogAsync("Updated", property, cancellationToken);
         await propertyRepository.SaveChangesAsync(cancellationToken);
@@ -96,26 +106,31 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
         return ApiResponse<PropertyDto>.Ok(MapToDto(property), "Property updated successfully.");
     }
 
-    public async Task<ApiResponse<object>> DeleteAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<ApiResponse<object>> DeleteAsync(Guid id, Guid companyId, CancellationToken cancellationToken)
     {
-        var property = await propertyRepository.GetByIdAsync(id, cancellationToken);
+        if (companyId == Guid.Empty)
+        {
+            return ApiResponse<object>.Fail("CompanyId is required.", ["CompanyId is required."]);
+        }
+
+        var property = await propertyRepository.GetByIdAsync(id, companyId, cancellationToken);
         if (property is null)
         {
             return ApiResponse<object>.Fail("Property was not found.");
         }
 
         property.IsActive = false;
-        foreach (var item in property.Amenities.Cast<AuditableEntity>()
-                     .Concat(property.HouseRules)
-                     .Concat(property.LocalRecommendations)
-                     .Concat(property.EmergencyContacts)
-                     .Concat(property.KnowledgeBaseItems))
+        foreach (var item in property.PropertyAmenities.Cast<AuditableEntity>()
+                     .Concat(property.PropertyHouseRules)
+                     .Concat(property.PropertyRecommendations)
+                     .Concat(property.PropertyEmergencyContacts)
+                     .Concat(property.PropertyKnowledgeArticles))
         {
-            if (item is Amenity amenity) amenity.IsActive = false;
-            if (item is HouseRule rule) rule.IsActive = false;
-            if (item is LocalRecommendation recommendation) recommendation.IsActive = false;
-            if (item is EmergencyContact contact) contact.IsActive = false;
-            if (item is KnowledgeBaseItem knowledgeBaseItem) knowledgeBaseItem.IsActive = false;
+            if (item is PropertyAmenity amenity) amenity.IsActive = false;
+            if (item is PropertyHouseRule rule) rule.IsActive = false;
+            if (item is PropertyRecommendation recommendation) recommendation.IsActive = false;
+            if (item is PropertyEmergencyContact contact) contact.IsActive = false;
+            if (item is PropertyKnowledgeArticle article) article.IsActive = false;
         }
 
         await AddAuditLogAsync("Deleted", property, cancellationToken);
@@ -126,50 +141,50 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
 
     private static void ReplaceChildren(
         Property property,
-        IReadOnlyCollection<AmenityRequest> amenities,
-        IReadOnlyCollection<HouseRuleRequest> houseRules,
-        IReadOnlyCollection<LocalRecommendationRequest> recommendations,
-        IReadOnlyCollection<EmergencyContactRequest> contacts,
-        IReadOnlyCollection<PropertyKnowledgeBaseItemRequest> knowledgeBaseItems)
+        IReadOnlyCollection<PropertyAmenityRequest> amenities,
+        IReadOnlyCollection<PropertyHouseRuleRequest> houseRules,
+        IReadOnlyCollection<PropertyRecommendationRequest> recommendations,
+        IReadOnlyCollection<PropertyEmergencyContactRequest> contacts,
+        IReadOnlyCollection<PropertyKnowledgeArticleRequest> knowledgeArticles)
     {
-        foreach (var amenity in property.Amenities)
+        foreach (var amenity in property.PropertyAmenities)
         {
             amenity.IsActive = false;
         }
 
-        foreach (var rule in property.HouseRules)
+        foreach (var rule in property.PropertyHouseRules)
         {
             rule.IsActive = false;
         }
 
-        foreach (var recommendation in property.LocalRecommendations)
+        foreach (var recommendation in property.PropertyRecommendations)
         {
             recommendation.IsActive = false;
         }
 
-        foreach (var contact in property.EmergencyContacts)
+        foreach (var contact in property.PropertyEmergencyContacts)
         {
             contact.IsActive = false;
         }
 
-        foreach (var item in property.KnowledgeBaseItems)
+        foreach (var item in property.PropertyKnowledgeArticles)
         {
             item.IsActive = false;
         }
 
         foreach (var amenity in amenities)
         {
-            property.Amenities.Add(new Amenity { Id = Guid.NewGuid(), Name = amenity.Name.Trim(), Description = NormalizeOptional(amenity.Description), IsActive = true });
+            property.PropertyAmenities.Add(new PropertyAmenity { Id = Guid.NewGuid(), Name = amenity.Name.Trim(), Description = NormalizeOptional(amenity.Description), IsActive = true });
         }
 
         foreach (var rule in houseRules)
         {
-            property.HouseRules.Add(new HouseRule { Id = Guid.NewGuid(), Title = rule.Title.Trim(), Description = rule.Description.Trim(), IsActive = true });
+            property.PropertyHouseRules.Add(new PropertyHouseRule { Id = Guid.NewGuid(), Title = rule.Title.Trim(), Description = rule.Description.Trim(), IsActive = true });
         }
 
         foreach (var recommendation in recommendations)
         {
-            property.LocalRecommendations.Add(new LocalRecommendation
+            property.PropertyRecommendations.Add(new PropertyRecommendation
             {
                 Id = Guid.NewGuid(),
                 Name = recommendation.Name.Trim(),
@@ -183,15 +198,16 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
 
         foreach (var contact in contacts)
         {
-            property.EmergencyContacts.Add(new EmergencyContact { Id = Guid.NewGuid(), Name = contact.Name.Trim(), Role = contact.Role.Trim(), PhoneNumber = contact.PhoneNumber.Trim(), IsActive = true });
+            property.PropertyEmergencyContacts.Add(new PropertyEmergencyContact { Id = Guid.NewGuid(), Name = contact.Name.Trim(), Role = contact.Role.Trim(), PhoneNumber = contact.PhoneNumber.Trim(), IsActive = true });
         }
 
-        foreach (var item in knowledgeBaseItems)
+        foreach (var item in knowledgeArticles)
         {
-            property.KnowledgeBaseItems.Add(new KnowledgeBaseItem
+            property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
             {
                 Id = Guid.NewGuid(),
                 CompanyId = property.CompanyId,
+                PropertyId = property.Id,
                 Title = item.Title.Trim(),
                 Content = item.Content.Trim(),
                 IsActive = true
@@ -242,11 +258,11 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
             IsActive = property.IsActive,
             CreatedAt = property.CreatedAt,
             UpdatedAt = property.UpdatedAt,
-            Amenities = property.Amenities.Where(item => item.IsActive).Select(item => new AmenityDto { Id = item.Id, Name = item.Name, Description = item.Description }).ToList(),
-            HouseRules = property.HouseRules.Where(item => item.IsActive).Select(item => new HouseRuleDto { Id = item.Id, Title = item.Title, Description = item.Description }).ToList(),
-            LocalRecommendations = property.LocalRecommendations.Where(item => item.IsActive).Select(item => new LocalRecommendationDto { Id = item.Id, Name = item.Name, Category = item.Category, Description = item.Description, Address = item.Address, PhoneNumber = item.PhoneNumber }).ToList(),
-            EmergencyContacts = property.EmergencyContacts.Where(item => item.IsActive).Select(item => new EmergencyContactDto { Id = item.Id, Name = item.Name, Role = item.Role, PhoneNumber = item.PhoneNumber }).ToList(),
-            KnowledgeBaseItems = property.KnowledgeBaseItems.Where(item => item.IsActive).Select(item => new PropertyKnowledgeBaseItemDto { Id = item.Id, Title = item.Title, Content = item.Content }).ToList()
+            PropertyAmenities = property.PropertyAmenities.Where(item => item.IsActive).Select(item => new PropertyAmenityDto { Id = item.Id, Name = item.Name, Description = item.Description }).ToList(),
+            PropertyHouseRules = property.PropertyHouseRules.Where(item => item.IsActive).Select(item => new PropertyHouseRuleDto { Id = item.Id, Title = item.Title, Description = item.Description }).ToList(),
+            PropertyRecommendations = property.PropertyRecommendations.Where(item => item.IsActive).Select(item => new PropertyRecommendationDto { Id = item.Id, Name = item.Name, Category = item.Category, Description = item.Description, Address = item.Address, PhoneNumber = item.PhoneNumber }).ToList(),
+            PropertyEmergencyContacts = property.PropertyEmergencyContacts.Where(item => item.IsActive).Select(item => new PropertyEmergencyContactDto { Id = item.Id, Name = item.Name, Role = item.Role, PhoneNumber = item.PhoneNumber }).ToList(),
+            PropertyKnowledgeArticles = property.PropertyKnowledgeArticles.Where(item => item.IsActive).Select(item => new PropertyKnowledgeArticleDto { Id = item.Id, Title = item.Title, Content = item.Content }).ToList()
         };
     }
 

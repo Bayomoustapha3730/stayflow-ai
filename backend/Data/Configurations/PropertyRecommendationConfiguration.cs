@@ -4,11 +4,11 @@ using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Data.Configurations;
 
-public sealed class LocalRecommendationConfiguration : IEntityTypeConfiguration<LocalRecommendation>
+public sealed class PropertyRecommendationConfiguration : IEntityTypeConfiguration<PropertyRecommendation>
 {
-    public void Configure(EntityTypeBuilder<LocalRecommendation> builder)
+    public void Configure(EntityTypeBuilder<PropertyRecommendation> builder)
     {
-        builder.ToTable("LocalRecommendations");
+        builder.ToTable("PropertyRecommendations");
         builder.HasKey(recommendation => recommendation.Id);
         builder.Property(recommendation => recommendation.Name).HasMaxLength(160).IsRequired();
         builder.Property(recommendation => recommendation.Category).HasMaxLength(100).IsRequired();
@@ -17,7 +17,7 @@ public sealed class LocalRecommendationConfiguration : IEntityTypeConfiguration<
         builder.Property(recommendation => recommendation.PhoneNumber).HasMaxLength(32);
 
         builder.HasOne(recommendation => recommendation.Property)
-            .WithMany(property => property.LocalRecommendations)
+            .WithMany(property => property.PropertyRecommendations)
             .HasForeignKey(recommendation => recommendation.PropertyId)
             .OnDelete(DeleteBehavior.Cascade);
 

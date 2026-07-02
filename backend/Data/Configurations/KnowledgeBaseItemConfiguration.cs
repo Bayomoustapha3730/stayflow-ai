@@ -21,7 +21,7 @@ public sealed class KnowledgeBaseItemConfiguration : IEntityTypeConfiguration<Kn
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(item => item.Property)
-            .WithMany(property => property.KnowledgeBaseItems)
+            .WithMany()
             .HasForeignKey(item => item.PropertyId)
             .OnDelete(DeleteBehavior.Restrict);
 

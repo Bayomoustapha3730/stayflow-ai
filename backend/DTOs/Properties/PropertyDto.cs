@@ -14,9 +14,9 @@ public sealed class PropertyDto
     public bool IsActive { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; init; }
-    public IReadOnlyCollection<AmenityDto> Amenities { get; init; } = [];
-    public IReadOnlyCollection<HouseRuleDto> HouseRules { get; init; } = [];
-    public IReadOnlyCollection<LocalRecommendationDto> LocalRecommendations { get; init; } = [];
-    public IReadOnlyCollection<EmergencyContactDto> EmergencyContacts { get; init; } = [];
-    public IReadOnlyCollection<PropertyKnowledgeBaseItemDto> KnowledgeBaseItems { get; init; } = [];
+    public IReadOnlyCollection<PropertyAmenityDto> PropertyAmenities { get; init; } = [];
+    public IReadOnlyCollection<PropertyHouseRuleDto> PropertyHouseRules { get; init; } = [];
+    public IReadOnlyCollection<PropertyRecommendationDto> PropertyRecommendations { get; init; } = [];
+    public IReadOnlyCollection<PropertyEmergencyContactDto> PropertyEmergencyContacts { get; init; } = [];
+    public IReadOnlyCollection<PropertyKnowledgeArticleDto> PropertyKnowledgeArticles { get; init; } = [];
 }

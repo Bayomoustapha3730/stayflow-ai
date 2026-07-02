@@ -14,6 +14,7 @@ public sealed class Company : AuditableEntity
     public ICollection<Property> Properties { get; set; } = [];
     public ICollection<Guest> Guests { get; set; } = [];
     public ICollection<KnowledgeBaseItem> KnowledgeBaseItems { get; set; } = [];
+    public ICollection<PropertyKnowledgeArticle> PropertyKnowledgeArticles { get; set; } = [];
     public ICollection<Conversation> Conversations { get; set; } = [];
     public ICollection<ServiceProvider> ServiceProviders { get; set; } = [];
     public ICollection<ServiceRequest> ServiceRequests { get; set; } = [];

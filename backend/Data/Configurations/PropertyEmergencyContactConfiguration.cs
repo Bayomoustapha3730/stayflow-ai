@@ -4,18 +4,18 @@ using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Data.Configurations;
 
-public sealed class EmergencyContactConfiguration : IEntityTypeConfiguration<EmergencyContact>
+public sealed class PropertyEmergencyContactConfiguration : IEntityTypeConfiguration<PropertyEmergencyContact>
 {
-    public void Configure(EntityTypeBuilder<EmergencyContact> builder)
+    public void Configure(EntityTypeBuilder<PropertyEmergencyContact> builder)
     {
-        builder.ToTable("EmergencyContacts");
+        builder.ToTable("PropertyEmergencyContacts");
         builder.HasKey(contact => contact.Id);
         builder.Property(contact => contact.Name).HasMaxLength(160).IsRequired();
         builder.Property(contact => contact.Role).HasMaxLength(100).IsRequired();
         builder.Property(contact => contact.PhoneNumber).HasMaxLength(32).IsRequired();
 
         builder.HasOne(contact => contact.Property)
-            .WithMany(property => property.EmergencyContacts)
+            .WithMany(property => property.PropertyEmergencyContacts)
             .HasForeignKey(contact => contact.PropertyId)
             .OnDelete(DeleteBehavior.Cascade);
 

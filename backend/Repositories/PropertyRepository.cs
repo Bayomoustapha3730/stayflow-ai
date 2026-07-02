@@ -44,15 +44,15 @@ public sealed class PropertyRepository(ApplicationDbContext dbContext) : IProper
         };
     }
 
-    public Task<Property?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+    public Task<Property?> GetByIdAsync(Guid id, Guid companyId, CancellationToken cancellationToken)
     {
         return dbContext.Properties
-            .Include(property => property.Amenities)
-            .Include(property => property.HouseRules)
-            .Include(property => property.LocalRecommendations)
-            .Include(property => property.EmergencyContacts)
-            .Include(property => property.KnowledgeBaseItems)
-            .FirstOrDefaultAsync(property => property.Id == id && property.IsActive, cancellationToken);
+            .Include(property => property.PropertyAmenities)
+            .Include(property => property.PropertyHouseRules)
+            .Include(property => property.PropertyRecommendations)
+            .Include(property => property.PropertyEmergencyContacts)
+            .Include(property => property.PropertyKnowledgeArticles)
+            .FirstOrDefaultAsync(property => property.Id == id && property.CompanyId == companyId && property.IsActive, cancellationToken);
     }
 
     public Task<bool> CompanyExistsAsync(Guid companyId, CancellationToken cancellationToken)

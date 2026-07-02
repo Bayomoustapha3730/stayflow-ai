@@ -8,12 +8,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Property> Properties => Set<Property>();
-    public DbSet<Amenity> Amenities => Set<Amenity>();
-    public DbSet<HouseRule> HouseRules => Set<HouseRule>();
-    public DbSet<LocalRecommendation> LocalRecommendations => Set<LocalRecommendation>();
-    public DbSet<EmergencyContact> EmergencyContacts => Set<EmergencyContact>();
+    public DbSet<PropertyAmenity> PropertyAmenities => Set<PropertyAmenity>();
+    public DbSet<PropertyHouseRule> PropertyHouseRules => Set<PropertyHouseRule>();
+    public DbSet<PropertyRecommendation> PropertyRecommendations => Set<PropertyRecommendation>();
+    public DbSet<PropertyEmergencyContact> PropertyEmergencyContacts => Set<PropertyEmergencyContact>();
     public DbSet<Guest> Guests => Set<Guest>();
     public DbSet<KnowledgeBaseItem> KnowledgeBaseItems => Set<KnowledgeBaseItem>();
+    public DbSet<PropertyKnowledgeArticle> PropertyKnowledgeArticles => Set<PropertyKnowledgeArticle>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<Models.ServiceProvider> ServiceProviders => Set<Models.ServiceProvider>();
     public DbSet<ServiceRequest> ServiceRequests => Set<ServiceRequest>();

@@ -14,7 +14,7 @@ namespace StayFlow.Api.Controllers;
 public sealed class PropertiesController(IPropertyService propertyService) : ControllerBase
 {
     /// <summary>
-    /// Gets active properties with pagination and optional name search.
+    /// Gets active properties for one company with pagination and optional name search.
     /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<PropertySummaryDto>>), StatusCodes.Status200OK)]
@@ -22,19 +22,23 @@ public sealed class PropertiesController(IPropertyService propertyService) : Con
         [FromQuery] PropertyQueryParameters query,
         CancellationToken cancellationToken)
     {
-        return Ok(await propertyService.GetAsync(query, cancellationToken));
+        var response = await propertyService.GetAsync(query, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
     }
 
     /// <summary>
-    /// Gets one active property, including amenities, rules, recommendations, emergency contacts, and knowledge base items.
+    /// Gets one active property, including amenities, rules, recommendations, emergency contacts, and knowledge articles.
     /// </summary>
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(ApiResponse<PropertyDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<PropertyDto>), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<ApiResponse<PropertyDto>>> GetProperty(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<PropertyDto>>> GetProperty(
+        Guid id,
+        [FromQuery] Guid companyId,
+        CancellationToken cancellationToken)
     {
-        var response = await propertyService.GetByIdAsync(id, cancellationToken);
-        return response.Success ? Ok(response) : NotFound(response);
+        var response = await propertyService.GetByIdAsync(id, companyId, cancellationToken);
+        return response.Success ? Ok(response) : response.Errors.Count > 0 ? BadRequest(response) : NotFound(response);
     }
 
     /// <summary>
@@ -53,7 +57,7 @@ public sealed class PropertiesController(IPropertyService propertyService) : Con
             return BadRequest(response);
         }
 
-        return CreatedAtAction(nameof(GetProperty), new { id = response.Data.Id }, response);
+        return CreatedAtAction(nameof(GetProperty), new { id = response.Data.Id, companyId = response.Data.CompanyId }, response);
     }
 
     /// <summary>
@@ -83,9 +87,12 @@ public sealed class PropertiesController(IPropertyService propertyService) : Con
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<ApiResponse<object>>> DeleteProperty(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<object>>> DeleteProperty(
+        Guid id,
+        [FromQuery] Guid companyId,
+        CancellationToken cancellationToken)
     {
-        var response = await propertyService.DeleteAsync(id, cancellationToken);
-        return response.Success ? Ok(response) : NotFound(response);
+        var response = await propertyService.DeleteAsync(id, companyId, cancellationToken);
+        return response.Success ? Ok(response) : response.Errors.Count > 0 ? BadRequest(response) : NotFound(response);
     }
 }

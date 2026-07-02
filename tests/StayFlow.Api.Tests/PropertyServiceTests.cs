@@ -20,11 +20,11 @@ public sealed class PropertyServiceTests
         Assert.NotNull(response.Data);
         Assert.Equal("Property created successfully.", response.Message);
         Assert.Single(repository.Properties);
-        Assert.Single(repository.Properties[0].Amenities);
-        Assert.Single(repository.Properties[0].HouseRules);
-        Assert.Single(repository.Properties[0].LocalRecommendations);
-        Assert.Single(repository.Properties[0].EmergencyContacts);
-        Assert.Single(repository.Properties[0].KnowledgeBaseItems);
+        Assert.Single(repository.Properties[0].PropertyAmenities);
+        Assert.Single(repository.Properties[0].PropertyHouseRules);
+        Assert.Single(repository.Properties[0].PropertyRecommendations);
+        Assert.Single(repository.Properties[0].PropertyEmergencyContacts);
+        Assert.Single(repository.Properties[0].PropertyKnowledgeArticles);
         Assert.Single(repository.AuditLogs);
         Assert.Equal("Created", repository.AuditLogs[0].Action);
     }
@@ -66,6 +66,7 @@ public sealed class PropertyServiceTests
 
         var response = await service.GetAsync(new PropertyQueryParameters
         {
+            CompanyId = repository.CompanyId,
             Search = "coast",
             PageNumber = 1,
             PageSize = 1
@@ -82,26 +83,49 @@ public sealed class PropertyServiceTests
     {
         var repository = new FakePropertyRepository();
         var property = NewProperty(repository.CompanyId, "Old Name");
-        property.Amenities.Add(new Amenity { Id = Guid.NewGuid(), Name = "WiFi", IsActive = true });
+        property.PropertyAmenities.Add(new PropertyAmenity { Id = Guid.NewGuid(), Name = "WiFi", IsActive = true });
         repository.Properties.Add(property);
         var service = new PropertyService(repository);
 
         var response = await service.UpdateAsync(property.Id, new UpdatePropertyRequest
         {
+            CompanyId = repository.CompanyId,
             Name = "Updated Name",
             AddressLine1 = "Updated address",
             City = "Nairobi",
             CountryCode = "KE",
             TimeZone = "Africa/Nairobi",
-            Amenities = [new AmenityRequest { Name = "Pool" }]
+            PropertyAmenities = [new PropertyAmenityRequest { Name = "Pool" }]
         }, CancellationToken.None);
 
         Assert.True(response.Success);
         Assert.Equal("Updated Name", property.Name);
-        Assert.Equal(2, property.Amenities.Count);
-        var activeAmenity = Assert.Single(property.Amenities, amenity => amenity.IsActive);
+        Assert.Equal(2, property.PropertyAmenities.Count);
+        var activeAmenity = Assert.Single(property.PropertyAmenities, PropertyAmenity => PropertyAmenity.IsActive);
         Assert.Equal("Pool", activeAmenity.Name);
-        Assert.Contains(property.Amenities, amenity => amenity.Name == "WiFi" && !amenity.IsActive);
+        Assert.Contains(property.PropertyAmenities, PropertyAmenity => PropertyAmenity.Name == "WiFi" && !PropertyAmenity.IsActive);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WithDifferentCompany_ReturnsNotFound()
+    {
+        var repository = new FakePropertyRepository();
+        var property = NewProperty(repository.CompanyId, "Company Property");
+        repository.Properties.Add(property);
+        var service = new PropertyService(repository);
+
+        var response = await service.UpdateAsync(property.Id, new UpdatePropertyRequest
+        {
+            CompanyId = Guid.NewGuid(),
+            Name = "Updated Name",
+            AddressLine1 = "Updated address",
+            City = "Nairobi",
+            CountryCode = "KE",
+            TimeZone = "Africa/Nairobi"
+        }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Property was not found.", response.Message);
     }
 
     [Fact]
@@ -109,17 +133,17 @@ public sealed class PropertyServiceTests
     {
         var repository = new FakePropertyRepository();
         var property = NewProperty(repository.CompanyId, "Delete Me");
-        property.Amenities.Add(new Amenity { Id = Guid.NewGuid(), Name = "WiFi", IsActive = true });
-        property.KnowledgeBaseItems.Add(new KnowledgeBaseItem { Id = Guid.NewGuid(), CompanyId = repository.CompanyId, Title = "FAQ", Content = "Answer", IsActive = true });
+        property.PropertyAmenities.Add(new PropertyAmenity { Id = Guid.NewGuid(), Name = "WiFi", IsActive = true });
+        property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle { Id = Guid.NewGuid(), CompanyId = repository.CompanyId, PropertyId = property.Id, Title = "FAQ", Content = "Answer", IsActive = true });
         repository.Properties.Add(property);
         var service = new PropertyService(repository);
 
-        var response = await service.DeleteAsync(property.Id, CancellationToken.None);
+        var response = await service.DeleteAsync(property.Id, repository.CompanyId, CancellationToken.None);
 
         Assert.True(response.Success);
         Assert.False(property.IsActive);
-        Assert.All(property.Amenities, amenity => Assert.False(amenity.IsActive));
-        Assert.All(property.KnowledgeBaseItems, item => Assert.False(item.IsActive));
+        Assert.All(property.PropertyAmenities, PropertyAmenity => Assert.False(PropertyAmenity.IsActive));
+        Assert.All(property.PropertyKnowledgeArticles, item => Assert.False(item.IsActive));
         Assert.Single(repository.AuditLogs);
         Assert.Equal("Deleted", repository.AuditLogs[0].Action);
     }
@@ -134,11 +158,11 @@ public sealed class PropertyServiceTests
             City = "Nairobi",
             CountryCode = "KE",
             TimeZone = "Africa/Nairobi",
-            Amenities = [new AmenityRequest { Name = "WiFi" }],
-            HouseRules = [new HouseRuleRequest { Title = "No smoking", Description = "Smoking is not allowed." }],
-            LocalRecommendations = [new LocalRecommendationRequest { Name = "Java House", Category = "Restaurant" }],
-            EmergencyContacts = [new EmergencyContactRequest { Name = "Security Desk", Role = "Security", PhoneNumber = "+254700000003" }],
-            KnowledgeBaseItems = [new PropertyKnowledgeBaseItemRequest { Title = "Check-in", Content = "Check-in is after 2 PM." }]
+            PropertyAmenities = [new PropertyAmenityRequest { Name = "WiFi" }],
+            PropertyHouseRules = [new PropertyHouseRuleRequest { Title = "No smoking", Description = "Smoking is not allowed." }],
+            PropertyRecommendations = [new PropertyRecommendationRequest { Name = "Java House", Category = "Restaurant" }],
+            PropertyEmergencyContacts = [new PropertyEmergencyContactRequest { Name = "Security Desk", Role = "Security", PhoneNumber = "+254700000003" }],
+            PropertyKnowledgeArticles = [new PropertyKnowledgeArticleRequest { Title = "Check-in", Content = "Check-in is after 2 PM." }]
         };
     }
 
@@ -186,9 +210,9 @@ public sealed class PropertyServiceTests
             });
         }
 
-        public Task<Property?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
+        public Task<Property?> GetByIdAsync(Guid id, Guid companyId, CancellationToken cancellationToken)
         {
-            return Task.FromResult(Properties.FirstOrDefault(property => property.Id == id && property.IsActive));
+            return Task.FromResult(Properties.FirstOrDefault(property => property.Id == id && property.CompanyId == companyId && property.IsActive));
         }
 
         public Task<bool> CompanyExistsAsync(Guid companyId, CancellationToken cancellationToken)

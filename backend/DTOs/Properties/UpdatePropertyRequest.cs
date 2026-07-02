@@ -2,6 +2,7 @@ namespace StayFlow.Api.DTOs.Properties;
 
 public sealed class UpdatePropertyRequest
 {
+    public Guid CompanyId { get; init; }
     public string Name { get; init; } = string.Empty;
     public string AddressLine1 { get; init; } = string.Empty;
     public string? AddressLine2 { get; init; }
@@ -10,9 +11,9 @@ public sealed class UpdatePropertyRequest
     public string TimeZone { get; init; } = "Africa/Nairobi";
     public string? Description { get; init; }
     public bool IsActive { get; init; } = true;
-    public IReadOnlyCollection<AmenityRequest> Amenities { get; init; } = [];
-    public IReadOnlyCollection<HouseRuleRequest> HouseRules { get; init; } = [];
-    public IReadOnlyCollection<LocalRecommendationRequest> LocalRecommendations { get; init; } = [];
-    public IReadOnlyCollection<EmergencyContactRequest> EmergencyContacts { get; init; } = [];
-    public IReadOnlyCollection<PropertyKnowledgeBaseItemRequest> KnowledgeBaseItems { get; init; } = [];
+    public IReadOnlyCollection<PropertyAmenityRequest> PropertyAmenities { get; init; } = [];
+    public IReadOnlyCollection<PropertyHouseRuleRequest> PropertyHouseRules { get; init; } = [];
+    public IReadOnlyCollection<PropertyRecommendationRequest> PropertyRecommendations { get; init; } = [];
+    public IReadOnlyCollection<PropertyEmergencyContactRequest> PropertyEmergencyContacts { get; init; } = [];
+    public IReadOnlyCollection<PropertyKnowledgeArticleRequest> PropertyKnowledgeArticles { get; init; } = [];
 }

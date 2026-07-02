@@ -1,20 +1,20 @@
 namespace StayFlow.Api.DTOs.Properties;
 
-public sealed class AmenityDto
+public sealed class PropertyAmenityDto
 {
     public Guid Id { get; init; }
     public string Name { get; init; } = string.Empty;
     public string? Description { get; init; }
 }
 
-public sealed class HouseRuleDto
+public sealed class PropertyHouseRuleDto
 {
     public Guid Id { get; init; }
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
 }
 
-public sealed class LocalRecommendationDto
+public sealed class PropertyRecommendationDto
 {
     public Guid Id { get; init; }
     public string Name { get; init; } = string.Empty;
@@ -24,7 +24,7 @@ public sealed class LocalRecommendationDto
     public string? PhoneNumber { get; init; }
 }
 
-public sealed class EmergencyContactDto
+public sealed class PropertyEmergencyContactDto
 {
     public Guid Id { get; init; }
     public string Name { get; init; } = string.Empty;
@@ -32,7 +32,7 @@ public sealed class EmergencyContactDto
     public string PhoneNumber { get; init; } = string.Empty;
 }
 
-public sealed class PropertyKnowledgeBaseItemDto
+public sealed class PropertyKnowledgeArticleDto
 {
     public Guid Id { get; init; }
     public string Title { get; init; } = string.Empty;

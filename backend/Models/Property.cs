@@ -13,11 +13,11 @@ public sealed class Property : AuditableEntity
     public bool IsActive { get; set; } = true;
 
     public Company Company { get; set; } = null!;
-    public ICollection<Amenity> Amenities { get; set; } = [];
-    public ICollection<HouseRule> HouseRules { get; set; } = [];
-    public ICollection<LocalRecommendation> LocalRecommendations { get; set; } = [];
-    public ICollection<EmergencyContact> EmergencyContacts { get; set; } = [];
-    public ICollection<KnowledgeBaseItem> KnowledgeBaseItems { get; set; } = [];
+    public ICollection<PropertyAmenity> PropertyAmenities { get; set; } = [];
+    public ICollection<PropertyHouseRule> PropertyHouseRules { get; set; } = [];
+    public ICollection<PropertyRecommendation> PropertyRecommendations { get; set; } = [];
+    public ICollection<PropertyEmergencyContact> PropertyEmergencyContacts { get; set; } = [];
+    public ICollection<PropertyKnowledgeArticle> PropertyKnowledgeArticles { get; set; } = [];
     public ICollection<Conversation> Conversations { get; set; } = [];
     public ICollection<ServiceRequest> ServiceRequests { get; set; } = [];
     public ICollection<Payment> Payments { get; set; } = [];
