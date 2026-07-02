@@ -12,3 +12,14 @@ Use it for:
 - External webhook contracts and callback payloads.
 
 API documentation should stay aligned with Swagger/OpenAPI output and include practical examples for frontend and integration developers.
+
+## API Topics
+
+- [Authentication](Authentication.md)
+- [Companies](Companies.md)
+- [Properties](Properties.md)
+- [Guests](Guests.md)
+- [Marketplace](Marketplace.md)
+- [Payments](Payments.md)
+- [WhatsApp](WhatsApp.md)
+- [Analytics](Analytics.md)
