@@ -11,3 +11,13 @@ Use it for:
 - Product analytics, feedback themes, and discovery notes.
 
 Product documentation should keep implementation work connected to customer value for Airbnb hosts, property managers, and guests.
+
+## Product Topics
+
+- [Vision](Vision.md)
+- [Mission](Mission.md)
+- [Roadmap](Roadmap.md)
+- [Personas](Personas.md)
+- [User Journeys](User-Journeys.md)
+- [Pricing](Pricing.md)
+- [Competitive Analysis](Competitive-Analysis.md)
