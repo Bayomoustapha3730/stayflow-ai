@@ -32,7 +32,7 @@ Out of scope: implementing marketplace fulfillment or payment capture.
 
 ## Functional Requirements
 
-- Identify active reservation by company, guest identifier, reservation dates, status, and property.
+- Resolve active reservation context through the Reservation Context Resolver defined in [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md).
 - Support ambiguity when one phone number maps to multiple active reservations.
 - Link active stay conversations to service requests, maintenance, marketplace services, and escalations.
 - Use approved guest preferences and property knowledge where allowed.
@@ -46,7 +46,7 @@ Out of scope: implementing marketplace fulfillment or payment capture.
 ## Business Rules
 
 - Do not assume a phone number maps to only one active reservation.
-- If multiple active reservations match, AI should ask clarifying questions or escalate.
+- If multiple active reservations match, application logic must request clarification or escalate using non-sensitive property labels.
 - Service requests should be tied to the reservation and property.
 - Emergency issues should bypass normal automation and escalate.
 
@@ -76,7 +76,7 @@ Active stay selection must not search across companies.
 
 ## AI Considerations
 
-AI may use reservation status, current property, approved property knowledge, preferred language, approved preferences, and relevant service requests. AI must not use unrelated stay history by default.
+AI may use reservation status, current property, approved property knowledge, preferred language, approved preferences, and relevant service requests after reservation context is resolved. AI must not use unrelated stay history by default and must not choose between multiple active reservations.
 
 ## Edge Cases
 

@@ -77,7 +77,7 @@ Lifecycle updates must validate the reservation Company ID and associated proper
 
 ## AI Considerations
 
-AI may use lifecycle state as current stay phase. AI must not override lifecycle status or invent approval.
+AI may use lifecycle state as current stay phase only after reservation context is resolved by the Reservation Context Resolver in [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md). AI must not override lifecycle status, invent approval, or choose among ambiguous reservation candidates.
 
 ## Edge Cases
 

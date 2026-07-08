@@ -32,7 +32,7 @@ Out of scope: smart lock implementation and physical security operations.
 ## Functional Requirements
 
 - Support standard, early, self, and host-assisted check-in.
-- Verify reservation status, guest identity, property, and allowed instruction release window.
+- Verify reservation status, guest identity, property, allowed instruction release window, and Reservation Context Resolver outcome from [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md).
 - Track check-in verification status and actual check-in timestamp.
 - Escalate failed check-in and emergency situations.
 
@@ -47,6 +47,7 @@ Out of scope: smart lock implementation and physical security operations.
 - Door codes, lock codes, and sensitive access instructions must only be provided to verified eligible guests.
 - Expired, cancelled, no-show, or unrelated reservations must not receive access instructions.
 - Early check-in is never automatically approved unless property business rules explicitly permit it.
+- Access authorization must be determined by deterministic application logic before AI context construction.
 
 ## Validation Rules
 
@@ -75,7 +76,7 @@ Check-in must validate company ownership across reservation, property, guest, an
 
 ## AI Considerations
 
-AI may explain check-in steps using approved property knowledge but must not invent or expose access instructions outside authorization rules.
+AI may explain check-in steps using approved property knowledge but must not invent or expose access instructions outside authorization rules. AI must never decide whether access information may be released.
 
 ## Edge Cases
 

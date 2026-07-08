@@ -78,7 +78,7 @@ Lifecycle is computed only from records within the same company. No lifecycle tr
 
 ## AI Considerations
 
-AI context should vary by lifecycle. For example, pre-arrival can include check-in preparation, active stay can include current property knowledge, and post-stay should avoid unnecessary operational details unless the guest asks.
+AI context should vary by lifecycle. For example, pre-arrival can include check-in preparation, active stay can include current property knowledge, and post-stay should avoid unnecessary operational details unless the guest asks. Reservation-specific lifecycle context must be resolved through [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md) before AI receives stay-specific context.
 
 ## Edge Cases
 

@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-Reservation AI Context defines how reservation data participates in AI context construction alongside [Guest AI Context](../guest/GuestAIContext.md), approved property knowledge, and the future AI Context Builder.
+Reservation AI Context defines how reservation data participates in AI context construction after reservation context has been resolved by [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md). It works alongside [Guest AI Context](../guest/GuestAIContext.md), approved property knowledge, and the future AI Context Builder.
 
 ## Business Purpose
 
@@ -31,6 +31,7 @@ Out of scope: prompt templates and provider-specific model calls.
 
 ## Functional Requirements
 
+- Require Reservation Context Resolver output before building stay-specific AI context.
 - Build reservation context from company-scoped reservation, property, primary guest, approved property knowledge, current stay phase, approved special requests, and relevant service requests.
 - Combine with Guest AI Context only after tenant, guest, and reservation match validation.
 - Exclude internal staff notes, unrelated financial information, audit logs, other guest information, and sensitive identifiers by default.
@@ -48,6 +49,7 @@ Out of scope: prompt templates and provider-specific model calls.
 - Property knowledge must be approved.
 - AI must not confirm extensions, late checkout, refunds, or access exceptions without approved workflow data.
 - AI must not assume a phone number maps to one active reservation.
+- AI must never receive multiple reservations and be asked to choose the correct reservation for sensitive workflows.
 
 ## Validation Rules
 
@@ -76,7 +78,7 @@ Prompt context must contain only data from the reservation company.
 
 ## AI Considerations
 
-ReservationAIContext should feed the future Context Builder documented in [Context Builder](../ai/ContextBuilder.md). It complements GuestAIContext rather than replacing it.
+ReservationAIContext should feed the future Context Builder documented in [Context Builder](../ai/ContextBuilder.md). It complements GuestAIContext rather than replacing it. The Reservation Context Resolver is a separate application service responsible for selecting, clarifying, or escalating reservation context before this AI context is built.
 
 ## Edge Cases
 
@@ -96,6 +98,7 @@ ReservationAIContext should feed the future Context Builder documented in [Conte
 - Allowed and excluded reservation context sources are documented.
 - Interaction with GuestAIContext and AI Context Builder is defined.
 - Ambiguous active reservations fail safely.
+- Reservation context resolution is documented as a prerequisite for stay-specific AI context.
 
 ```mermaid
 flowchart TD

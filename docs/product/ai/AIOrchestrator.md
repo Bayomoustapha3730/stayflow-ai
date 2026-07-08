@@ -14,6 +14,7 @@ The AI Orchestrator coordinates the end-to-end decision flow for guest messages.
 
 - Receive normalized conversation events from WhatsApp workflows.
 - Classify intent, urgency, language, and confidence.
+- Invoke or require the Reservation Context Resolver from [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md) before stay-specific AI context is built.
 - Select context sources such as property, reservation, guest profile, memory, and knowledge articles.
 - Route messages to response generation, task creation, or escalation.
 - Record orchestration decisions and correlation identifiers.
@@ -29,6 +30,7 @@ The AI Orchestrator coordinates the end-to-end decision flow for guest messages.
 ## Validation Rules
 
 - Company and conversation identifiers must be present before AI orchestration begins.
+- Tenant scope and reservation context resolution must complete before reservation-specific AI context construction.
 - Orchestrator must reject or escalate messages with missing critical context.
 - High-risk intents must bypass direct AI reply unless explicitly approved by policy.
 - Retry logic must not send duplicate guest replies.
@@ -44,6 +46,7 @@ The AI Orchestrator coordinates the end-to-end decision flow for guest messages.
 ## Acceptance Criteria
 
 - Orchestrator responsibilities are clearly separated from prompt generation, retrieval, memory, validation, and escalation.
+- Reservation context resolution remains a deterministic application service step, not an AI model decision.
 - AI decisions can be traced from guest message to final action.
 - Human handoff is supported as a first-class outcome.
 

@@ -22,5 +22,6 @@ Use it for:
 - [ADR-0004: Use WhatsApp Cloud API for Guest Messaging](ADR-0004-use-whatsapp-cloud-api.md)
 - [ADR-0005: Use Clean Architecture Principles](ADR-0005-use-clean-architecture.md)
 - [ADR-0006: Use Multi-Tenant SaaS Design](ADR-0006-use-multi-tenant-saas-design.md)
+- [ADR-0007: Reservation Context Resolution](ADR-0007-reservation-context-resolution.md)
 
 Decision records should include status, context, the decision, consequences, alternatives considered, and the date the decision was made.

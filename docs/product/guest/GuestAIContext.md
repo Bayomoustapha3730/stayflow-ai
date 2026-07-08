@@ -34,6 +34,7 @@ Out of scope: model provider implementation, prompt engineering details, and unr
 ## Functional Requirements
 
 - Build AI context from current reservation, current property, approved property knowledge, guest preferred language, explicit preferences, relevant current conversation context, and approved stay history.
+- Use only reservation context resolved by the Reservation Context Resolver described in [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md) for stay-specific AI context.
 - Exclude unauthorized, stale, sensitive, or irrelevant data.
 - Label context sources as operational data, guest-provided preference, conversation context, or AI-derived observation.
 - Respect AI personalization disabled setting.
@@ -57,7 +58,7 @@ Out of scope: model provider implementation, prompt engineering details, and unr
 ## Validation Rules
 
 - Company scope is required before context retrieval.
-- Current reservation must match the guest and company.
+- Current reservation must match the guest and company and must be resolved before AI context construction.
 - Property knowledge must be active and approved.
 - Personal data must be excluded unless required for the specific workflow.
 - AI personalization disabled must remove optional preference and historical context.
@@ -83,7 +84,7 @@ AI context must be company-scoped. A prompt for Company A must never include Com
 
 ## AI Considerations
 
-AI should be instructed to answer only from provided context, admit uncertainty, ask clarifying questions, or escalate. Current context is preferred over long-term memory.
+AI should be instructed to answer only from provided context, admit uncertainty, ask clarifying questions, or escalate. Current context is preferred over long-term memory. AI must not select among multiple reservations for sensitive workflows; reservation resolution occurs before AI context construction per [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md).
 
 ## Edge Cases
 

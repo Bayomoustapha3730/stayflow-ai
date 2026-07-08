@@ -33,6 +33,7 @@ Out of scope: storing unrestricted sensitive data, using all past conversations 
 
 - Track conversation records by company, guest, reservation, and channel.
 - Store message direction, timestamp, delivery status, WhatsApp identifiers, and correlation IDs.
+- Support temporary reservation conversation bindings created by the Reservation Context Resolver in [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md).
 - Support conversation summaries and unresolved issue markers.
 - Track opt-in, opt-out, and consent-related communication events.
 - Link communication to service requests and escalations.
@@ -50,6 +51,7 @@ Out of scope: storing unrestricted sensitive data, using all past conversations 
 - AI summaries must not overwrite source messages.
 - Opt-out status must prevent non-essential outbound messaging.
 - Human escalation may pause or constrain AI replies.
+- Reservation bindings are temporary and must be invalidated when the reservation is cancelled, tenant context changes, guest identity is disputed, the conversation explicitly changes reservation, or security validation fails.
 
 ## Validation Rules
 
@@ -112,8 +114,8 @@ sequenceDiagram
     participant Human
     Guest->>WhatsApp: Sends message
     WhatsApp->>StayFlow: Webhook event
-    StayFlow->>StayFlow: Match company and guest
-    StayFlow->>AI: Send minimized current context
+    StayFlow->>StayFlow: Resolve company, guest, and reservation context
+    StayFlow->>AI: Send minimized resolved context
     alt AI can respond safely
         AI-->>StayFlow: Candidate response
         StayFlow-->>WhatsApp: Reply

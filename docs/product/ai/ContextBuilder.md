@@ -13,6 +13,7 @@ The Context Builder assembles the minimum useful information needed for AI to an
 ## Functional Requirements
 
 - Build context from company, property, guest, reservation, conversation memory, knowledge articles, service requests, and policies.
+- Consume resolved reservation context from the Reservation Context Resolver defined in [ADR-0007](../../decisions/ADR-0007-reservation-context-resolution.md) rather than selecting among reservation candidates itself.
 - Apply relevance ranking and data minimization rules.
 - Include source labels and freshness metadata.
 - Detect missing, stale, or conflicting context.
@@ -28,9 +29,10 @@ The Context Builder assembles the minimum useful information needed for AI to an
 ## Validation Rules
 
 - Company scope must be validated before any context lookup.
-- Property context must match the active reservation or selected conversation scope.
+- Property context must match the resolved reservation or selected conversation scope.
 - Guest data must be minimized to service-relevant facts.
 - Stale context must be flagged before prompt construction.
+- Ambiguous reservation candidates must be resolved, clarified, or escalated before context construction.
 
 ## Edge Cases
 
@@ -45,6 +47,7 @@ The Context Builder assembles the minimum useful information needed for AI to an
 - Context Builder documentation defines sources, minimization rules, and conflict handling.
 - AI prompts can be grounded without exposing unnecessary data.
 - Missing or ambiguous context can trigger clarification or escalation.
+- Reservation Context Resolver remains separate from Context Builder responsibilities.
 
 ## Future Enhancements
 
