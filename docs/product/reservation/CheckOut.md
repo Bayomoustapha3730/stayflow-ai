@@ -1,52 +1,98 @@
 # Check-Out
 
+## Executive Summary
+
+Check-Out defines how a reservation moves from active stay toward departure, post-stay, and completion.
+
 ## Business Purpose
 
-Check-out documentation defines how StayFlow AI supports a smooth departure, communicates property-specific instructions, captures stay completion signals, and prepares hosts for turnover.
+Checkout workflows help guests depart smoothly, protect property readiness, resolve open issues, and prepare post-stay communication.
+
+## Scope
+
+In scope: standard checkout, late checkout request, checkout instructions, departure confirmation, unresolved service requests, outstanding payment considerations, post-stay eligibility, and review request workflow.
+
+Out of scope: automatic late checkout approval and payment settlement implementation.
+
+## Actors
+
+- Primary guest.
+- Host.
+- Property manager.
+- AI concierge.
+- Cleaning provider.
+- Payment workflow.
 
 ## User Stories
 
-- As a guest, I want clear checkout instructions before leaving.
-- As a host, I want to know when the guest has checked out so cleaning and inspection can begin.
-- As an operations user, I want checkout status connected to reservation completion.
+- As a guest, I want clear departure instructions.
+- As a host, I want late checkout requests approved only under property rules.
+- As operations, I want unresolved issues visible before completion.
 
 ## Functional Requirements
 
-- Store scheduled checkout date, checkout time, actual checkout timestamp, status, and notes.
-- Provide property-specific departure instructions, key return steps, waste disposal guidance, and late checkout policies.
-- Support manual and guest-confirmed checkout.
-- Link checkout to cleaning, maintenance, service request closure, and post-stay messaging.
+- Provide checkout instructions using approved property knowledge.
+- Track scheduled checkout, actual checkout, and departure confirmation.
+- Capture late checkout requests and approval outcome.
+- Surface unresolved service requests and outstanding payment considerations.
+- Determine post-stay communication eligibility.
 
 ## Non-Functional Requirements
 
-- Checkout instructions must be property scoped and easy to update.
-- Checkout state must be reliable for operational planning.
-- Post-stay messages should respect guest consent and opt-out settings.
+- Checkout status should update operations quickly.
+- Late checkout decisions must be auditable.
+- Post-stay messages must respect consent and WhatsApp policy.
+
+## Business Rules
+
+- Late checkout must not be automatically approved.
+- Late checkout approval follows property or host business rules.
+- Reservation should not be completed while critical service requests remain unresolved unless manually overridden.
+- Review requests require communication eligibility.
 
 ## Validation Rules
 
-- Checkout must belong to an active or recently active reservation.
-- Actual checkout timestamp should not precede actual check-in unless manually overridden.
-- Late checkout must be approved or recorded with reason.
-- Checkout completion should not erase reservation or communication history.
+- Checkout cannot precede check-in unless corrected manually.
+- Late checkout request must specify requested time.
+- Approval actor and timestamp are required for approved late checkout.
+
+## Error Handling
+
+- Unapproved late checkout should trigger host review or denial messaging.
+- Missing departure confirmation may keep state at Check-Out Pending.
+- Outstanding payment concerns should be surfaced but not resolved by AI unless approved workflow exists.
+
+## Security Considerations
+
+Checkout instructions may include access or key return details and must be limited to eligible guests.
+
+## Privacy Considerations
+
+Post-stay communication should use minimal data and respect opt-out.
+
+## Multi-Tenant Considerations
+
+Checkout actions must validate reservation and property company scope.
+
+## AI Considerations
+
+AI may explain checkout instructions and collect late checkout requests. AI must not approve late checkout or payment exceptions.
 
 ## Edge Cases
 
-- Guest leaves without confirming checkout.
-- Guest requests late checkout on the departure day.
-- Guest damages property or leaves items behind.
-- Cleaning team reports occupancy after checkout.
-- Reservation is extended after checkout reminders were sent.
-
-## Acceptance Criteria
-
-- Checkout documentation supports departure communication and operational turnover.
-- Late checkout and unconfirmed checkout scenarios are covered.
-- Checkout state can update reservation lifecycle and downstream workflows.
+- Guest leaves without confirmation.
+- Late checkout conflicts with next reservation.
+- Service request remains unresolved.
+- Payment dispute exists at checkout.
 
 ## Future Enhancements
 
-- Automated checkout reminders.
-- Cleaning task integration.
+- Cleaning handoff automation.
+- Review request scheduling.
 - Lost-and-found workflow.
-- Post-stay satisfaction survey.
+
+## Acceptance Criteria
+
+- Late checkout approval boundary is documented.
+- Unresolved service and payment considerations are covered.
+- Post-stay communication eligibility is defined.

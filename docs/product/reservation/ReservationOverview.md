@@ -1,66 +1,104 @@
 # Reservation Overview
 
+## Executive Summary
+
+The Reservation domain is the authoritative stay record that connects a company-managed property to a primary guest and optional additional guests for a defined date range.
+
 ## Business Purpose
 
-The Reservation domain represents a guest's booked or requested stay at a property. It connects guests, properties, dates, pricing, policies, and operational workflows so StayFlow AI can provide accurate, stay-aware concierge support.
+Reservations provide the operational context required for guest identification, WhatsApp messaging, AI concierge support, property readiness, marketplace service coordination, payment follow-up, and analytics.
+
+## Scope
+
+In scope: reservation relationships, structured data, lifecycle, source-aware references, guest counts, stay phases, duplicate detection, tenant validation, and AI context boundaries.
+
+Out of scope: direct Airbnb API dependency, third-party refund decisions, payment capture, and source-specific booking policy enforcement.
+
+## Actors
+
+- Company administrator.
+- Host.
+- Property manager.
+- Primary guest.
+- Additional guest.
+- AI concierge.
+- WhatsApp workflow.
+- Marketplace workflow.
 
 ## User Stories
 
-- As a host, I want each reservation connected to the correct guest and property so my team can prepare for the stay.
-- As a guest, I want the WhatsApp concierge to understand my arrival date, checkout date, and stay details.
-- As a property manager, I want reservation status to drive check-in, checkout, cancellation, and extension workflows.
-- As an operations user, I want reservation records to provide a reliable source of truth across channels.
+- As a property manager, I want a reservation to show who is staying, where, and when.
+- As a guest, I want support to match my current reservation.
+- As a host, I want manual and imported reservations handled consistently.
+- As an AI workflow, I need reservation context before answering stay-specific questions.
 
 ## Functional Requirements
 
-- Store reservation reference, company, property, guest, source channel, dates, status, guest count, pricing summary, and notes.
-- Support imported bookings, manually created reservations, and future direct bookings.
-- Link reservations to conversations, service requests, payments, check-in, checkout, cancellations, and extensions.
-- Support search, filtering, pagination, soft deletion, and audit fields in future implementation.
-- Expose safe reservation context to AI concierge workflows.
+- Store Reservation ID, Company ID, Property ID, Primary Guest ID, external reservation reference, reservation source, confirmation number, dates, guest counts, status, currency, amount when available, special requests, notes, created date, and updated date.
+- Connect reservations to property, guest, communication, marketplace services, payments, and analytics.
+- Support manual reservation creation and controlled import.
+- Flag potential duplicate reservations for review.
 
 ## Non-Functional Requirements
 
-- Reservation data must be company isolated.
-- Reservation lookup must be efficient for active-stay WhatsApp interactions.
-- Lifecycle changes must be auditable.
-- Reservation context must be deterministic when used in AI prompts.
+- Reservation reads must be company-scoped.
+- Active reservation selection should be deterministic.
+- Reservation records should support audit and reporting.
+- Financial fields must be optional when unavailable.
+
+## Business Rules
+
+- Reservation belongs to exactly one company and one property.
+- Reservation has one primary guest.
+- Additional guests may be counted without permanent profiles.
+- Reservation source affects reference uniqueness and import behavior.
 
 ## Validation Rules
 
-- Reservation must belong to one company, one guest, and one property.
-- Check-out date must be after check-in date.
-- Guest count must be greater than zero.
-- Source booking reference should be unique within company and source where available.
-- Soft-deleted reservations must not appear in normal operational workflows.
+- Check-out date/time must be after check-in date/time.
+- Adult count and child count must be non-negative.
+- Total guest count must be positive for confirmed stays.
+- Company ID must match property and primary guest ownership.
+
+## Error Handling
+
+- Missing required stay dates prevents confirmation.
+- Source reference conflicts create duplicate-review outcomes.
+- Cross-tenant associations are rejected.
+- Missing optional booking amount does not fail creation.
+
+## Security Considerations
+
+Reservation data exposes occupancy and guest identity. Access must be role-aware, tenant-scoped, and audited.
+
+## Privacy Considerations
+
+Only data necessary for stay operations should be stored. Additional guest information should be minimized.
+
+## Multi-Tenant Considerations
+
+Reservation, Property, and Primary Guest must share the same Company ID. Requests attempting cross-tenant associations must fail.
+
+## AI Considerations
+
+AI may use reservation status, stay phase, dates, property, and approved special requests when relevant. Internal notes and unrelated financial data are excluded by default.
 
 ## Edge Cases
 
-- Guest changes dates after confirmation.
-- Reservation is imported without complete guest details.
-- Reservation is created for multiple units or rooms.
-- Booking platform status differs from local StayFlow status.
-- A guest has overlapping reservations at different properties.
-
-## Acceptance Criteria
-
-- Reservation documentation defines the domain boundaries and key relationships.
-- Reservation context supports guest, property, payment, and AI workflows.
-- Validation and edge cases prepare the domain for future API and database design.
+- Imported reservation has no primary guest match.
+- Guest has overlapping stays.
+- External confirmation number is reused by different platforms.
+- Manual reservation later matches an imported booking.
 
 ## Future Enhancements
 
-- Booking platform synchronization.
-- Direct booking checkout.
-- Multi-room reservations.
-- Reservation conflict detection.
+- Reservation calendar conflict detection.
+- PMS import reconciliation.
+- Source-specific import adapters.
+- Event history timeline.
 
-```mermaid
-erDiagram
-    COMPANY ||--o{ RESERVATION : owns
-    GUEST ||--o{ RESERVATION : makes
-    PROPERTY ||--o{ RESERVATION : hosts
-    RESERVATION ||--o{ PAYMENT : has
-    RESERVATION ||--o{ CONVERSATION : informs
-    RESERVATION ||--o{ SERVICE_REQUEST : creates
-```
+## Acceptance Criteria
+
+- Reservation is documented as the bridge between Property, Guest, AI, WhatsApp, Marketplace, Payments, and Analytics.
+- Company-scoped ownership is explicit.
+- Required and optional reservation data are distinguished.

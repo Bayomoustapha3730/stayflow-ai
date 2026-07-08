@@ -1,63 +1,97 @@
 # Cancellation
 
+## Executive Summary
+
+Cancellation documents how reservations are cancelled by guests, hosts, property managers, external platforms, or duplicate events.
+
 ## Business Purpose
 
-Cancellation documentation defines how StayFlow AI handles reservations that are cancelled before or during a stay. It helps hosts manage availability, guest communication, refunds, and operational changes.
+Clear cancellation behavior prevents active stay automation from continuing after a reservation is no longer valid and protects StayFlow AI from incorrectly deciding third-party refund policies.
+
+## Scope
+
+In scope: guest cancellation, host cancellation, property manager cancellation, external platform cancellation, duplicate cancellation event, reason, timestamp, and communication behavior.
+
+Out of scope: independent determination of Airbnb, Booking.com, Expedia, or other external refund policies.
+
+## Actors
+
+- Guest.
+- Host.
+- Property manager.
+- External booking platform.
+- Support agent.
+- AI concierge.
 
 ## User Stories
 
-- As a guest, I want clear cancellation guidance and refund expectations.
-- As a host, I want cancelled reservations removed from active stay workflows.
-- As an operations user, I want cancellation reason and timing captured for reporting.
+- As a guest, I want cancellation status communicated clearly.
+- As a host, I want cancelled reservations removed from active automation.
+- As support, I want refund policy boundaries respected.
 
 ## Functional Requirements
 
-- Store cancellation status, reason, timestamp, source, policy, refund expectation, and notes.
-- Support host-initiated, guest-initiated, platform-initiated, and system-initiated cancellations.
-- Update reservation lifecycle and availability context.
-- Link cancellation to payments, refund workflows, and guest communication.
+- Store cancellation reason, timestamp, source, actor, status, and communication notes.
+- Support idempotent duplicate cancellation events.
+- Stop normal pre-arrival, check-in, and active stay automation.
+- Link cancellation to payment or refund workflows without deciding external policy.
 
 ## Non-Functional Requirements
 
 - Cancellation events must be auditable.
-- Refund-related messaging must be accurate and avoid overpromising.
-- External channel updates must be idempotent.
-- Cancelled reservations must not trigger normal check-in automation.
+- External updates must be idempotent.
+- Communication after cancellation must be policy-aware.
+
+## Business Rules
+
+- External platform refund decisions remain authoritative when applicable.
+- AI must not promise refunds or override platform policy.
+- Duplicate cancellation events should not create duplicate records.
+- Cancelled is a terminal state unless reopened through privileged correction.
 
 ## Validation Rules
 
-- Cancellation must reference an existing reservation.
-- Cancellation reason should be required for manual cancellation.
-- Refund status must be separate from cancellation status.
-- Cancelled reservations should remain visible for reporting unless deleted under policy.
+- Cancellation reason is required for manual cancellation.
+- Source and timestamp are required.
+- Cancelled reservation must not transition to Active Stay without reopening.
+
+## Error Handling
+
+- Duplicate cancellation event is ignored or logged idempotently.
+- Refund ambiguity should escalate to human support.
+- Cancellation after check-in requires manual review.
+
+## Security Considerations
+
+Cancellation can affect access and financial workflows; authorization and audit metadata are required.
+
+## Privacy Considerations
+
+Cancellation communication should avoid unnecessary disclosure of guest personal or financial data.
+
+## Multi-Tenant Considerations
+
+Cancellation events must validate company ownership before updating a reservation.
+
+## AI Considerations
+
+AI may explain cancellation status from reservation context but must not independently determine or promise third-party refunds.
 
 ## Edge Cases
 
-- Reservation is cancelled after check-in.
-- Guest disputes cancellation policy.
-- Booking platform reports cancellation after local manual cancellation.
-- Payment has been collected but refund status is unknown.
-- Reservation is reinstated after cancellation.
-
-## Acceptance Criteria
-
-- Cancellation documentation separates reservation cancellation from payment refund.
-- Requirements support cancellation source, reason, audit, and communication.
-- Edge cases cover disputes, reinstatement, and external channel sync.
+- Guest cancels after check-in.
+- External platform sends stale cancellation.
+- Host cancellation creates relocation need.
+- Duplicate cancellation arrives from import retry.
 
 ## Future Enhancements
 
-- Cancellation policy calculator.
-- Automated availability reopening.
+- Cancellation policy reference model.
 - Refund workflow integration.
-- Cancellation analytics by property and source.
+- Availability reopening automation.
 
-```mermaid
-flowchart TD
-    CancelRequest["Cancellation Request"] --> Source["Identify Source"]
-    Source --> Policy["Evaluate Policy"]
-    Policy --> Reservation["Update Reservation Status"]
-    Reservation --> Payment["Update Refund Workflow"]
-    Reservation --> Messaging["Notify Guest and Host"]
-    Reservation --> Availability["Release Availability"]
-```
+## Acceptance Criteria
+
+- Cancellation source, reason, and timestamp are documented.
+- External refund policy boundary is explicit.
+- Duplicate cancellation handling is idempotent.

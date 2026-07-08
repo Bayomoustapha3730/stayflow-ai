@@ -1,68 +1,98 @@
 # Check-In
 
+## Executive Summary
+
+Check-In defines how a confirmed reservation becomes an occupied stay through standard, early, self, or host-assisted check-in.
+
 ## Business Purpose
 
-Check-in documentation defines the product expectations for helping guests arrive smoothly, access the property, understand house rules, and begin their stay with minimal host intervention.
+Safe check-in protects guests, hosts, and property access information while reducing arrival friction and escalating failed access quickly.
+
+## Scope
+
+In scope: standard check-in, early check-in request, self check-in, host-assisted check-in, verification, failed check-in, access instruction delivery, and emergency escalation.
+
+Out of scope: smart lock implementation and physical security operations.
+
+## Actors
+
+- Primary guest.
+- Host.
+- Property manager.
+- AI concierge.
+- WhatsApp workflow.
+- Emergency contact.
 
 ## User Stories
 
-- As a guest, I want clear arrival instructions before I reach the property.
-- As a host, I want check-in readiness confirmed before the guest arrives.
-- As an operations user, I want check-in status to show whether the guest has arrived or needs assistance.
+- As a guest, I want access instructions when I am authorized to receive them.
+- As a host, I want early check-in requests reviewed before approval.
+- As support, I want failed check-ins escalated quickly.
 
 ## Functional Requirements
 
-- Store expected check-in date, time window, actual check-in timestamp, method, status, and notes.
-- Provide property-specific arrival instructions through AI-safe knowledge.
-- Support manual confirmation of guest arrival.
-- Support escalation when the guest cannot access the property.
-- Link check-in status to reservation lifecycle and guest communication.
+- Support standard, early, self, and host-assisted check-in.
+- Verify reservation status, guest identity, property, and allowed instruction release window.
+- Track check-in verification status and actual check-in timestamp.
+- Escalate failed check-in and emergency situations.
 
 ## Non-Functional Requirements
 
-- Check-in instructions must be accurate, current, and property scoped.
-- Access-related details must be protected and shared only with eligible guests.
-- Check-in status must update quickly enough for live support workflows.
+- Access instruction delivery must be reliable and auditable.
+- Sensitive access information must be protected.
+- Check-in workflows should respond quickly during arrival windows.
+
+## Business Rules
+
+- Door codes, lock codes, and sensitive access instructions must only be provided to verified eligible guests.
+- Expired, cancelled, no-show, or unrelated reservations must not receive access instructions.
+- Early check-in is never automatically approved unless property business rules explicitly permit it.
 
 ## Validation Rules
 
-- Check-in details must belong to an active reservation.
-- Access instructions should not be sent before the configured safe release window.
-- Actual check-in timestamp cannot be before reservation creation.
-- Sensitive access codes should be stored and displayed according to security policy.
+- Reservation must be Ready for Check-In or otherwise eligible by documented exception.
+- Guest identifier must match the reservation's primary guest or approved contact.
+- Property Company ID must match Reservation Company ID.
+- Access release timing must be satisfied.
+
+## Error Handling
+
+- Failed identity verification blocks sensitive instructions.
+- Failed access requires escalation to host or emergency workflow.
+- Conflicting active reservations require clarification before instructions are sent.
+
+## Security Considerations
+
+Access credentials are sensitive. They must not be logged in plain text, shown to unrelated guests, or sent after reservation eligibility expires.
+
+## Privacy Considerations
+
+Check-in verification should not collect unnecessary personal data.
+
+## Multi-Tenant Considerations
+
+Check-in must validate company ownership across reservation, property, guest, and conversation.
+
+## AI Considerations
+
+AI may explain check-in steps using approved property knowledge but must not invent or expose access instructions outside authorization rules.
 
 ## Edge Cases
 
 - Guest arrives early.
-- Guest arrives late at night.
-- Access code is wrong or expired.
-- Reservation dates changed but check-in instructions were already sent.
-- Multiple guests in one reservation need separate arrival instructions.
-
-## Acceptance Criteria
-
-- Check-in requirements support arrival guidance, readiness, and escalation.
-- Security-sensitive access information is treated as restricted context.
-- Check-in status can drive reservation lifecycle and AI concierge behavior.
+- Guest uses a different phone number.
+- Lock code fails.
+- Multiple active reservations match one phone number.
+- Guest reports emergency access issue.
 
 ## Future Enhancements
 
-- Automated pre-arrival checklists.
-- Smart lock integration.
-- Arrival verification through WhatsApp.
-- Location-aware arrival assistance.
+- Smart lock integrations.
+- Check-in verification automation.
+- Access-code redaction controls.
 
-```mermaid
-sequenceDiagram
-    participant Guest
-    participant StayFlow
-    participant Host
-    Guest->>StayFlow: Requests check-in help
-    StayFlow->>StayFlow: Verify active reservation
-    StayFlow->>StayFlow: Retrieve property instructions
-    alt Safe to share
-        StayFlow->>Guest: Send check-in guidance
-    else Issue detected
-        StayFlow->>Host: Escalate access request
-    end
-```
+## Acceptance Criteria
+
+- Sensitive access instruction protection is documented.
+- Early check-in approval rules are explicit.
+- Failed check-in escalation is defined.
