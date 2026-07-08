@@ -29,8 +29,14 @@ public sealed class ReservationRepository(ApplicationDbContext dbContext) : IRes
 
         if (!string.IsNullOrWhiteSpace(query.Status))
         {
-            var status = query.Status.Trim();
-            reservationsQuery = reservationsQuery.Where(reservation => EF.Functions.ILike(reservation.Status, status));
+            if (Enum.TryParse<ReservationStatus>(query.Status.Trim(), ignoreCase: true, out var status))
+            {
+                reservationsQuery = reservationsQuery.Where(reservation => reservation.Status == status);
+            }
+            else
+            {
+                reservationsQuery = reservationsQuery.Where(_ => false);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(query.Search))
@@ -39,8 +45,7 @@ public sealed class ReservationRepository(ApplicationDbContext dbContext) : IRes
             reservationsQuery = reservationsQuery.Where(reservation =>
                 (reservation.ExternalReservationReference != null && EF.Functions.ILike(reservation.ExternalReservationReference, $"%{searchTerm}%"))
                 || (reservation.ConfirmationNumber != null && EF.Functions.ILike(reservation.ConfirmationNumber, $"%{searchTerm}%"))
-                || EF.Functions.ILike(reservation.ReservationSource, $"%{searchTerm}%")
-                || EF.Functions.ILike(reservation.Status, $"%{searchTerm}%"));
+                || EF.Functions.ILike(reservation.ReservationSource, $"%{searchTerm}%"));
         }
 
         var totalCount = await reservationsQuery.CountAsync(cancellationToken);

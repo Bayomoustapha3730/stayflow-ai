@@ -85,6 +85,27 @@ public sealed class ReservationsController(IReservationService reservationServic
     }
 
     /// <summary>
+    /// Transitions a tenant-scoped reservation through the approved lifecycle.
+    /// </summary>
+    [HttpPost("{id:guid}/status-transitions")]
+    [ProducesResponseType(typeof(ApiResponse<ReservationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ReservationDto>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<ReservationDto>), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<ReservationDto>>> TransitionReservationStatus(
+        Guid id,
+        [FromBody] TransitionReservationStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await reservationService.TransitionStatusAsync(id, request, cancellationToken);
+        if (response.Success)
+        {
+            return Ok(response);
+        }
+
+        return response.Errors.Count > 0 ? BadRequest(response) : NotFound(response);
+    }
+
+    /// <summary>
     /// Soft deletes a tenant-scoped reservation.
     /// </summary>
     [HttpDelete("{id:guid}")]

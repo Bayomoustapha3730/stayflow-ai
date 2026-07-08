@@ -6,7 +6,10 @@ using StayFlow.Api.Repositories;
 
 namespace StayFlow.Api.Services;
 
-public sealed class ReservationService(IReservationRepository reservationRepository, ICurrentTenantContext currentTenantContext) : IReservationService
+public sealed class ReservationService(
+    IReservationRepository reservationRepository,
+    ICurrentTenantContext currentTenantContext,
+    IReservationStatusTransitionPolicy statusTransitionPolicy) : IReservationService
 {
     public async Task<ApiResponse<PagedResult<ReservationSummaryDto>>> GetAsync(ReservationQueryParameters query, CancellationToken cancellationToken)
     {
@@ -72,7 +75,7 @@ public sealed class ReservationService(IReservationRepository reservationReposit
             Adults = request.Adults,
             Children = request.Children,
             TotalGuestCount = request.Adults + request.Children,
-            Status = request.Status.Trim(),
+            Status = ReservationStatus.Draft,
             Currency = NormalizeCurrency(request.Currency),
             BookingAmount = request.BookingAmount,
             SpecialRequests = NormalizeOptional(request.SpecialRequests),
@@ -122,7 +125,6 @@ public sealed class ReservationService(IReservationRepository reservationReposit
         reservation.Adults = request.Adults;
         reservation.Children = request.Children;
         reservation.TotalGuestCount = request.Adults + request.Children;
-        reservation.Status = request.Status.Trim();
         reservation.Currency = NormalizeCurrency(request.Currency);
         reservation.BookingAmount = request.BookingAmount;
         reservation.SpecialRequests = NormalizeOptional(request.SpecialRequests);
@@ -133,6 +135,45 @@ public sealed class ReservationService(IReservationRepository reservationReposit
         await reservationRepository.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<ReservationDto>.Ok(MapToDto(reservation), "Reservation updated successfully.");
+    }
+
+    public async Task<ApiResponse<ReservationDto>> TransitionStatusAsync(Guid id, TransitionReservationStatusRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<ReservationDto>.Fail(tenantError, [tenantError]);
+        }
+
+        if (!TryParseStatus(request.TargetStatus, out var targetStatus))
+        {
+            return ApiResponse<ReservationDto>.Fail("Reservation status transition failed.", ["Target status is invalid."]);
+        }
+
+        var reservation = await reservationRepository.GetByIdAsync(id, companyId, cancellationToken);
+        if (reservation is null)
+        {
+            return ApiResponse<ReservationDto>.Fail("Reservation was not found.");
+        }
+
+        var previousStatus = reservation.Status;
+        if (previousStatus == targetStatus)
+        {
+            return ApiResponse<ReservationDto>.Ok(MapToDto(reservation), "Reservation status is already current.");
+        }
+
+        if (!statusTransitionPolicy.CanTransition(previousStatus, targetStatus))
+        {
+            return ApiResponse<ReservationDto>.Fail(
+                "Reservation status transition failed.",
+                [$"Cannot transition reservation status from {previousStatus} to {targetStatus}."]);
+        }
+
+        reservation.Status = targetStatus;
+
+        await AddStatusTransitionAuditLogAsync(previousStatus, targetStatus, reservation, cancellationToken);
+        await reservationRepository.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<ReservationDto>.Ok(MapToDto(reservation), "Reservation status updated successfully.");
     }
 
     public async Task<ApiResponse<object>> DeleteAsync(Guid id, CancellationToken cancellationToken)
@@ -216,7 +257,7 @@ public sealed class ReservationService(IReservationRepository reservationReposit
                 reservation.ConfirmationNumber,
                 reservation.CheckInDate,
                 reservation.CheckOutDate,
-                reservation.Status,
+                Status = reservation.Status.ToString(),
                 reservation.IsActive,
                 reservation.IsDeleted,
                 reservation.DeletedAt,
@@ -240,7 +281,7 @@ public sealed class ReservationService(IReservationRepository reservationReposit
             CheckInDate = reservation.CheckInDate,
             CheckOutDate = reservation.CheckOutDate,
             TotalGuestCount = reservation.TotalGuestCount,
-            Status = reservation.Status,
+            Status = reservation.Status.ToString(),
             IsActive = reservation.IsActive,
             CreatedAt = reservation.CreatedAt
         };
@@ -261,7 +302,7 @@ public sealed class ReservationService(IReservationRepository reservationReposit
             Adults = reservation.Adults,
             Children = reservation.Children,
             TotalGuestCount = reservation.TotalGuestCount,
-            Status = reservation.Status,
+            Status = reservation.Status.ToString(),
             Currency = reservation.Currency,
             BookingAmount = reservation.BookingAmount,
             SpecialRequests = reservation.SpecialRequests,
@@ -280,5 +321,35 @@ public sealed class ReservationService(IReservationRepository reservationReposit
     private static string? NormalizeCurrency(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToUpperInvariant();
+    }
+
+    private async Task AddStatusTransitionAuditLogAsync(
+        ReservationStatus previousStatus,
+        ReservationStatus newStatus,
+        Reservation reservation,
+        CancellationToken cancellationToken)
+    {
+        await reservationRepository.AddAuditLogAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            EntityName = nameof(Reservation),
+            EntityId = reservation.Id,
+            Action = "StatusTransitioned",
+            Details = JsonSerializer.Serialize(new
+            {
+                reservation.CompanyId,
+                PreviousStatus = previousStatus.ToString(),
+                NewStatus = newStatus.ToString(),
+                AuthenticatedUserId = currentTenantContext.UserId,
+                currentTenantContext.CorrelationId
+            }),
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+    }
+
+    private static bool TryParseStatus(string? value, out ReservationStatus status)
+    {
+        return Enum.TryParse(value?.Trim(), ignoreCase: true, out status)
+            && Enum.IsDefined(status);
     }
 }

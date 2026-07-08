@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Repositories.IGuestRepository, Repositories.GuestRepository>();
         services.AddScoped<Services.IGuestService, Services.GuestService>();
         services.AddScoped<Repositories.IReservationRepository, Repositories.ReservationRepository>();
+        services.AddSingleton<Services.IReservationStatusTransitionPolicy, Services.ReservationStatusTransitionPolicy>();
         services.AddScoped<Services.IReservationService, Services.ReservationService>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();
         services.AddScoped<Services.IPasswordHasher, Services.Pbkdf2PasswordHasher>();

@@ -16,7 +16,6 @@ public static partial class ReservationRequestValidator
             request.CheckOutDate,
             request.Adults,
             request.Children,
-            request.Status,
             request.Currency,
             request.BookingAmount,
             request.SpecialRequests,
@@ -35,7 +34,6 @@ public static partial class ReservationRequestValidator
             request.CheckOutDate,
             request.Adults,
             request.Children,
-            request.Status,
             request.Currency,
             request.BookingAmount,
             request.SpecialRequests,
@@ -52,7 +50,6 @@ public static partial class ReservationRequestValidator
         DateOnly checkOutDate,
         int adults,
         int children,
-        string status,
         string? currency,
         decimal? bookingAmount,
         string? specialRequests,
@@ -71,7 +68,6 @@ public static partial class ReservationRequestValidator
         }
 
         AddRequired(result, reservationSource, "Reservation source", 80);
-        AddRequired(result, status, "Status", 40);
 
         if (checkInDate == default)
         {

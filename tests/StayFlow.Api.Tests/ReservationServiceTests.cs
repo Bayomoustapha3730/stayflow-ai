@@ -14,13 +14,15 @@ public sealed class ReservationServiceTests
         Assert.Null(typeof(CreateReservationRequest).GetProperty("CompanyId"));
         Assert.Null(typeof(UpdateReservationRequest).GetProperty("CompanyId"));
         Assert.Null(typeof(ReservationQueryParameters).GetProperty("CompanyId"));
+        Assert.Null(typeof(CreateReservationRequest).GetProperty("Status"));
+        Assert.Null(typeof(UpdateReservationRequest).GetProperty("Status"));
     }
 
     [Fact]
     public async Task CreateAsync_WithTenantAssociations_CreatesReservation()
     {
         var repository = new FakeReservationRepository();
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.CreateAsync(ValidCreateRequest(repository.PropertyId, repository.GuestId), CancellationToken.None);
 
@@ -31,6 +33,7 @@ public sealed class ReservationServiceTests
         Assert.Equal(repository.CompanyId, reservation.CompanyId);
         Assert.Equal(repository.PropertyId, reservation.PropertyId);
         Assert.Equal(repository.GuestId, reservation.PrimaryGuestId);
+        Assert.Equal(ReservationStatus.Draft, reservation.Status);
         Assert.Equal(3, reservation.TotalGuestCount);
         Assert.Equal("KES", reservation.Currency);
         Assert.Single(repository.AuditLogs);
@@ -42,7 +45,7 @@ public sealed class ReservationServiceTests
         var repository = new FakeReservationRepository();
         var reservation = NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId);
         repository.Reservations.Add(reservation);
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.UpdateAsync(reservation.Id, new UpdateReservationRequest
         {
@@ -55,7 +58,6 @@ public sealed class ReservationServiceTests
             CheckOutDate = new DateOnly(2026, 8, 12),
             Adults = 1,
             Children = 0,
-            Status = "Confirmed",
             Currency = "usd",
             BookingAmount = 250,
             SpecialRequests = "Ground floor",
@@ -67,6 +69,7 @@ public sealed class ReservationServiceTests
         Assert.Equal("ext-002", reservation.ExternalReservationReference);
         Assert.Equal("conf-002", reservation.ConfirmationNumber);
         Assert.Equal(1, reservation.TotalGuestCount);
+        Assert.Equal(ReservationStatus.Confirmed, reservation.Status);
         Assert.Equal("USD", reservation.Currency);
         Assert.False(reservation.IsActive);
     }
@@ -77,7 +80,7 @@ public sealed class ReservationServiceTests
         var repository = new FakeReservationRepository();
         var reservation = NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId);
         repository.Reservations.Add(reservation);
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.GetByIdAsync(reservation.Id, CancellationToken.None);
 
@@ -93,7 +96,7 @@ public sealed class ReservationServiceTests
         repository.Reservations.Add(NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, confirmationNumber: "A"));
         repository.Reservations.Add(NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, confirmationNumber: "B"));
         repository.Reservations.Add(NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, confirmationNumber: "C"));
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.GetAsync(new ReservationQueryParameters { PageNumber = 1, PageSize = 2 }, CancellationToken.None);
 
@@ -109,7 +112,7 @@ public sealed class ReservationServiceTests
         var repository = new FakeReservationRepository();
         repository.Reservations.Add(NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, confirmationNumber: "CONF-001", externalReference: "AIR-001"));
         repository.Reservations.Add(NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, confirmationNumber: "CONF-002", externalReference: "DIRECT-002"));
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.GetAsync(new ReservationQueryParameters { Search = "DIRECT" }, CancellationToken.None);
 
@@ -123,9 +126,9 @@ public sealed class ReservationServiceTests
         var repository = new FakeReservationRepository();
         var otherPropertyId = Guid.NewGuid();
         repository.TenantPropertyIds.Add(otherPropertyId);
-        repository.Reservations.Add(NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, status: "Confirmed"));
-        repository.Reservations.Add(NewReservation(repository.CompanyId, otherPropertyId, repository.GuestId, status: "Draft"));
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        repository.Reservations.Add(NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, status: ReservationStatus.Confirmed));
+        repository.Reservations.Add(NewReservation(repository.CompanyId, otherPropertyId, repository.GuestId, status: ReservationStatus.Draft));
+        var service = CreateService(repository);
 
         var response = await service.GetAsync(new ReservationQueryParameters
         {
@@ -144,7 +147,7 @@ public sealed class ReservationServiceTests
     public async Task CreateAsync_WithInvalidRequest_ReturnsValidationErrors()
     {
         var repository = new FakeReservationRepository();
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.CreateAsync(new CreateReservationRequest
         {
@@ -155,7 +158,6 @@ public sealed class ReservationServiceTests
             CheckOutDate = new DateOnly(2026, 8, 9),
             Adults = 0,
             Children = 0,
-            Status = "",
             Currency = "US",
             BookingAmount = -1
         }, CancellationToken.None);
@@ -174,7 +176,7 @@ public sealed class ReservationServiceTests
     public async Task CreateAsync_WithMissingTenantContext_ReturnsFailure()
     {
         var repository = new FakeReservationRepository();
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(null, isAuthenticated: true));
+        var service = CreateService(repository, new FakeCurrentTenantContext(null, isAuthenticated: true));
 
         var response = await service.CreateAsync(ValidCreateRequest(repository.PropertyId, repository.GuestId), CancellationToken.None);
 
@@ -187,7 +189,7 @@ public sealed class ReservationServiceTests
     public async Task CreateAsync_WithInvalidTenantContext_ReturnsFailure()
     {
         var repository = new FakeReservationRepository();
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(Guid.Empty));
+        var service = CreateService(repository, new FakeCurrentTenantContext(Guid.Empty));
 
         var response = await service.CreateAsync(ValidCreateRequest(repository.PropertyId, repository.GuestId), CancellationToken.None);
 
@@ -200,7 +202,7 @@ public sealed class ReservationServiceTests
     public async Task CreateAsync_WithoutAuthenticatedTenantContext_ReturnsFailure()
     {
         var repository = new FakeReservationRepository();
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId, isAuthenticated: false));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId, isAuthenticated: false));
 
         var response = await service.CreateAsync(ValidCreateRequest(repository.PropertyId, repository.GuestId), CancellationToken.None);
 
@@ -213,7 +215,7 @@ public sealed class ReservationServiceTests
     public async Task CreateAsync_WithCrossTenantProperty_ReturnsNotFound()
     {
         var repository = new FakeReservationRepository();
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.CreateAsync(ValidCreateRequest(Guid.NewGuid(), repository.GuestId), CancellationToken.None);
 
@@ -226,7 +228,7 @@ public sealed class ReservationServiceTests
     public async Task CreateAsync_WithCrossTenantGuest_ReturnsNotFound()
     {
         var repository = new FakeReservationRepository();
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.CreateAsync(ValidCreateRequest(repository.PropertyId, Guid.NewGuid()), CancellationToken.None);
 
@@ -241,7 +243,7 @@ public sealed class ReservationServiceTests
         var repository = new FakeReservationRepository();
         var reservation = NewReservation(Guid.NewGuid(), repository.PropertyId, repository.GuestId);
         repository.Reservations.Add(reservation);
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.GetByIdAsync(reservation.Id, CancellationToken.None);
 
@@ -255,7 +257,7 @@ public sealed class ReservationServiceTests
         var repository = new FakeReservationRepository();
         var reservation = NewReservation(Guid.NewGuid(), repository.PropertyId, repository.GuestId);
         repository.Reservations.Add(reservation);
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.UpdateAsync(reservation.Id, ValidUpdateRequest(repository.PropertyId, repository.GuestId), CancellationToken.None);
 
@@ -269,7 +271,7 @@ public sealed class ReservationServiceTests
         var repository = new FakeReservationRepository();
         var reservation = NewReservation(Guid.NewGuid(), repository.PropertyId, repository.GuestId);
         repository.Reservations.Add(reservation);
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.DeleteAsync(reservation.Id, CancellationToken.None);
 
@@ -284,7 +286,7 @@ public sealed class ReservationServiceTests
         var repository = new FakeReservationRepository();
         repository.Reservations.Add(NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, confirmationNumber: "TENANT-A"));
         repository.Reservations.Add(NewReservation(Guid.NewGuid(), repository.PropertyId, repository.GuestId, confirmationNumber: "TENANT-B"));
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository);
 
         var response = await service.GetAsync(new ReservationQueryParameters(), CancellationToken.None);
 
@@ -299,7 +301,7 @@ public sealed class ReservationServiceTests
         var userId = Guid.NewGuid();
         var reservation = NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId);
         repository.Reservations.Add(reservation);
-        var service = new ReservationService(repository, new FakeCurrentTenantContext(repository.CompanyId, userId: userId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId, userId: userId));
 
         var response = await service.DeleteAsync(reservation.Id, CancellationToken.None);
 
@@ -308,6 +310,171 @@ public sealed class ReservationServiceTests
         Assert.NotNull(reservation.DeletedAt);
         Assert.Equal(userId, reservation.DeletedBy);
         Assert.Single(repository.AuditLogs);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_DraftToPendingConfirmation_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.Draft, ReservationStatus.PendingConfirmation);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_PendingConfirmationToConfirmed_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.PendingConfirmation, ReservationStatus.Confirmed);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_ConfirmedToPreArrival_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.Confirmed, ReservationStatus.PreArrival);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_PreArrivalToReadyForCheckIn_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.PreArrival, ReservationStatus.ReadyForCheckIn);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_ReadyForCheckInToCheckedIn_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.ReadyForCheckIn, ReservationStatus.CheckedIn);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_CheckedInToActiveStay_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.CheckedIn, ReservationStatus.ActiveStay);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_ActiveStayToCheckOutPending_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.ActiveStay, ReservationStatus.CheckOutPending);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_CheckOutPendingToCheckedOut_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.CheckOutPending, ReservationStatus.CheckedOut);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_CheckedOutToPostStay_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.CheckedOut, ReservationStatus.PostStay);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_PostStayToCompleted_Succeeds()
+    {
+        await AssertTransitionSucceedsAsync(ReservationStatus.PostStay, ReservationStatus.Completed);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_DraftToActiveStay_Fails()
+    {
+        await AssertTransitionFailsAsync(ReservationStatus.Draft, ReservationStatus.ActiveStay);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_CompletedToDraft_Fails()
+    {
+        await AssertTransitionFailsAsync(ReservationStatus.Completed, ReservationStatus.Draft);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_CancelledToConfirmed_Fails()
+    {
+        await AssertTransitionFailsAsync(ReservationStatus.Cancelled, ReservationStatus.Confirmed);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_NoShowToCheckedIn_Fails()
+    {
+        await AssertTransitionFailsAsync(ReservationStatus.NoShow, ReservationStatus.CheckedIn);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_SameStatus_IsIdempotent()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, status: ReservationStatus.Confirmed);
+        repository.Reservations.Add(reservation);
+        var service = CreateService(repository);
+
+        var response = await service.TransitionStatusAsync(reservation.Id, new TransitionReservationStatusRequest { TargetStatus = "Confirmed" }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(ReservationStatus.Confirmed, reservation.Status);
+        Assert.Empty(repository.AuditLogs);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_InvalidTargetStatus_Fails()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, status: ReservationStatus.Draft);
+        repository.Reservations.Add(reservation);
+        var service = CreateService(repository);
+
+        var response = await service.TransitionStatusAsync(reservation.Id, new TransitionReservationStatusRequest { TargetStatus = "Flying" }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Reservation status transition failed.", response.Message);
+        Assert.Contains("Target status is invalid.", response.Errors);
+        Assert.Equal(ReservationStatus.Draft, reservation.Status);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_CrossTenantReservationReturnsNotFound()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = NewReservation(Guid.NewGuid(), repository.PropertyId, repository.GuestId, status: ReservationStatus.Draft);
+        repository.Reservations.Add(reservation);
+        var service = CreateService(repository);
+
+        var response = await service.TransitionStatusAsync(reservation.Id, new TransitionReservationStatusRequest { TargetStatus = "PendingConfirmation" }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Reservation was not found.", response.Message);
+        Assert.Equal(ReservationStatus.Draft, reservation.Status);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_WithMissingTenantContext_ReturnsFailure()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, status: ReservationStatus.Draft);
+        repository.Reservations.Add(reservation);
+        var service = CreateService(repository, new FakeCurrentTenantContext(null, isAuthenticated: true));
+
+        var response = await service.TransitionStatusAsync(reservation.Id, new TransitionReservationStatusRequest { TargetStatus = "PendingConfirmation" }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Authenticated tenant context is missing or invalid.", response.Message);
+        Assert.Equal(ReservationStatus.Draft, reservation.Status);
+    }
+
+    [Fact]
+    public async Task TransitionStatusAsync_SuccessfulTransitionCreatesAuditRecord()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, status: ReservationStatus.Draft);
+        repository.Reservations.Add(reservation);
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId, userId: Guid.NewGuid(), correlationId: "transition-correlation"));
+
+        var response = await service.TransitionStatusAsync(reservation.Id, new TransitionReservationStatusRequest { TargetStatus = "PendingConfirmation" }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var auditLog = Assert.Single(repository.AuditLogs);
+        Assert.Equal(nameof(Reservation), auditLog.EntityName);
+        Assert.Equal(reservation.Id, auditLog.EntityId);
+        Assert.Equal("StatusTransitioned", auditLog.Action);
+        Assert.Contains("PreviousStatus", auditLog.Details);
+        Assert.Contains("PendingConfirmation", auditLog.Details);
+        Assert.Contains("transition-correlation", auditLog.Details);
     }
 
     private static CreateReservationRequest ValidCreateRequest(Guid propertyId, Guid guestId)
@@ -323,7 +490,6 @@ public sealed class ReservationServiceTests
             CheckOutDate = new DateOnly(2026, 8, 4),
             Adults = 2,
             Children = 1,
-            Status = "Confirmed",
             Currency = "kes",
             BookingAmount = 1200,
             SpecialRequests = "Late arrival",
@@ -341,8 +507,7 @@ public sealed class ReservationServiceTests
             CheckInDate = new DateOnly(2026, 8, 1),
             CheckOutDate = new DateOnly(2026, 8, 3),
             Adults = 1,
-            Children = 0,
-            Status = "Draft"
+            Children = 0
         };
     }
 
@@ -352,7 +517,7 @@ public sealed class ReservationServiceTests
         Guid guestId,
         string confirmationNumber = "CONF-001",
         string externalReference = "EXT-001",
-        string status = "Confirmed",
+        ReservationStatus status = ReservationStatus.Confirmed,
         bool isDeleted = false)
     {
         return new Reservation
@@ -417,7 +582,7 @@ public sealed class ReservationServiceTests
                 .Where(reservation => !reservation.IsDeleted)
                 .Where(reservation => query.PropertyId is null || reservation.PropertyId == query.PropertyId)
                 .Where(reservation => query.PrimaryGuestId is null || reservation.PrimaryGuestId == query.PrimaryGuestId)
-                .Where(reservation => string.IsNullOrWhiteSpace(query.Status) || reservation.Status.Equals(query.Status, StringComparison.OrdinalIgnoreCase))
+                .Where(reservation => string.IsNullOrWhiteSpace(query.Status) || reservation.Status.ToString().Equals(query.Status, StringComparison.OrdinalIgnoreCase))
                 .Where(reservation => string.IsNullOrWhiteSpace(query.Search) || MatchesSearch(reservation, query.Search))
                 .OrderBy(reservation => reservation.CheckInDate)
                 .ThenBy(reservation => reservation.CreatedAt)
@@ -473,8 +638,44 @@ public sealed class ReservationServiceTests
         {
             return (reservation.ExternalReservationReference?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
                 || (reservation.ConfirmationNumber?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
-                || reservation.ReservationSource.Contains(search, StringComparison.OrdinalIgnoreCase)
-                || reservation.Status.Contains(search, StringComparison.OrdinalIgnoreCase);
+                || reservation.ReservationSource.Contains(search, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    private static ReservationService CreateService(FakeReservationRepository repository, FakeCurrentTenantContext? currentTenantContext = null)
+    {
+        return new ReservationService(
+            repository,
+            currentTenantContext ?? new FakeCurrentTenantContext(repository.CompanyId),
+            new ReservationStatusTransitionPolicy());
+    }
+
+    private static async Task AssertTransitionSucceedsAsync(ReservationStatus currentStatus, ReservationStatus targetStatus)
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, status: currentStatus);
+        repository.Reservations.Add(reservation);
+        var service = CreateService(repository);
+
+        var response = await service.TransitionStatusAsync(reservation.Id, new TransitionReservationStatusRequest { TargetStatus = targetStatus.ToString() }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(targetStatus, reservation.Status);
+        Assert.Single(repository.AuditLogs);
+    }
+
+    private static async Task AssertTransitionFailsAsync(ReservationStatus currentStatus, ReservationStatus targetStatus)
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = NewReservation(repository.CompanyId, repository.PropertyId, repository.GuestId, status: currentStatus);
+        repository.Reservations.Add(reservation);
+        var service = CreateService(repository);
+
+        var response = await service.TransitionStatusAsync(reservation.Id, new TransitionReservationStatusRequest { TargetStatus = targetStatus.ToString() }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Reservation status transition failed.", response.Message);
+        Assert.Equal(currentStatus, reservation.Status);
+        Assert.Empty(repository.AuditLogs);
     }
 }

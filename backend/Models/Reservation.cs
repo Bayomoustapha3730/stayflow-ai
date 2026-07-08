@@ -13,7 +13,7 @@ public sealed class Reservation : AuditableEntity
     public int Adults { get; set; }
     public int Children { get; set; }
     public int TotalGuestCount { get; set; }
-    public string Status { get; set; } = "Draft";
+    public ReservationStatus Status { get; set; } = ReservationStatus.Draft;
     public string? Currency { get; set; }
     public decimal? BookingAmount { get; set; }
     public string? SpecialRequests { get; set; }

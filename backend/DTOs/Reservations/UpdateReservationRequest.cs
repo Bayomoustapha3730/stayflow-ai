@@ -11,7 +11,6 @@ public sealed class UpdateReservationRequest
     public DateOnly CheckOutDate { get; init; }
     public int Adults { get; init; } = 1;
     public int Children { get; init; }
-    public string Status { get; init; } = "Draft";
     public string? Currency { get; init; }
     public decimal? BookingAmount { get; init; }
     public string? SpecialRequests { get; init; }

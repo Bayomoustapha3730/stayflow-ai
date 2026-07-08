@@ -16,7 +16,7 @@ public sealed class ReservationConfiguration : IEntityTypeConfiguration<Reservat
         builder.Property(reservation => reservation.ExternalReservationReference).HasMaxLength(160);
         builder.Property(reservation => reservation.ReservationSource).HasMaxLength(80).IsRequired();
         builder.Property(reservation => reservation.ConfirmationNumber).HasMaxLength(80);
-        builder.Property(reservation => reservation.Status).HasMaxLength(40).IsRequired();
+        builder.Property(reservation => reservation.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(reservation => reservation.Currency).HasMaxLength(3);
         builder.Property(reservation => reservation.BookingAmount).HasPrecision(18, 2);
         builder.Property(reservation => reservation.SpecialRequests).HasMaxLength(2000);
