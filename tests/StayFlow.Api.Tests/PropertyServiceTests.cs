@@ -25,6 +25,11 @@ public sealed class PropertyServiceTests
         Assert.Single(repository.Properties[0].PropertyRecommendations);
         Assert.Single(repository.Properties[0].PropertyEmergencyContacts);
         Assert.Single(repository.Properties[0].PropertyKnowledgeArticles);
+        Assert.All(repository.Properties[0].PropertyAmenities, amenity => Assert.Equal(repository.Properties[0].Id, amenity.PropertyId));
+        Assert.All(repository.Properties[0].PropertyHouseRules, rule => Assert.Equal(repository.Properties[0].Id, rule.PropertyId));
+        Assert.All(repository.Properties[0].PropertyRecommendations, recommendation => Assert.Equal(repository.Properties[0].Id, recommendation.PropertyId));
+        Assert.All(repository.Properties[0].PropertyEmergencyContacts, contact => Assert.Equal(repository.Properties[0].Id, contact.PropertyId));
+        Assert.All(repository.Properties[0].PropertyKnowledgeArticles, article => Assert.Equal(repository.Properties[0].Id, article.PropertyId));
         Assert.Single(repository.AuditLogs);
         Assert.Equal("Created", repository.AuditLogs[0].Action);
     }
@@ -126,6 +131,28 @@ public sealed class PropertyServiceTests
 
         Assert.False(response.Success);
         Assert.Equal("Property was not found.", response.Message);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_ExcludesInactiveNestedData()
+    {
+        var repository = new FakePropertyRepository();
+        var property = NewProperty(repository.CompanyId, "Nested Property");
+        property.PropertyAmenities.Add(new PropertyAmenity { Id = Guid.NewGuid(), PropertyId = property.Id, Name = "WiFi", IsActive = true });
+        property.PropertyAmenities.Add(new PropertyAmenity { Id = Guid.NewGuid(), PropertyId = property.Id, Name = "Inactive Pool", IsActive = false });
+        property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle { Id = Guid.NewGuid(), CompanyId = repository.CompanyId, PropertyId = property.Id, Title = "Active FAQ", Content = "Answer", IsActive = true });
+        property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle { Id = Guid.NewGuid(), CompanyId = repository.CompanyId, PropertyId = property.Id, Title = "Inactive FAQ", Content = "Old answer", IsActive = false });
+        repository.Properties.Add(property);
+        var service = new PropertyService(repository);
+
+        var response = await service.GetByIdAsync(property.Id, repository.CompanyId, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        var amenity = Assert.Single(response.Data.PropertyAmenities);
+        Assert.Equal("WiFi", amenity.Name);
+        var article = Assert.Single(response.Data.PropertyKnowledgeArticles);
+        Assert.Equal("Active FAQ", article.Title);
     }
 
     [Fact]

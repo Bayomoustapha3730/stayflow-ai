@@ -174,12 +174,26 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
 
         foreach (var amenity in amenities)
         {
-            property.PropertyAmenities.Add(new PropertyAmenity { Id = Guid.NewGuid(), Name = amenity.Name.Trim(), Description = NormalizeOptional(amenity.Description), IsActive = true });
+            property.PropertyAmenities.Add(new PropertyAmenity
+            {
+                Id = Guid.NewGuid(),
+                PropertyId = property.Id,
+                Name = amenity.Name.Trim(),
+                Description = NormalizeOptional(amenity.Description),
+                IsActive = true
+            });
         }
 
         foreach (var rule in houseRules)
         {
-            property.PropertyHouseRules.Add(new PropertyHouseRule { Id = Guid.NewGuid(), Title = rule.Title.Trim(), Description = rule.Description.Trim(), IsActive = true });
+            property.PropertyHouseRules.Add(new PropertyHouseRule
+            {
+                Id = Guid.NewGuid(),
+                PropertyId = property.Id,
+                Title = rule.Title.Trim(),
+                Description = rule.Description.Trim(),
+                IsActive = true
+            });
         }
 
         foreach (var recommendation in recommendations)
@@ -187,6 +201,7 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
             property.PropertyRecommendations.Add(new PropertyRecommendation
             {
                 Id = Guid.NewGuid(),
+                PropertyId = property.Id,
                 Name = recommendation.Name.Trim(),
                 Category = recommendation.Category.Trim(),
                 Description = NormalizeOptional(recommendation.Description),
@@ -198,7 +213,15 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
 
         foreach (var contact in contacts)
         {
-            property.PropertyEmergencyContacts.Add(new PropertyEmergencyContact { Id = Guid.NewGuid(), Name = contact.Name.Trim(), Role = contact.Role.Trim(), PhoneNumber = contact.PhoneNumber.Trim(), IsActive = true });
+            property.PropertyEmergencyContacts.Add(new PropertyEmergencyContact
+            {
+                Id = Guid.NewGuid(),
+                PropertyId = property.Id,
+                Name = contact.Name.Trim(),
+                Role = contact.Role.Trim(),
+                PhoneNumber = contact.PhoneNumber.Trim(),
+                IsActive = true
+            });
         }
 
         foreach (var item in knowledgeArticles)
