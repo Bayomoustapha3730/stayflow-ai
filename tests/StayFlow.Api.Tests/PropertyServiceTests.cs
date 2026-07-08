@@ -102,6 +102,32 @@ public sealed class PropertyServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_WithInvalidTenantContext_ReturnsFailure()
+    {
+        var repository = new FakePropertyRepository();
+        var service = new PropertyService(repository, new FakeCurrentTenantContext(Guid.Empty));
+
+        var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Authenticated tenant context is missing or invalid.", response.Message);
+        Assert.Empty(repository.Properties);
+    }
+
+    [Fact]
+    public async Task CreateAsync_WithoutAuthenticatedTenantContext_ReturnsFailure()
+    {
+        var repository = new FakePropertyRepository();
+        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId, isAuthenticated: false));
+
+        var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Authenticated tenant context is required.", response.Message);
+        Assert.Empty(repository.Properties);
+    }
+
+    [Fact]
     public async Task GetAsync_SearchesAndPaginatesTenantPropertiesIncludingInactiveOnes()
     {
         var repository = new FakePropertyRepository();
