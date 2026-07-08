@@ -11,7 +11,7 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.ToTable("Payments");
 
         builder.HasKey(payment => payment.Id);
-        builder.HasQueryFilter(payment => !payment.Property.IsDeleted);
+        builder.HasQueryFilter(payment => !payment.Property.IsDeleted && !payment.Guest.IsDeleted);
 
         builder.Property(payment => payment.Amount).HasPrecision(18, 2);
         builder.Property(payment => payment.Currency).HasMaxLength(3).IsRequired();

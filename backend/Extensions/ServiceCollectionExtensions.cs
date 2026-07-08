@@ -10,6 +10,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
         services.AddScoped<Repositories.IPropertyRepository, Repositories.PropertyRepository>();
         services.AddScoped<Services.IPropertyService, Services.PropertyService>();
+        services.AddScoped<Repositories.IGuestRepository, Repositories.GuestRepository>();
+        services.AddScoped<Services.IGuestService, Services.GuestService>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();
         services.AddScoped<Services.IPasswordHasher, Services.Pbkdf2PasswordHasher>();
         services.AddScoped<Services.IJwtTokenService, Services.JwtTokenService>();
