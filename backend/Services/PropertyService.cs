@@ -6,16 +6,16 @@ using StayFlow.Api.Repositories;
 
 namespace StayFlow.Api.Services;
 
-public sealed class PropertyService(IPropertyRepository propertyRepository) : IPropertyService
+public sealed class PropertyService(IPropertyRepository propertyRepository, ICurrentTenantContext currentTenantContext) : IPropertyService
 {
     public async Task<ApiResponse<PagedResult<PropertySummaryDto>>> GetAsync(PropertyQueryParameters query, CancellationToken cancellationToken)
     {
-        if (query.CompanyId is null || query.CompanyId == Guid.Empty)
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
         {
-            return ApiResponse<PagedResult<PropertySummaryDto>>.Fail("CompanyId is required.", ["CompanyId is required."]);
+            return ApiResponse<PagedResult<PropertySummaryDto>>.Fail(tenantError, [tenantError]);
         }
 
-        var properties = await propertyRepository.GetAsync(query, cancellationToken);
+        var properties = await propertyRepository.GetAsync(companyId, query, cancellationToken);
 
         return ApiResponse<PagedResult<PropertySummaryDto>>.Ok(new PagedResult<PropertySummaryDto>
         {
@@ -26,11 +26,11 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
         });
     }
 
-    public async Task<ApiResponse<PropertyDto>> GetByIdAsync(Guid id, Guid companyId, CancellationToken cancellationToken)
+    public async Task<ApiResponse<PropertyDto>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
-        if (companyId == Guid.Empty)
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
         {
-            return ApiResponse<PropertyDto>.Fail("CompanyId is required.", ["CompanyId is required."]);
+            return ApiResponse<PropertyDto>.Fail(tenantError, [tenantError]);
         }
 
         var property = await propertyRepository.GetByIdAsync(id, companyId, cancellationToken);
@@ -41,13 +41,18 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
 
     public async Task<ApiResponse<PropertyDto>> CreateAsync(CreatePropertyRequest request, CancellationToken cancellationToken)
     {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<PropertyDto>.Fail(tenantError, [tenantError]);
+        }
+
         var validation = PropertyRequestValidator.Validate(request);
         if (!validation.IsValid)
         {
             return ApiResponse<PropertyDto>.Fail("Property validation failed.", validation.Errors);
         }
 
-        if (!await propertyRepository.CompanyExistsAsync(request.CompanyId, cancellationToken))
+        if (!await propertyRepository.CompanyExistsAsync(companyId, cancellationToken))
         {
             return ApiResponse<PropertyDto>.Fail("Company was not found.");
         }
@@ -55,7 +60,7 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
         var property = new Property
         {
             Id = Guid.NewGuid(),
-            CompanyId = request.CompanyId,
+            CompanyId = companyId,
             Name = request.Name.Trim(),
             AddressLine1 = request.AddressLine1.Trim(),
             AddressLine2 = NormalizeOptional(request.AddressLine2),
@@ -77,13 +82,18 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
 
     public async Task<ApiResponse<PropertyDto>> UpdateAsync(Guid id, UpdatePropertyRequest request, CancellationToken cancellationToken)
     {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<PropertyDto>.Fail(tenantError, [tenantError]);
+        }
+
         var validation = PropertyRequestValidator.Validate(request);
         if (!validation.IsValid)
         {
             return ApiResponse<PropertyDto>.Fail("Property validation failed.", validation.Errors);
         }
 
-        var property = await propertyRepository.GetByIdAsync(id, request.CompanyId, cancellationToken);
+        var property = await propertyRepository.GetByIdAsync(id, companyId, cancellationToken);
         if (property is null)
         {
             return ApiResponse<PropertyDto>.Fail("Property was not found.");
@@ -106,11 +116,11 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
         return ApiResponse<PropertyDto>.Ok(MapToDto(property), "Property updated successfully.");
     }
 
-    public async Task<ApiResponse<object>> DeleteAsync(Guid id, Guid companyId, CancellationToken cancellationToken)
+    public async Task<ApiResponse<object>> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
-        if (companyId == Guid.Empty)
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
         {
-            return ApiResponse<object>.Fail("CompanyId is required.", ["CompanyId is required."]);
+            return ApiResponse<object>.Fail(tenantError, [tenantError]);
         }
 
         var property = await propertyRepository.GetByIdAsync(id, companyId, cancellationToken);
@@ -119,24 +129,35 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
             return ApiResponse<object>.Fail("Property was not found.");
         }
 
-        property.IsActive = false;
-        foreach (var item in property.PropertyAmenities.Cast<AuditableEntity>()
-                     .Concat(property.PropertyHouseRules)
-                     .Concat(property.PropertyRecommendations)
-                     .Concat(property.PropertyEmergencyContacts)
-                     .Concat(property.PropertyKnowledgeArticles))
-        {
-            if (item is PropertyAmenity amenity) amenity.IsActive = false;
-            if (item is PropertyHouseRule rule) rule.IsActive = false;
-            if (item is PropertyRecommendation recommendation) recommendation.IsActive = false;
-            if (item is PropertyEmergencyContact contact) contact.IsActive = false;
-            if (item is PropertyKnowledgeArticle article) article.IsActive = false;
-        }
+        property.IsDeleted = true;
+        property.DeletedAt = DateTimeOffset.UtcNow;
+        property.DeletedBy = currentTenantContext.UserId;
 
         await AddAuditLogAsync("Deleted", property, cancellationToken);
         await propertyRepository.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<object>.Ok(new { property.Id }, "Property deleted successfully.");
+    }
+
+    private bool TryGetCompanyId(out Guid companyId, out string error)
+    {
+        if (!currentTenantContext.IsAuthenticated)
+        {
+            companyId = Guid.Empty;
+            error = "Authenticated tenant context is required.";
+            return false;
+        }
+
+        if (currentTenantContext.CompanyId is not { } tenantCompanyId || tenantCompanyId == Guid.Empty)
+        {
+            companyId = Guid.Empty;
+            error = "Authenticated tenant context is missing or invalid.";
+            return false;
+        }
+
+        companyId = tenantCompanyId;
+        error = string.Empty;
+        return true;
     }
 
     private static void ReplaceChildren(
@@ -246,7 +267,17 @@ public sealed class PropertyService(IPropertyRepository propertyRepository) : IP
             EntityName = nameof(Property),
             EntityId = property.Id,
             Action = action,
-            Details = JsonSerializer.Serialize(new { property.CompanyId, property.Name, property.IsActive }),
+            Details = JsonSerializer.Serialize(new
+            {
+                property.CompanyId,
+                property.Name,
+                property.IsActive,
+                property.IsDeleted,
+                property.DeletedAt,
+                property.DeletedBy,
+                AuthenticatedUserId = currentTenantContext.UserId,
+                currentTenantContext.CorrelationId
+            }),
             CreatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
     }

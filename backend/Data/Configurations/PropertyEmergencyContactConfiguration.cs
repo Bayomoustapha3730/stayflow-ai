@@ -10,6 +10,7 @@ public sealed class PropertyEmergencyContactConfiguration : IEntityTypeConfigura
     {
         builder.ToTable("PropertyEmergencyContacts");
         builder.HasKey(contact => contact.Id);
+        builder.HasQueryFilter(contact => !contact.Property.IsDeleted);
         builder.Property(contact => contact.Name).HasMaxLength(160).IsRequired();
         builder.Property(contact => contact.Role).HasMaxLength(100).IsRequired();
         builder.Property(contact => contact.PhoneNumber).HasMaxLength(32).IsRequired();

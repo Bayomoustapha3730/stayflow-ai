@@ -10,6 +10,7 @@ public sealed class PropertyRecommendationConfiguration : IEntityTypeConfigurati
     {
         builder.ToTable("PropertyRecommendations");
         builder.HasKey(recommendation => recommendation.Id);
+        builder.HasQueryFilter(recommendation => !recommendation.Property.IsDeleted);
         builder.Property(recommendation => recommendation.Name).HasMaxLength(160).IsRequired();
         builder.Property(recommendation => recommendation.Category).HasMaxLength(100).IsRequired();
         builder.Property(recommendation => recommendation.Description).HasMaxLength(1000);

@@ -2,7 +2,6 @@ namespace StayFlow.Api.DTOs.Properties;
 
 public sealed class UpdatePropertyRequest
 {
-    public Guid CompanyId { get; init; }
     public string Name { get; init; } = string.Empty;
     public string AddressLine1 { get; init; } = string.Empty;
     public string? AddressLine2 { get; init; }

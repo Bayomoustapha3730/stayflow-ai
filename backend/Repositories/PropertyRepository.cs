@@ -8,19 +8,14 @@ namespace StayFlow.Api.Repositories;
 
 public sealed class PropertyRepository(ApplicationDbContext dbContext) : IPropertyRepository
 {
-    public async Task<PagedResult<Property>> GetAsync(PropertyQueryParameters query, CancellationToken cancellationToken)
+    public async Task<PagedResult<Property>> GetAsync(Guid companyId, PropertyQueryParameters query, CancellationToken cancellationToken)
     {
         var pageNumber = query.NormalizedPageNumber;
         var pageSize = query.NormalizedPageSize;
 
         var propertiesQuery = dbContext.Properties
             .AsNoTracking()
-            .Where(property => property.IsActive);
-
-        if (query.CompanyId is not null)
-        {
-            propertiesQuery = propertiesQuery.Where(property => property.CompanyId == query.CompanyId);
-        }
+            .Where(property => property.CompanyId == companyId);
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -52,7 +47,7 @@ public sealed class PropertyRepository(ApplicationDbContext dbContext) : IProper
             .Include(property => property.PropertyRecommendations)
             .Include(property => property.PropertyEmergencyContacts)
             .Include(property => property.PropertyKnowledgeArticles)
-            .FirstOrDefaultAsync(property => property.Id == id && property.CompanyId == companyId && property.IsActive, cancellationToken);
+            .FirstOrDefaultAsync(property => property.Id == id && property.CompanyId == companyId, cancellationToken);
     }
 
     public Task<bool> CompanyExistsAsync(Guid companyId, CancellationToken cancellationToken)

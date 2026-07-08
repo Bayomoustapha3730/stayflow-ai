@@ -11,6 +11,9 @@ public sealed class Property : AuditableEntity
     public string TimeZone { get; set; } = string.Empty;
     public string? Description { get; set; }
     public bool IsActive { get; set; } = true;
+    public bool IsDeleted { get; set; }
+    public DateTimeOffset? DeletedAt { get; set; }
+    public Guid? DeletedBy { get; set; }
 
     public Company Company { get; set; } = null!;
     public ICollection<PropertyAmenity> PropertyAmenities { get; set; } = [];

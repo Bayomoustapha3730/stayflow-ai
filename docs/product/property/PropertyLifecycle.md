@@ -40,13 +40,27 @@ Examples:
 
 ### Inactive
 
-The property is hidden from active workflows through soft deletion or deactivation.
+The property remains part of the company portfolio but is not available for operational or guest-facing workflows.
 
 Expected behavior:
 
-- The property does not appear in active lists.
+- The property may remain retrievable by authorized management workflows.
 - Guest-facing automation should not use inactive property content.
 - Audit history remains available.
+
+`IsActive` represents operational availability. It must not be used as the deletion flag.
+
+### Deleted
+
+The property has been removed from normal management workflows while business history is preserved.
+
+Expected behavior:
+
+- `IsDeleted` is set to `true`.
+- `DeletedAt` records the deletion timestamp.
+- `DeletedBy` records the authenticated user when available.
+- Normal property queries exclude deleted properties.
+- Nested property data remains associated with the deleted property for historical integrity.
 
 ## Lifecycle Events
 

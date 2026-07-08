@@ -11,6 +11,7 @@ public sealed class PropertyKnowledgeArticleConfiguration : IEntityTypeConfigura
         builder.ToTable("PropertyKnowledgeArticles");
 
         builder.HasKey(article => article.Id);
+        builder.HasQueryFilter(article => !article.Property.IsDeleted);
         builder.Property(article => article.Title).HasMaxLength(200).IsRequired();
         builder.Property(article => article.Content).IsRequired();
 

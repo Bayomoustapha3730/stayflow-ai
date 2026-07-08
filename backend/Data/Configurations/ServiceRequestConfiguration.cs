@@ -11,6 +11,7 @@ public sealed class ServiceRequestConfiguration : IEntityTypeConfiguration<Servi
         builder.ToTable("ServiceRequests");
 
         builder.HasKey(request => request.Id);
+        builder.HasQueryFilter(request => !request.Property.IsDeleted);
 
         builder.Property(request => request.Title).HasMaxLength(180).IsRequired();
         builder.Property(request => request.Description).HasMaxLength(2000);

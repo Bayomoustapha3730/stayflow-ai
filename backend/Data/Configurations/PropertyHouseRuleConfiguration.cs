@@ -10,6 +10,7 @@ public sealed class PropertyHouseRuleConfiguration : IEntityTypeConfiguration<Pr
     {
         builder.ToTable("PropertyHouseRules");
         builder.HasKey(rule => rule.Id);
+        builder.HasQueryFilter(rule => !rule.Property.IsDeleted);
         builder.Property(rule => rule.Title).HasMaxLength(160).IsRequired();
         builder.Property(rule => rule.Description).HasMaxLength(1000).IsRequired();
 

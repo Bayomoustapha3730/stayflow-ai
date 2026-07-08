@@ -5,10 +5,6 @@ public static class PropertyRequestValidator
     public static PropertyValidationResult Validate(CreatePropertyRequest request)
     {
         var result = ValidateCore(request.Name, request.AddressLine1, request.City, request.CountryCode, request.TimeZone);
-        if (request.CompanyId == Guid.Empty)
-        {
-            result.Errors.Add("CompanyId is required.");
-        }
 
         ValidateCollections(request.PropertyAmenities, request.PropertyHouseRules, request.PropertyRecommendations, request.PropertyEmergencyContacts, request.PropertyKnowledgeArticles, result);
         return result;
@@ -17,10 +13,6 @@ public static class PropertyRequestValidator
     public static PropertyValidationResult Validate(UpdatePropertyRequest request)
     {
         var result = ValidateCore(request.Name, request.AddressLine1, request.City, request.CountryCode, request.TimeZone);
-        if (request.CompanyId == Guid.Empty)
-        {
-            result.Errors.Add("CompanyId is required.");
-        }
 
         ValidateCollections(request.PropertyAmenities, request.PropertyHouseRules, request.PropertyRecommendations, request.PropertyEmergencyContacts, request.PropertyKnowledgeArticles, result);
         return result;

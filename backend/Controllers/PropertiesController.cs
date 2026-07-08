@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Properties;
@@ -11,10 +12,11 @@ namespace StayFlow.Api.Controllers;
 [ApiController]
 [Route("properties")]
 [Produces("application/json")]
+[Authorize]
 public sealed class PropertiesController(IPropertyService propertyService) : ControllerBase
 {
     /// <summary>
-    /// Gets active properties for one company with pagination and optional name search.
+    /// Gets tenant-scoped properties with pagination and optional name search.
     /// </summary>
     [HttpGet]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<PropertySummaryDto>>), StatusCodes.Status200OK)]
@@ -34,10 +36,9 @@ public sealed class PropertiesController(IPropertyService propertyService) : Con
     [ProducesResponseType(typeof(ApiResponse<PropertyDto>), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ApiResponse<PropertyDto>>> GetProperty(
         Guid id,
-        [FromQuery] Guid companyId,
         CancellationToken cancellationToken)
     {
-        var response = await propertyService.GetByIdAsync(id, companyId, cancellationToken);
+        var response = await propertyService.GetByIdAsync(id, cancellationToken);
         return response.Success ? Ok(response) : response.Errors.Count > 0 ? BadRequest(response) : NotFound(response);
     }
 
@@ -57,7 +58,7 @@ public sealed class PropertiesController(IPropertyService propertyService) : Con
             return BadRequest(response);
         }
 
-        return CreatedAtAction(nameof(GetProperty), new { id = response.Data.Id, companyId = response.Data.CompanyId }, response);
+        return CreatedAtAction(nameof(GetProperty), new { id = response.Data.Id }, response);
     }
 
     /// <summary>
@@ -89,10 +90,9 @@ public sealed class PropertiesController(IPropertyService propertyService) : Con
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ApiResponse<object>>> DeleteProperty(
         Guid id,
-        [FromQuery] Guid companyId,
         CancellationToken cancellationToken)
     {
-        var response = await propertyService.DeleteAsync(id, companyId, cancellationToken);
+        var response = await propertyService.DeleteAsync(id, cancellationToken);
         return response.Success ? Ok(response) : response.Errors.Count > 0 ? BadRequest(response) : NotFound(response);
     }
 }

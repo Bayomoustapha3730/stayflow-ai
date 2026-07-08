@@ -18,7 +18,15 @@ The initial tenant boundary is `CompanyId`. Company-scoped records should either
 
 ## Authentication Integration
 
-Until full authenticated tenant context is available, APIs may require explicit `CompanyId`. Once authentication is fully enforced, company scope should come from the current user and authorization claims.
+Authenticated APIs must resolve company scope from verified user claims, currently the `company_id` JWT claim issued by StayFlow AI authentication. Client-supplied `CompanyId` values must not be accepted as tenant selectors for protected workflows such as Property management.
+
+If an authenticated request does not contain a valid tenant claim, tenant-scoped services should reject the operation before executing repository queries.
+
+## Property Tenant Enforcement
+
+Property endpoints use authenticated tenant context for create, list, detail, update, and delete workflows. The Property repository also applies `CompanyId` filters so tenant isolation does not depend only on controller routing.
+
+Soft-deleted properties are excluded by EF Core global query filters. Tenant-aware global query filters are not currently placed in `ApplicationDbContext` because request-scoped tenant state in the DbContext would require additional lifecycle design. Until an ADR changes this, tenant isolation is enforced by service and repository boundaries plus tests.
 
 ## Data Model Guidance
 

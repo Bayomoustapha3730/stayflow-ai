@@ -11,6 +11,7 @@ public sealed class PropertyConfiguration : IEntityTypeConfiguration<Property>
         builder.ToTable("Properties");
 
         builder.HasKey(property => property.Id);
+        builder.HasQueryFilter(property => !property.IsDeleted);
 
         builder.Property(property => property.Name).HasMaxLength(180).IsRequired();
         builder.Property(property => property.AddressLine1).HasMaxLength(240).IsRequired();
@@ -27,5 +28,6 @@ public sealed class PropertyConfiguration : IEntityTypeConfiguration<Property>
 
         builder.HasIndex(property => property.CompanyId);
         builder.HasIndex(property => property.CreatedAt);
+        builder.HasIndex(property => property.IsDeleted);
     }
 }

@@ -4,6 +4,8 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
+        services.AddHttpContextAccessor();
+        services.AddScoped<Services.ICurrentTenantContext, Services.CurrentTenantContext>();
         services.AddScoped<Repositories.ICompanyRepository, Repositories.CompanyRepository>();
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
         services.AddScoped<Repositories.IPropertyRepository, Repositories.PropertyRepository>();

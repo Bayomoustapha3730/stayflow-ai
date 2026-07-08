@@ -10,6 +10,7 @@ public sealed class PropertyAmenityConfiguration : IEntityTypeConfiguration<Prop
     {
         builder.ToTable("PropertyAmenities");
         builder.HasKey(PropertyAmenity => PropertyAmenity.Id);
+        builder.HasQueryFilter(PropertyAmenity => !PropertyAmenity.Property.IsDeleted);
         builder.Property(PropertyAmenity => PropertyAmenity.Name).HasMaxLength(120).IsRequired();
         builder.Property(PropertyAmenity => PropertyAmenity.Description).HasMaxLength(500);
 
