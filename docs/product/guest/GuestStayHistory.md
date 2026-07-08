@@ -1,61 +1,113 @@
 # Guest Stay History
 
+## Executive Summary
+
+Guest Stay History records a guest's prior and current stays through reservations. It supports returning guest identification, operational continuity, and limited AI personalization without treating every historical detail as permanent memory.
+
 ## Business Purpose
 
-Guest stay history gives hosts and property managers continuity across bookings. It helps identify repeat guests, previous service issues, preferred properties, and operational patterns that can improve future stays.
+Stay history helps hosts recognize repeat guests, understand prior service issues, and tailor current support while preserving privacy and tenant isolation.
+
+## Scope
+
+In scope: reservation references, property association through reservations, check-in and checkout dates, stay status, prior service issues, approved stay summary, and returning guest indicators.
+
+Out of scope: unrestricted historical chat reuse, platform-wide travel history, and guest behavior scoring without product approval.
+
+## Actors
+
+- Guest.
+- Host.
+- Property manager.
+- Support agent.
+- Reservation workflow.
+- AI concierge.
 
 ## User Stories
 
-- As a host, I want to see previous stays for a guest.
-- As a property manager, I want to know whether a guest had unresolved issues in a past stay.
-- As a guest, I want repeat visits to feel easier because relevant history is remembered appropriately.
+- As a host, I want to know whether a guest has stayed with my company before.
+- As a guest, I want repeat stays to feel smoother without unnecessary data reuse.
+- As an AI workflow, I need approved stay history only when it helps answer the current question.
 
 ## Functional Requirements
 
-- Track stay records linked to guest, company, property, and booking reference where available.
-- Store check-in date, checkout date, status, guest count, source channel, and operational notes.
-- Link stays to conversations, service requests, payments, and reviews when available.
-- Support repeat-stay detection.
+- Link stay history to guest reservations.
+- Derive property association from reservations.
+- Track stay status, dates, source, and relevant operational outcomes.
+- Support returning guest detection within a company.
+- Identify approved stay history that may be used in AI context.
 
 ## Non-Functional Requirements
 
-- Stay history queries must support dashboards, guest profiles, and AI context assembly.
-- Historical data must remain company isolated.
-- Retention rules must support privacy and legal obligations.
+- Stay history queries should support guest profile views and active support workflows.
+- Historical records must remain company-scoped.
+- Retention policy should govern old stay data.
+- Stay history summaries should be auditable.
+
+## Business Rules
+
+- Stay history belongs to the company that owns the reservation.
+- Returning guest identification must not cross company boundaries.
+- Approved stay history may be used for AI only when relevant to the current workflow.
+- Sensitive incidents should not be reused as general personalization.
 
 ## Validation Rules
 
-- Stay history must belong to one guest and one company.
-- Property should be required for confirmed stays.
+- Stay history must reference a guest and reservation.
+- Property context must be derived from reservation.
 - Checkout date must not precede check-in date.
-- Booking references should be unique within company and source where possible.
+- Approved AI history must have a source and approval flag.
+
+## Error Handling
+
+- Missing reservation reference should prevent confirmed stay-history creation.
+- Conflicting stay dates should be flagged.
+- Cross-company reservation linkage must be rejected.
+- If history is stale or ambiguous, AI should not rely on it.
+
+## Security Considerations
+
+Stay history can reveal occupancy and travel patterns. Access must be company-scoped and role-aware.
+
+## Privacy Considerations
+
+Retention rules should define how long stay history remains available. Guests may request deletion or restriction subject to legal and operational obligations.
+
+## Multi-Tenant Considerations
+
+Company-scoped stay history prevents one host from seeing a guest's stays with another company.
+
+## AI Considerations
+
+AI may use approved stay history such as "returning guest" or "previously preferred late checkout" only if consent and business rules allow. AI must not receive full historical records by default.
 
 ## Edge Cases
 
-- Guest changes property after booking.
-- Stay is split across multiple properties.
-- Booking is cancelled after communication has started.
-- Walk-in or direct guest has no external booking reference.
-- Multiple guests share one booking.
-
-## Acceptance Criteria
-
-- Stay history documentation defines required relationships and operational value.
-- Stay history can support repeat-guest recognition and AI-safe context.
-- Edge cases are captured for booking changes and shared reservations.
+- Split stays across multiple properties.
+- Cancelled reservations with prior communication.
+- Guest returns with a new phone number.
+- Shared reservation with multiple guests.
+- Dispute-related notes in historical stay.
 
 ## Future Enhancements
 
-- Booking platform sync.
-- Stay-level satisfaction indicators.
-- Guest lifetime value analytics.
-- Automated post-stay follow-up triggers.
+- Stay summary approval workflow.
+- Retention-aware stay history cleanup.
+- Returning guest dashboard indicators.
+- Reservation import reconciliation.
+
+## Acceptance Criteria
+
+- Stay history uses reservations as the source of property association.
+- Returning guest detection is company-scoped.
+- AI use of history is approved and minimized.
+- Retention and privacy concerns are explicit.
 
 ```mermaid
 erDiagram
-    GUEST ||--o{ STAY : has
-    PROPERTY ||--o{ STAY : hosts
-    STAY ||--o{ CONVERSATION : includes
-    STAY ||--o{ SERVICE_REQUEST : generates
-    STAY ||--o{ PAYMENT : references
+    COMPANY ||--o{ GUEST : owns
+    GUEST ||--o{ RESERVATION : has
+    PROPERTY ||--o{ RESERVATION : hosts
+    RESERVATION ||--o{ CONVERSATION : informs
+    RESERVATION ||--o{ SERVICE_REQUEST : generates
 ```
