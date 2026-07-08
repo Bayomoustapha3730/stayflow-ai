@@ -21,6 +21,7 @@ public sealed class Property : AuditableEntity
     public ICollection<PropertyRecommendation> PropertyRecommendations { get; set; } = [];
     public ICollection<PropertyEmergencyContact> PropertyEmergencyContacts { get; set; } = [];
     public ICollection<PropertyKnowledgeArticle> PropertyKnowledgeArticles { get; set; } = [];
+    public ICollection<Reservation> Reservations { get; set; } = [];
     public ICollection<Conversation> Conversations { get; set; } = [];
     public ICollection<ServiceRequest> ServiceRequests { get; set; } = [];
     public ICollection<Payment> Payments { get; set; } = [];

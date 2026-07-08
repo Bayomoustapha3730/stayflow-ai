@@ -16,6 +16,7 @@ public sealed class Guest : AuditableEntity
     public Guid? DeletedBy { get; set; }
 
     public Company Company { get; set; } = null!;
+    public ICollection<Reservation> PrimaryReservations { get; set; } = [];
     public ICollection<Conversation> Conversations { get; set; } = [];
     public ICollection<ServiceRequest> ServiceRequests { get; set; } = [];
     public ICollection<Payment> Payments { get; set; } = [];
