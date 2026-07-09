@@ -180,6 +180,10 @@ public sealed class AIContextBuilderTests
         Assert.Null(result.Context!.Reservation);
         Assert.Null(result.Context.Property);
         Assert.True(result.Context.Safety.RequiresPropertyAccessAuthorization);
+        Assert.Equal(fixture.CompanyId, result.Metadata.CompanyId);
+        Assert.Equal(fixture.GuestId, result.Metadata.GuestId);
+        Assert.Null(result.Metadata.ReservationId);
+        Assert.Null(result.Metadata.PropertyId);
     }
 
     [Fact]
@@ -195,6 +199,10 @@ public sealed class AIContextBuilderTests
         Assert.NotNull(result.Context.Property);
         Assert.NotNull(result.Context.Knowledge);
         Assert.True(result.Context.Safety.ReservationContextResolved);
+        Assert.Equal(fixture.CompanyId, result.Metadata.CompanyId);
+        Assert.Equal(fixture.GuestId, result.Metadata.GuestId);
+        Assert.Equal(fixture.ReservationId, result.Metadata.ReservationId);
+        Assert.Equal(fixture.PropertyId, result.Metadata.PropertyId);
     }
 
     [Fact]
@@ -239,6 +247,10 @@ public sealed class AIContextBuilderTests
 
         Assert.Equal(AIContextBuildOutcome.EscalationRequired, result.Outcome);
         Assert.Equal("ResolvedContextValidationFailed", result.EscalationReason);
+        Assert.Equal(fixture.CompanyId, result.Metadata.CompanyId);
+        Assert.Null(result.Metadata.GuestId);
+        Assert.Null(result.Metadata.ReservationId);
+        Assert.Null(result.Metadata.PropertyId);
     }
 
     [Fact]

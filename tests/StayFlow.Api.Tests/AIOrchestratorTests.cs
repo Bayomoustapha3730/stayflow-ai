@@ -224,13 +224,132 @@ public sealed class AIOrchestratorTests
     {
         var fixture = new Fixture();
         var guestId = Guid.NewGuid();
+        var companyId = Guid.NewGuid();
+        var reservationId = Guid.NewGuid();
+        var propertyId = Guid.NewGuid();
+        fixture.ContextBuilder.Result = Fixture.ReadyContext(metadata: new AIContextBuildMetadata
+        {
+            CompanyId = companyId,
+            GuestId = guestId,
+            ReservationId = reservationId,
+            PropertyId = propertyId
+        });
 
         var result = await fixture.ProcessAsync(guestId: guestId);
         var json = JsonSerializer.Serialize(result);
 
         Assert.DoesNotContain("PromptPackage", json);
         Assert.DoesNotContain("SystemInstructions", json);
+        Assert.DoesNotContain("CompanyId", json);
+        Assert.DoesNotContain("GuestId", json);
+        Assert.DoesNotContain("ReservationId", json);
+        Assert.DoesNotContain("PropertyId", json);
+        Assert.DoesNotContain(companyId.ToString(), json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(guestId.ToString(), json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(reservationId.ToString(), json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(propertyId.ToString(), json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ResolvedCompanyIdReachesValidatorProtectedIdentifiers()
+    {
+        var fixture = new Fixture();
+        var companyId = Guid.NewGuid();
+        fixture.ContextBuilder.Result = Fixture.ReadyContext(metadata: new AIContextBuildMetadata { CompanyId = companyId });
+
+        await fixture.ProcessAsync();
+
+        Assert.Equal(companyId, fixture.Validator.LastRequest!.ProtectedIdentifiers.CompanyId);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ResolvedGuestIdReachesValidatorWhenRequestGuestIdIsNull()
+    {
+        var fixture = new Fixture();
+        var guestId = Guid.NewGuid();
+        fixture.ContextBuilder.Result = Fixture.ReadyContext(metadata: new AIContextBuildMetadata { GuestId = guestId });
+
+        await fixture.ProcessAsync(guestId: null);
+
+        Assert.Equal(guestId, fixture.Validator.LastRequest!.ProtectedIdentifiers.GuestId);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ResolvedReservationIdReachesValidatorProtectedIdentifiers()
+    {
+        var fixture = new Fixture();
+        var reservationId = Guid.NewGuid();
+        fixture.ContextBuilder.Result = Fixture.ReadyContext(metadata: new AIContextBuildMetadata { ReservationId = reservationId });
+
+        await fixture.ProcessAsync();
+
+        Assert.Equal(reservationId, fixture.Validator.LastRequest!.ProtectedIdentifiers.ReservationId);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ResolvedPropertyIdReachesValidatorProtectedIdentifiers()
+    {
+        var fixture = new Fixture();
+        var propertyId = Guid.NewGuid();
+        fixture.ContextBuilder.Result = Fixture.ReadyContext(metadata: new AIContextBuildMetadata { PropertyId = propertyId });
+
+        await fixture.ProcessAsync();
+
+        Assert.Equal(propertyId, fixture.Validator.LastRequest!.ProtectedIdentifiers.PropertyId);
+    }
+
+    [Theory]
+    [InlineData("CompanyId")]
+    [InlineData("GuestId")]
+    [InlineData("ReservationId")]
+    [InlineData("PropertyId")]
+    public async Task ProcessAsync_ProviderResponseContainingProtectedIdentifierIsBlocked(string identifierName)
+    {
+        var identifiers = new AIContextBuildMetadata
+        {
+            CompanyId = Guid.NewGuid(),
+            GuestId = Guid.NewGuid(),
+            ReservationId = Guid.NewGuid(),
+            PropertyId = Guid.NewGuid()
+        };
+        var leakedIdentifier = identifierName switch
+        {
+            "CompanyId" => identifiers.CompanyId,
+            "GuestId" => identifiers.GuestId,
+            "ReservationId" => identifiers.ReservationId,
+            _ => identifiers.PropertyId
+        };
+        var fixture = new Fixture(useRealValidator: true);
+        fixture.ContextBuilder.Result = Fixture.ReadyContext(metadata: identifiers);
+        fixture.Provider.Result = AIProviderResult.Success($"The internal value is {leakedIdentifier}.", "Fake", "fake-model", "req-1", 10);
+
+        var result = await fixture.ProcessAsync();
+
+        Assert.Equal(AIOrchestrationOutcome.Blocked, result.Outcome);
+        Assert.Contains(AIResponseViolationCode.InternalIdentifierDisclosure, result.ValidationViolations);
+        Assert.DoesNotContain(leakedIdentifier.ToString()!, result.GuestSafeMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_NoEligibleReservationDoesNotInventReservationOrPropertyIdentifiers()
+    {
+        var fixture = new Fixture();
+        fixture.ContextBuilder.Result = new AIContextBuildResult
+        {
+            Outcome = AIContextBuildOutcome.NoEligibleReservation,
+            QuestionCategories = [QuestionContextCategory.General],
+            Metadata = new AIContextBuildMetadata { CompanyId = Guid.NewGuid(), GuestId = Guid.NewGuid() },
+            Context = new AIContext
+            {
+                Guest = new AIGuestContext { PreferredLanguage = "en" },
+                Safety = new AISafetyContext { TenantValidated = true, GuestValidated = true, ContextMinimized = true }
+            }
+        };
+
+        await fixture.ProcessAsync();
+
+        Assert.Null(fixture.Validator.LastRequest!.ProtectedIdentifiers.ReservationId);
+        Assert.Null(fixture.Validator.LastRequest.ProtectedIdentifiers.PropertyId);
     }
 
     [Fact]
@@ -293,13 +412,15 @@ public sealed class AIOrchestratorTests
 
     private sealed class Fixture
     {
-        public Fixture()
+        public Fixture(bool useRealValidator = false)
         {
             Repository = new FakeAIContextRepository();
             ContextBuilder = new FakeContextBuilder();
             PromptBuilder = new FakePromptBuilder();
             Provider = new FakeProvider();
-            Validator = new FakeValidator();
+            Validator = useRealValidator
+                ? new CapturingValidator(new AIResponseValidator(Repository, new FakeCurrentTenantContext(), Microsoft.Extensions.Options.Options.Create(new AIPromptOptions())))
+                : new CapturingValidator();
             Orchestrator = new AIOrchestrator(
                 ContextBuilder,
                 PromptBuilder,
@@ -313,7 +434,7 @@ public sealed class AIOrchestratorTests
         public FakeContextBuilder ContextBuilder { get; }
         public FakePromptBuilder PromptBuilder { get; }
         public FakeProvider Provider { get; }
-        public FakeValidator Validator { get; }
+        public CapturingValidator Validator { get; }
         private AIOrchestrator Orchestrator { get; }
 
         public Task<AIOrchestrationResult> ProcessAsync(string message = "What is the wifi?", Guid? guestId = null)
@@ -321,17 +442,27 @@ public sealed class AIOrchestratorTests
             return Orchestrator.ProcessAsync(new AIOrchestrationRequest
             {
                 GuestMessage = message,
-                GuestId = guestId ?? Guid.NewGuid(),
+                GuestId = guestId,
                 CurrentTimestamp = DateTimeOffset.UtcNow
             }, CancellationToken.None);
         }
 
-        public static AIContextBuildResult ReadyContext(IReadOnlyCollection<QuestionContextCategory>? categories = null, bool accessRestricted = false)
+        public static AIContextBuildResult ReadyContext(
+            IReadOnlyCollection<QuestionContextCategory>? categories = null,
+            bool accessRestricted = false,
+            AIContextBuildMetadata? metadata = null)
         {
             return new AIContextBuildResult
             {
                 Outcome = AIContextBuildOutcome.Ready,
                 QuestionCategories = categories ?? [QuestionContextCategory.WiFi],
+                Metadata = metadata ?? new AIContextBuildMetadata
+                {
+                    CompanyId = Guid.NewGuid(),
+                    GuestId = Guid.NewGuid(),
+                    ReservationId = Guid.NewGuid(),
+                    PropertyId = Guid.NewGuid()
+                },
                 Context = new AIContext
                 {
                     Guest = new AIGuestContext { PreferredLanguage = "en" },
@@ -410,15 +541,17 @@ public sealed class AIOrchestratorTests
         }
     }
 
-    private sealed class FakeValidator : IAIResponseValidator
+    private sealed class CapturingValidator(IAIResponseValidator? innerValidator = null) : IAIResponseValidator
     {
         public bool WasCalled { get; private set; }
         public AIResponseValidationResult Result { get; set; } = new() { Outcome = AIResponseValidationOutcome.Valid };
+        public AIResponseValidationRequest? LastRequest { get; private set; }
 
         public AIResponseValidationResult Validate(AIResponseValidationRequest request)
         {
             WasCalled = true;
-            return Result;
+            LastRequest = request;
+            return innerValidator?.Validate(request) ?? Result;
         }
     }
 

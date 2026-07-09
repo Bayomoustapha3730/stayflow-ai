@@ -8,6 +8,7 @@ public sealed class AIContextBuildResult
     public AIContext? Context { get; init; }
     public IReadOnlyCollection<ReservationCandidateLabel> CandidateLabels { get; init; } = [];
     public IReadOnlyCollection<QuestionContextCategory> QuestionCategories { get; init; } = [];
+    public AIContextBuildMetadata Metadata { get; init; } = new();
     public string? EscalationReason { get; init; }
     public string? Message { get; init; }
 }

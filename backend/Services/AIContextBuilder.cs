@@ -24,6 +24,7 @@ public sealed class AIContextBuilder(
             {
                 Outcome = AIContextBuildOutcome.EscalationRequired,
                 QuestionCategories = categories,
+                Metadata = new AIContextBuildMetadata { GuestId = request.GuestId },
                 EscalationReason = "TenantContextUnavailable",
                 Message = tenantError
             };
@@ -53,6 +54,7 @@ public sealed class AIContextBuilder(
             {
                 Outcome = AIContextBuildOutcome.EscalationRequired,
                 QuestionCategories = categories,
+                Metadata = MetadataFromReservationContext(reservationContext, companyId),
                 EscalationReason = "UnsupportedReservationContextOutcome",
                 Message = "Reservation context resolution returned an unsupported outcome."
             }
@@ -77,6 +79,7 @@ public sealed class AIContextBuilder(
             {
                 Outcome = AIContextBuildOutcome.EscalationRequired,
                 QuestionCategories = categories,
+                Metadata = new AIContextBuildMetadata { CompanyId = companyId },
                 EscalationReason = "IncompleteResolvedReservationContext",
                 Message = "Resolved reservation context is missing required identifiers."
             };
@@ -92,6 +95,7 @@ public sealed class AIContextBuilder(
             {
                 Outcome = AIContextBuildOutcome.EscalationRequired,
                 QuestionCategories = categories,
+                Metadata = new AIContextBuildMetadata { CompanyId = companyId },
                 EscalationReason = "ResolvedContextValidationFailed",
                 Message = "Resolved reservation context could not be validated within the authenticated tenant."
             };
@@ -107,6 +111,13 @@ public sealed class AIContextBuilder(
                 {
                     Outcome = AIContextBuildOutcome.EscalationRequired,
                     QuestionCategories = categories,
+                    Metadata = new AIContextBuildMetadata
+                    {
+                        CompanyId = companyId,
+                        GuestId = guest.Id,
+                        ReservationId = reservation.Id,
+                        PropertyId = property.Id
+                    },
                     EscalationReason = "ConversationContextValidationFailed",
                     Message = "Conversation context could not be validated within the authenticated tenant."
                 };
@@ -121,6 +132,13 @@ public sealed class AIContextBuilder(
         {
             Outcome = AIContextBuildOutcome.Ready,
             QuestionCategories = categories,
+            Metadata = new AIContextBuildMetadata
+            {
+                CompanyId = companyId,
+                GuestId = guest.Id,
+                ReservationId = reservation.Id,
+                PropertyId = property.Id
+            },
             Context = new AIContext
             {
                 Guest = new AIGuestContext
@@ -187,6 +205,11 @@ public sealed class AIContextBuilder(
         {
             Outcome = AIContextBuildOutcome.NoEligibleReservation,
             QuestionCategories = categories,
+            Metadata = new AIContextBuildMetadata
+            {
+                CompanyId = companyId,
+                GuestId = guestContext is not null ? reservationContext.GuestId : null
+            },
             Message = reservationContext.Message,
             Context = new AIContext
             {
@@ -210,6 +233,7 @@ public sealed class AIContextBuilder(
             Outcome = AIContextBuildOutcome.ClarificationRequired,
             CandidateLabels = reservationContext.CandidateLabels,
             QuestionCategories = categories,
+            Metadata = MetadataFromReservationContext(reservationContext),
             Message = reservationContext.Message
         };
     }
@@ -220,8 +244,20 @@ public sealed class AIContextBuilder(
         {
             Outcome = AIContextBuildOutcome.EscalationRequired,
             QuestionCategories = categories,
+            Metadata = MetadataFromReservationContext(reservationContext),
             EscalationReason = reservationContext.EscalationReason,
             Message = reservationContext.Message
+        };
+    }
+
+    private static AIContextBuildMetadata MetadataFromReservationContext(ReservationContextResolutionResult reservationContext, Guid? fallbackCompanyId = null)
+    {
+        return new AIContextBuildMetadata
+        {
+            CompanyId = reservationContext.CompanyId ?? fallbackCompanyId,
+            GuestId = reservationContext.GuestId,
+            ReservationId = reservationContext.ReservationId,
+            PropertyId = reservationContext.PropertyId
         };
     }
 

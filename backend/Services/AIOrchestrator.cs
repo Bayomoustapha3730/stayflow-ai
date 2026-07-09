@@ -124,7 +124,10 @@ public sealed class AIOrchestrator(
                 PromptPackage = promptPackage,
                 ProtectedIdentifiers = new AIProtectedIdentifiers
                 {
-                    GuestId = request.GuestId
+                    CompanyId = contextResult.Metadata.CompanyId,
+                    GuestId = contextResult.Metadata.GuestId,
+                    ReservationId = contextResult.Metadata.ReservationId,
+                    PropertyId = contextResult.Metadata.PropertyId
                 }
             });
 

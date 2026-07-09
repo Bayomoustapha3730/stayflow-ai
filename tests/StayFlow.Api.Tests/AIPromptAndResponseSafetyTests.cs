@@ -93,6 +93,51 @@ public sealed class AIPromptAndResponseSafetyTests
     }
 
     [Fact]
+    public void PromptBuilder_DoesNotIncludeProtectedIdentifiersInContextSectionsOrDeveloperMessages()
+    {
+        var protectedIds = new[]
+        {
+            Guid.NewGuid().ToString(),
+            Guid.NewGuid().ToString(),
+            Guid.NewGuid().ToString(),
+            Guid.NewGuid().ToString()
+        };
+
+        var package = BuildPrompt(Context());
+        var contextText = string.Join("\n", package.ContextSections.SelectMany(section => section.Items));
+        var developerMessages = string.Join("\n", package.RenderedMessages.Where(message => message.Role == "developer").Select(message => message.Content));
+        var safetyText = string.Join("\n", package.SafetyDirectives);
+        var constraintsText = System.Text.Json.JsonSerializer.Serialize(package.ResponseConstraints);
+
+        foreach (var protectedId in protectedIds)
+        {
+            Assert.DoesNotContain(protectedId, package.SystemInstructions, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(protectedId, contextText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(protectedId, developerMessages, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(protectedId, safetyText, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(protectedId, constraintsText, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void PromptBuilder_DoesNotRewriteGuidInOriginalUntrustedGuestMessage()
+    {
+        var arbitraryGuestGuid = Guid.NewGuid().ToString();
+        var builder = new AIPromptBuilder(Options.Create(new AIPromptOptions()));
+
+        var package = builder.Build(new AIPromptBuildRequest
+        {
+            GuestQuestion = $"My booking reference says {arbitraryGuestGuid}",
+            AIContext = Context(),
+            QuestionCategories = [QuestionContextCategory.General]
+        });
+
+        Assert.Contains(arbitraryGuestGuid, package.GuestMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(package.RenderedMessages, message => message.Role == "user" && message.Content.Contains(arbitraryGuestGuid, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(package.RenderedMessages.Where(message => message.Role != "user"), message => message.Content.Contains(arbitraryGuestGuid, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void PromptBuilder_AddsPropertyAccessRestrictionDirectives()
     {
         var context = Context(accessRestricted: true);
