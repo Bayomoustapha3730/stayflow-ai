@@ -22,8 +22,15 @@ public static class ServiceCollectionExtensions
             .ValidateOnStart();
         services.AddOptions<Services.AIProviderOptions>()
             .Bind(configuration.GetSection(Services.AIProviderOptions.SectionName))
-            .Validate(options => options.Provider.Equals("Development", StringComparison.OrdinalIgnoreCase), "Only the Development AI provider is supported in this build.")
+            .Validate(
+                options => options.Provider.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                    || options.Provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase),
+                "AI provider must be either Development or OpenAI.")
             .ValidateOnStart();
+        services.AddOptions<Services.OpenAIOptions>()
+            .Bind(configuration.GetSection(Services.OpenAIOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.OpenAIOptions>, Services.OpenAIOptionsValidator>();
         services.AddScoped<Services.ICurrentTenantContext, Services.CurrentTenantContext>();
         services.AddScoped<Repositories.ICompanyRepository, Repositories.CompanyRepository>();
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
@@ -41,7 +48,15 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IAIPromptBuilder, Services.AIPromptBuilder>();
         services.AddScoped<Services.IAIResponseValidator, Services.AIResponseValidator>();
         services.AddScoped<Services.DevelopmentAIProvider>();
-        services.AddScoped<Services.IAIProvider, Services.DevelopmentAIProvider>();
+        services.AddScoped<Services.OpenAIAIProvider>();
+        services.AddSingleton<Services.IOpenAIResponsesClient, Services.OpenAIResponsesClient>();
+        services.AddScoped<Services.IAIProvider>(serviceProvider =>
+        {
+            var provider = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.AIProviderOptions>>().Value.Provider;
+            return provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase)
+                ? serviceProvider.GetRequiredService<Services.OpenAIAIProvider>()
+                : serviceProvider.GetRequiredService<Services.DevelopmentAIProvider>();
+        });
         services.AddScoped<Services.IAIOrchestrator, Services.AIOrchestrator>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();
         services.AddScoped<Services.IPasswordHasher, Services.Pbkdf2PasswordHasher>();

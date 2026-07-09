@@ -20,6 +20,7 @@ Architecture documentation should explain why the system is shaped the way it is
 - [04 AI Orchestrator](04-ai-orchestrator.md)
 - [05 WhatsApp Architecture](05-whatsapp-architecture.md)
 - [06 OpenAI Integration](06-openai-integration.md)
+- [OpenAI Provider](openai-provider.md)
 - [07 Security Architecture](07-security-architecture.md)
 - [08 Deployment Architecture](08-deployment-architecture.md)
 - [09 API Gateway](09-api-gateway.md)

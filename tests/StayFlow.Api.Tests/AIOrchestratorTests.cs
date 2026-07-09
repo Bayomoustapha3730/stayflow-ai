@@ -321,7 +321,7 @@ public sealed class AIOrchestratorTests
         };
         var fixture = new Fixture(useRealValidator: true);
         fixture.ContextBuilder.Result = Fixture.ReadyContext(metadata: identifiers);
-        fixture.Provider.Result = AIProviderResult.Success($"The internal value is {leakedIdentifier}.", "Fake", "fake-model", "req-1", 10);
+        fixture.Provider.Result = AIProviderResult.Success($"The internal value is {leakedIdentifier}.", "OpenAI", "gpt-test", "req-1", 10);
 
         var result = await fixture.ProcessAsync();
 
