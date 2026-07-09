@@ -5,7 +5,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
-builder.Services.AddSwaggerGen();
+
 builder.Services.AddApplicationDatabase(builder.Configuration);
 builder.Services.AddApplicationServices(builder.Configuration);
 builder.Services.AddApplicationAuthentication(builder.Configuration);
@@ -19,12 +19,8 @@ app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
-    app.UseSwagger();
-    app.UseSwaggerUI(options =>
-    {
-        options.SwaggerEndpoint("/openapi/v1.json", "StayFlow API");
-        options.RoutePrefix = "swagger";
-    });
+    await app.Services.GetRequiredService<StayFlow.Api.Services.IDevelopmentSeedService>()
+        .SeedAsync(CancellationToken.None);
 }
 
 app.UseHttpsRedirection();

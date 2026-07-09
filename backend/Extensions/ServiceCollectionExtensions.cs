@@ -63,6 +63,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IJwtTokenService, Services.JwtTokenService>();
         services.AddScoped<Services.IAuthService, Services.AuthService>();
         services.AddScoped<Services.IRoleService, Services.RoleService>();
+        services.AddScoped<Services.IDevelopmentSeedService, Services.DevelopmentSeedService>();
 
         return services;
     }
