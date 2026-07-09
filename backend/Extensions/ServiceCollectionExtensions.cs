@@ -9,6 +9,13 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(Services.ReservationContextOptions.SectionName))
             .Validate(options => options.PreArrivalWindowDays >= 0 && options.PreArrivalWindowDays <= 365, "Reservation context pre-arrival window must be between 0 and 365 days.")
             .ValidateOnStart();
+        services.AddOptions<Services.AIContextOptions>()
+            .Bind(configuration.GetSection(Services.AIContextOptions.SectionName))
+            .Validate(options => options.MaxKnowledgeArticles >= 0 && options.MaxKnowledgeArticles <= 50, "AI context knowledge article limit must be between 0 and 50.")
+            .Validate(options => options.MaxRecommendations >= 0 && options.MaxRecommendations <= 50, "AI context recommendation limit must be between 0 and 50.")
+            .Validate(options => options.MaxHouseRules >= 0 && options.MaxHouseRules <= 50, "AI context house rule limit must be between 0 and 50.")
+            .Validate(options => options.MaxEmergencyContacts >= 0 && options.MaxEmergencyContacts <= 50, "AI context emergency contact limit must be between 0 and 50.")
+            .ValidateOnStart();
         services.AddScoped<Services.ICurrentTenantContext, Services.CurrentTenantContext>();
         services.AddScoped<Repositories.ICompanyRepository, Repositories.CompanyRepository>();
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
@@ -20,6 +27,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IReservationStatusTransitionPolicy, Services.ReservationStatusTransitionPolicy>();
         services.AddScoped<Services.IReservationService, Services.ReservationService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
+        services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();
+        services.AddSingleton<Services.IQuestionRelevanceClassifier, Services.KeywordQuestionRelevanceClassifier>();
+        services.AddScoped<Services.IAIContextBuilder, Services.AIContextBuilder>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();
         services.AddScoped<Services.IPasswordHasher, Services.Pbkdf2PasswordHasher>();
         services.AddScoped<Services.IJwtTokenService, Services.JwtTokenService>();
