@@ -19,7 +19,8 @@ app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
-    await app.Services.GetRequiredService<StayFlow.Api.Services.IDevelopmentSeedService>()
+    using var scope = app.Services.CreateAsyncScope();
+    await scope.ServiceProvider.GetRequiredService<StayFlow.Api.Services.IDevelopmentSeedService>()
         .SeedAsync(CancellationToken.None);
 }
 
