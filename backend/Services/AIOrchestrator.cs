@@ -16,13 +16,15 @@ public sealed class AIOrchestrator(
     IAIResponseValidator aiResponseValidator,
     IAIContextRepository aiContextRepository,
     ICurrentTenantContext currentTenantContext,
-    ILogger<AIOrchestrator> logger) : IAIOrchestrator
+    ILogger<AIOrchestrator> logger,
+    IHostEnvironment hostEnvironment) : IAIOrchestrator
 {
     public async Task<AIOrchestrationResult> ProcessAsync(AIOrchestrationRequest request, CancellationToken cancellationToken)
     {
         AIContextBuildResult? contextResult = null;
         AIProviderResult? providerResult = null;
         AIResponseValidationResult? validationResult = null;
+        var providerWasInvoked = false;
 
         try
         {
@@ -66,6 +68,7 @@ public sealed class AIOrchestrator(
                     CandidateLabels = contextResult.CandidateLabels,
                     QuestionCategories = contextResult.QuestionCategories
                 };
+                ApplyDevelopmentDiagnostics(result, contextResult, providerWasInvoked);
                 await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
                 return result;
             }
@@ -82,6 +85,7 @@ public sealed class AIOrchestrator(
                     GuestSafeMessage = AIOrchestrationSafeMessages.HostAssistanceRequired,
                     QuestionCategories = contextResult.QuestionCategories
                 };
+                ApplyDevelopmentDiagnostics(result, contextResult, providerWasInvoked);
                 await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
                 return result;
             }
@@ -94,6 +98,7 @@ public sealed class AIOrchestrator(
                     GuestSafeMessage = AIOrchestrationSafeMessages.NoEligibleReservation,
                     QuestionCategories = contextResult.QuestionCategories
                 };
+                ApplyDevelopmentDiagnostics(result, contextResult, providerWasInvoked);
                 await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
                 return result;
             }
@@ -111,6 +116,7 @@ public sealed class AIOrchestrator(
                     GuestSafeMessage = AIOrchestrationSafeMessages.HostAssistanceRequired,
                     QuestionCategories = contextResult.QuestionCategories
                 };
+                ApplyDevelopmentDiagnostics(result, contextResult, providerWasInvoked);
                 await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
                 return result;
             }
@@ -130,6 +136,7 @@ public sealed class AIOrchestrator(
                 "AI provider invocation started. CorrelationId={CorrelationId} MessageCount={MessageCount}",
                 currentTenantContext.CorrelationId,
                 promptPackage.RenderedMessages.Count);
+            providerWasInvoked = true;
             providerResult = await aiProvider.GenerateAsync(new AIProviderRequest
             {
                 PromptPackage = promptPackage,
@@ -150,6 +157,7 @@ public sealed class AIOrchestrator(
             if (providerResult.Outcome == AIProviderOutcome.Unavailable)
             {
                 var result = ProviderUnavailable(providerResult, contextResult.QuestionCategories);
+                ApplyDevelopmentDiagnostics(result, contextResult, providerWasInvoked);
                 await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
                 return result;
             }
@@ -157,6 +165,7 @@ public sealed class AIOrchestrator(
             if (providerResult.Outcome == AIProviderOutcome.Failed)
             {
                 var result = ProviderUnavailable(providerResult, contextResult.QuestionCategories);
+                ApplyDevelopmentDiagnostics(result, contextResult, providerWasInvoked);
                 await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
                 return result;
             }
@@ -183,6 +192,7 @@ public sealed class AIOrchestrator(
                 validationResult.Violations.Select(violation => violation.ToString()).ToArray());
 
             var mapped = MapValidationResult(providerResult, validationResult, contextResult.QuestionCategories);
+            ApplyDevelopmentDiagnostics(mapped, contextResult, providerWasInvoked);
             await AuditAsync(mapped, contextResult, providerResult, validationResult, cancellationToken);
             return mapped;
         }
@@ -200,6 +210,7 @@ public sealed class AIOrchestrator(
                 GuestSafeMessage = AIOrchestrationSafeMessages.ProviderUnavailable,
                 QuestionCategories = contextResult?.QuestionCategories ?? []
             };
+            ApplyDevelopmentDiagnostics(result, contextResult, providerWasInvoked);
             await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
             return result;
         }
@@ -273,6 +284,25 @@ public sealed class AIOrchestrator(
             && !contextResult.Context.Safety.RequiresPropertyAccessAuthorization
             && contextResult.Context.Reservation is null
             && contextResult.Context.Property is null;
+    }
+
+    private void ApplyDevelopmentDiagnostics(
+        AIOrchestrationResult result,
+        AIContextBuildResult? contextResult,
+        bool providerWasInvoked)
+    {
+        if (!hostEnvironment.IsDevelopment())
+        {
+            return;
+        }
+
+        result.ContextBuildOutcome = contextResult?.Outcome.ToString();
+        result.EscalationReason = contextResult?.EscalationReason;
+        result.ContextBuildMessage = contextResult?.Message;
+        result.ReservationContextOutcome = contextResult?.ReservationContextOutcome;
+        result.ReservationContextMessage = contextResult?.ReservationContextMessage;
+        result.ProviderSelected = aiProvider.GetType().Name;
+        result.ProviderWasInvoked = providerWasInvoked;
     }
 
     private async Task AuditAsync(

@@ -11,4 +11,6 @@ public sealed class AIContextBuildResult
     public AIContextBuildMetadata Metadata { get; init; } = new();
     public string? EscalationReason { get; init; }
     public string? Message { get; init; }
+    public string? ReservationContextOutcome { get; set; }
+    public string? ReservationContextMessage { get; set; }
 }

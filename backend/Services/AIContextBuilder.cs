@@ -80,6 +80,8 @@ public sealed class AIContextBuilder(
                 Message = "Reservation context resolution returned an unsupported outcome."
             }
         };
+        result.ReservationContextOutcome = reservationContext.Outcome.ToString();
+        result.ReservationContextMessage = reservationContext.Message;
 
         var knowledgeCount = result.Context?.Knowledge.Articles.Count ?? 0;
         var recommendationCount = result.Context?.Knowledge.Recommendations.Count ?? 0;

@@ -1,6 +1,7 @@
 using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.AIResponseValidation;
 using StayFlow.Api.DTOs.ReservationContext;
+using System.Text.Json.Serialization;
 
 namespace StayFlow.Api.DTOs.AIOrchestration;
 
@@ -12,4 +13,25 @@ public sealed class AIOrchestrationResult
     public IReadOnlyCollection<QuestionContextCategory> QuestionCategories { get; init; } = [];
     public IReadOnlyCollection<AIResponseViolationCode> ValidationViolations { get; init; } = [];
     public AIProviderMetadata? ProviderMetadata { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContextBuildOutcome { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EscalationReason { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContextBuildMessage { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReservationContextOutcome { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReservationContextMessage { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProviderSelected { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ProviderWasInvoked { get; set; }
 }

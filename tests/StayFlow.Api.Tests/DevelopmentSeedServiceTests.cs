@@ -237,6 +237,57 @@ public sealed class DevelopmentSeedServiceTests
         Assert.NotEqual(passwordHash1, passwordHash2);
     }
 
+    [Fact]
+    public async Task SeedAsync_WhenDemoUserAlreadyExists_StillCreatesGuestReservationAndRole()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        dbContext.Users.Add(new User
+        {
+            Id = DemoDemoUserId,
+            CompanyId = SeedData.DemoCompanyId,
+            Email = DemoUserEmail,
+            FullName = "Existing Demo",
+            PasswordHash = "old-hash",
+            IsActive = true
+        });
+        await dbContext.SaveChangesAsync();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?> { ["DevelopmentSeed:DemoPassword"] = TestPassword });
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        Assert.NotNull(await dbContext.Guests.FirstOrDefaultAsync(g => g.Id == DemoDemoGuestId));
+        Assert.NotNull(await dbContext.Reservations.FirstOrDefaultAsync(r => r.Id == DemoDemoReservationId));
+        Assert.True(await dbContext.UserRoles.AnyAsync(userRole => userRole.UserId == DemoDemoUserId));
+    }
+
+    [Fact]
+    public async Task SeedAsync_RepairsStaleDemoReservationForAiContextResolution()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?> { ["DevelopmentSeed:DemoPassword"] = TestPassword });
+        await seeder.SeedAsync(CancellationToken.None);
+
+        var reservation = await dbContext.Reservations.FirstAsync(r => r.Id == DemoDemoReservationId);
+        reservation.Status = ReservationStatus.Cancelled;
+        reservation.IsActive = false;
+        reservation.IsDeleted = true;
+        reservation.CheckInDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-30);
+        reservation.CheckOutDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-20);
+        await dbContext.SaveChangesAsync();
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        var repairedReservation = await dbContext.Reservations.FirstAsync(r => r.Id == DemoDemoReservationId);
+        var currentDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        Assert.Equal(ReservationStatus.CheckedIn, repairedReservation.Status);
+        Assert.True(repairedReservation.IsActive);
+        Assert.False(repairedReservation.IsDeleted);
+        Assert.True(repairedReservation.CheckInDate <= currentDate);
+        Assert.True(repairedReservation.CheckOutDate >= currentDate);
+        Assert.Equal(DemoDemoGuestId, repairedReservation.PrimaryGuestId);
+        Assert.Equal(SeedData.DemoPropertyId, repairedReservation.PropertyId);
+    }
+
     private static ApplicationDbContext CreateInMemoryDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()

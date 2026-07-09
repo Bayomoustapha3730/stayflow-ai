@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.AIPrompt;
 using StayFlow.Api.DTOs.AIProvider;
@@ -288,6 +290,60 @@ public sealed class AIOrchestratorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_InDevelopmentIncludesSafeDiagnosticsForPreProviderEscalation()
+    {
+        var fixture = new Fixture();
+        fixture.ContextBuilder.Result = new AIContextBuildResult
+        {
+            Outcome = AIContextBuildOutcome.EscalationRequired,
+            QuestionCategories = [QuestionContextCategory.CheckIn, QuestionContextCategory.CheckOut],
+            EscalationReason = "ResolvedContextValidationFailed",
+            Message = "Context could not be validated.",
+            ReservationContextOutcome = "Resolved",
+            ReservationContextMessage = "Reservation context resolved."
+        };
+
+        var result = await fixture.ProcessAsync("What are my check-in and check-out dates?", Guid.NewGuid());
+        var json = JsonSerializer.Serialize(result);
+
+        Assert.Equal("EscalationRequired", result.ContextBuildOutcome);
+        Assert.Equal("ResolvedContextValidationFailed", result.EscalationReason);
+        Assert.Equal("Context could not be validated.", result.ContextBuildMessage);
+        Assert.Equal("Resolved", result.ReservationContextOutcome);
+        Assert.Equal("Reservation context resolved.", result.ReservationContextMessage);
+        Assert.Equal("FakeProvider", result.ProviderSelected);
+        Assert.False(result.ProviderWasInvoked);
+        Assert.DoesNotContain("CompanyId", json);
+        Assert.DoesNotContain("ReservationId", json);
+        Assert.DoesNotContain("SystemInstructions", json);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_OutsideDevelopmentOmitsDiagnostics()
+    {
+        var fixture = new Fixture(environmentName: Environments.Production);
+        fixture.ContextBuilder.Result = new AIContextBuildResult
+        {
+            Outcome = AIContextBuildOutcome.EscalationRequired,
+            QuestionCategories = [QuestionContextCategory.CheckIn],
+            EscalationReason = "ResolvedContextValidationFailed",
+            Message = "Context could not be validated.",
+            ReservationContextOutcome = "Resolved"
+        };
+
+        var result = await fixture.ProcessAsync("What are my check-in and check-out dates?", Guid.NewGuid());
+        var json = JsonSerializer.Serialize(result);
+
+        Assert.Null(result.ContextBuildOutcome);
+        Assert.Null(result.EscalationReason);
+        Assert.Null(result.ContextBuildMessage);
+        Assert.Null(result.ReservationContextOutcome);
+        Assert.Null(result.ProviderSelected);
+        Assert.Null(result.ProviderWasInvoked);
+        Assert.DoesNotContain("contextBuildOutcome", json, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ProcessAsync_ResultDoesNotExposePromptSystemInstructionsOrInternalIds()
     {
         var fixture = new Fixture();
@@ -480,7 +536,7 @@ public sealed class AIOrchestratorTests
 
     private sealed class Fixture
     {
-        public Fixture(bool useRealValidator = false)
+        public Fixture(bool useRealValidator = false, string environmentName = "Development")
         {
             Repository = new FakeAIContextRepository();
             ContextBuilder = new FakeContextBuilder();
@@ -496,7 +552,8 @@ public sealed class AIOrchestratorTests
                 Validator,
                 Repository,
                 new FakeCurrentTenantContext(),
-                Logger);
+                Logger,
+                new FakeHostEnvironment(environmentName));
         }
 
         public FakeAIContextRepository Repository { get; }
@@ -668,5 +725,13 @@ public sealed class AIOrchestratorTests
         {
             Messages.Add(formatter(state, exception));
         }
+    }
+
+    private sealed class FakeHostEnvironment(string environmentName) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = environmentName;
+        public string ApplicationName { get; set; } = "StayFlow.Api.Tests";
+        public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

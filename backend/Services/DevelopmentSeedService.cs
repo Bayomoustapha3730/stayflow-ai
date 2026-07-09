@@ -33,87 +33,111 @@ public sealed class DevelopmentSeedService(
             return; // No password configured, skip seeding
         }
 
-        // Check if demo user already exists
-        var existingUser = await dbContext.Users
-            .FirstOrDefaultAsync(u => u.Id == DemoDemoUserId, cancellationToken);
-
-        if (existingUser != null)
-        {
-            // Update password hash if needed (idempotent)
-            var newPasswordHash = passwordHasher.HashPassword(demoPassword);
-            existingUser.PasswordHash = newPasswordHash;
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return;
-        }
-
-        // Create demo role with required permissions
         var role = await GetOrCreateDemoRoleAsync(cancellationToken);
+        var demoUser = await GetOrCreateDemoUserAsync(role, demoPassword, cancellationToken);
+        await EnsureDemoGuestAsync(cancellationToken);
 
-        // Create demo user
-        var demoUser = new User
-        {
-            Id = DemoDemoUserId,
-            CompanyId = SeedData.DemoCompanyId,
-            Email = DemoUserEmail,
-            FullName = DemoUserFullName,
-            PhoneNumber = "+254700000001",
-            PasswordHash = passwordHasher.HashPassword(demoPassword),
-            IsEmailVerified = true,
-            IsActive = true,
-            Role = role.Name
-        };
-
-        // Create demo guest
-        var demoGuest = new Guest
-        {
-            Id = DemoDemoGuestId,
-            CompanyId = SeedData.DemoCompanyId,
-            FirstName = "Demo",
-            LastName = "Guest",
-            Email = "demo.guest@stayflow.local",
-            PhoneNumber = "+254700000002",
-            IsActive = true
-        };
-
-        // Create demo reservation (eligible for AI context resolution)
-        // Use dates that are current relative to test date 2026-08-10
         var currentDate = DateOnly.FromDateTime(DateTime.UtcNow);
-        var checkInDate = currentDate.AddDays(-1); // Yesterday (pre-arrival to active stay)
-        var checkOutDate = currentDate.AddDays(3);  // 3 days from now
-
-        var demoReservation = new Reservation
-        {
-            Id = DemoDemoReservationId,
-            CompanyId = SeedData.DemoCompanyId,
-            PropertyId = SeedData.DemoPropertyId,
-            PrimaryGuestId = DemoDemoGuestId,
-            ExternalReservationReference = DemoReservationReference,
-            ConfirmationNumber = "DEMO-CONF-001",
-            CheckInDate = checkInDate,
-            CheckOutDate = checkOutDate,
-            Adults = 2,
-            Children = 0,
-            TotalGuestCount = 2,
-            Status = ReservationStatus.CheckedIn, // Eligible for AI context resolution
-            Currency = "KES",
-            BookingAmount = 5000.00m,
-            SpecialRequests = "Demo reservation for StayFlow AI testing",
-            IsActive = true
-        };
-
-        // Assign role to user
-        var userRole = new UserRole
-        {
-            UserId = DemoDemoUserId,
-            RoleId = role.Id
-        };
-
-        dbContext.Users.Add(demoUser);
-        dbContext.Guests.Add(demoGuest);
-        dbContext.Reservations.Add(demoReservation);
-        dbContext.UserRoles.Add(userRole);
+        await EnsureDemoReservationAsync(currentDate, cancellationToken);
+        await EnsureDemoUserRoleAsync(demoUser.Id, role.Id, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<User> GetOrCreateDemoUserAsync(Role role, string demoPassword, CancellationToken cancellationToken)
+    {
+        var user = await dbContext.Users
+            .FirstOrDefaultAsync(u => u.Id == DemoDemoUserId, cancellationToken);
+
+        if (user is null)
+        {
+            user = new User { Id = DemoDemoUserId };
+            dbContext.Users.Add(user);
+        }
+
+        user.CompanyId = SeedData.DemoCompanyId;
+        user.Email = DemoUserEmail;
+        user.FullName = DemoUserFullName;
+        user.PhoneNumber = "+254700000001";
+        user.PasswordHash = passwordHasher.HashPassword(demoPassword);
+        user.IsEmailVerified = true;
+        user.IsActive = true;
+        user.Role = role.Name;
+
+        return user;
+    }
+
+    private async Task EnsureDemoGuestAsync(CancellationToken cancellationToken)
+    {
+        var guest = await dbContext.Guests
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(g => g.Id == DemoDemoGuestId, cancellationToken);
+
+        if (guest is null)
+        {
+            guest = new Guest { Id = DemoDemoGuestId };
+            dbContext.Guests.Add(guest);
+        }
+
+        guest.CompanyId = SeedData.DemoCompanyId;
+        guest.FirstName = "Demo";
+        guest.LastName = "Guest";
+        guest.Email = "demo.guest@stayflow.local";
+        guest.PhoneNumber = "+254700000002";
+        guest.PreferredLanguage = "en";
+        guest.CountryCode = "KE";
+        guest.IsActive = true;
+        guest.IsDeleted = false;
+        guest.DeletedAt = null;
+        guest.DeletedBy = null;
+    }
+
+    private async Task EnsureDemoReservationAsync(DateOnly currentDate, CancellationToken cancellationToken)
+    {
+        var reservation = await dbContext.Reservations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(r => r.Id == DemoDemoReservationId, cancellationToken);
+
+        if (reservation is null)
+        {
+            reservation = new Reservation { Id = DemoDemoReservationId };
+            dbContext.Reservations.Add(reservation);
+        }
+
+        reservation.CompanyId = SeedData.DemoCompanyId;
+        reservation.PropertyId = SeedData.DemoPropertyId;
+        reservation.PrimaryGuestId = DemoDemoGuestId;
+        reservation.ExternalReservationReference = DemoReservationReference;
+        reservation.ReservationSource = "Airbnb";
+        reservation.ConfirmationNumber = "DEMO-CONF-001";
+        reservation.CheckInDate = currentDate.AddDays(-1);
+        reservation.CheckOutDate = currentDate.AddDays(3);
+        reservation.Adults = 2;
+        reservation.Children = 0;
+        reservation.TotalGuestCount = 2;
+        reservation.Status = ReservationStatus.CheckedIn;
+        reservation.Currency = "KES";
+        reservation.BookingAmount = 5000.00m;
+        reservation.SpecialRequests = "Demo reservation for StayFlow AI testing";
+        reservation.IsActive = true;
+        reservation.IsDeleted = false;
+        reservation.DeletedAt = null;
+        reservation.DeletedBy = null;
+    }
+
+    private async Task EnsureDemoUserRoleAsync(Guid userId, Guid roleId, CancellationToken cancellationToken)
+    {
+        var exists = await dbContext.UserRoles
+            .AnyAsync(userRole => userRole.UserId == userId && userRole.RoleId == roleId, cancellationToken);
+
+        if (!exists)
+        {
+            dbContext.UserRoles.Add(new UserRole
+            {
+                UserId = userId,
+                RoleId = roleId
+            });
+        }
     }
 
     private async Task<Role> GetOrCreateDemoRoleAsync(CancellationToken cancellationToken)
@@ -125,6 +149,7 @@ public sealed class DevelopmentSeedService(
 
         if (existingRole != null)
         {
+            await EnsureRolePermissionsAsync(existingRole, cancellationToken);
             return existingRole;
         }
 
@@ -172,5 +197,39 @@ public sealed class DevelopmentSeedService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return role;
+    }
+
+    private async Task EnsureRolePermissionsAsync(Role role, CancellationToken cancellationToken)
+    {
+        var requiredPermissions = new[]
+        {
+            "auth.me",
+            "guests.read",
+            "reservations.read",
+            "ai.orchestrate"
+        };
+
+        foreach (var permissionName in requiredPermissions)
+        {
+            var permission = await dbContext.Permissions
+                .FirstOrDefaultAsync(p => p.Name == permissionName, cancellationToken);
+
+            if (permission is null)
+            {
+                permission = new Permission
+                {
+                    Id = Guid.NewGuid(),
+                    Name = permissionName
+                };
+                dbContext.Permissions.Add(permission);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            var hasPermission = role.RolePermissions.Any(rolePermission => rolePermission.PermissionId == permission.Id);
+            if (!hasPermission)
+            {
+                role.RolePermissions.Add(new RolePermission { PermissionId = permission.Id });
+            }
+        }
     }
 }
