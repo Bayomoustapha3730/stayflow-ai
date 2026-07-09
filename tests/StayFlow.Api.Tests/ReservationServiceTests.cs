@@ -617,6 +617,57 @@ public sealed class ReservationServiceTests
             return Task.FromResult(companyId == CompanyId && TenantGuestIds.Contains(guestId));
         }
 
+        public Task<Guest?> GetGuestAsync(Guid guestId, Guid companyId, CancellationToken cancellationToken)
+        {
+            Guest? guest = companyId == CompanyId && TenantGuestIds.Contains(guestId)
+                ? new Guest
+                {
+                    Id = guestId,
+                    CompanyId = companyId,
+                    FirstName = "Test",
+                    LastName = "Guest",
+                    IsActive = true
+                }
+                : null;
+
+            return Task.FromResult(guest);
+        }
+
+        public Task<Conversation?> GetConversationAsync(Guid conversationId, Guid companyId, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<Conversation?>(null);
+        }
+
+        public Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsForGuestAsync(
+            Guid companyId,
+            Guid guestId,
+            DateOnly currentDate,
+            DateOnly upcomingThroughDate,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyCollection<Reservation>>([]);
+        }
+
+        public Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsByReferenceAsync(
+            Guid companyId,
+            Guid guestId,
+            string normalizedReference,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyCollection<Reservation>>([]);
+        }
+
+        public Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsByPropertyNameAsync(
+            Guid companyId,
+            Guid guestId,
+            DateOnly currentDate,
+            DateOnly upcomingThroughDate,
+            string normalizedPropertyName,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyCollection<Reservation>>([]);
+        }
+
         public Task AddAsync(Reservation reservation, CancellationToken cancellationToken)
         {
             Reservations.Add(reservation);

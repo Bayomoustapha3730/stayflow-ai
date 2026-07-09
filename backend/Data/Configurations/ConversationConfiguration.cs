@@ -16,6 +16,7 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
         builder.Property(conversation => conversation.Channel).HasMaxLength(40).IsRequired();
         builder.Property(conversation => conversation.ExternalThreadId).HasMaxLength(160);
         builder.Property(conversation => conversation.Status).HasMaxLength(40).IsRequired();
+        builder.Property(conversation => conversation.ReservationContextResolutionMethod).HasMaxLength(80);
 
         builder.HasOne(conversation => conversation.Company)
             .WithMany(company => company.Conversations)
@@ -32,9 +33,15 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
             .HasForeignKey(conversation => conversation.GuestId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasOne(conversation => conversation.Reservation)
+            .WithMany(reservation => reservation.Conversations)
+            .HasForeignKey(conversation => conversation.ReservationId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.HasIndex(conversation => conversation.CompanyId);
         builder.HasIndex(conversation => conversation.PropertyId);
         builder.HasIndex(conversation => conversation.GuestId);
+        builder.HasIndex(conversation => conversation.ReservationId);
         builder.HasIndex(conversation => conversation.CreatedAt);
     }
 }

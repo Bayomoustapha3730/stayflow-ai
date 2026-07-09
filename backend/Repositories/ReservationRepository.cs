@@ -86,6 +86,62 @@ public sealed class ReservationRepository(ApplicationDbContext dbContext) : IRes
         return dbContext.Guests.AnyAsync(guest => guest.Id == guestId && guest.CompanyId == companyId && guest.IsActive, cancellationToken);
     }
 
+    public Task<Guest?> GetGuestAsync(Guid guestId, Guid companyId, CancellationToken cancellationToken)
+    {
+        return dbContext.Guests
+            .AsNoTracking()
+            .FirstOrDefaultAsync(guest => guest.Id == guestId && guest.CompanyId == companyId && guest.IsActive, cancellationToken);
+    }
+
+    public Task<Conversation?> GetConversationAsync(Guid conversationId, Guid companyId, CancellationToken cancellationToken)
+    {
+        return dbContext.Conversations
+            .Include(conversation => conversation.Reservation)
+            .ThenInclude(reservation => reservation!.Property)
+            .FirstOrDefaultAsync(conversation => conversation.Id == conversationId && conversation.CompanyId == companyId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsForGuestAsync(
+        Guid companyId,
+        Guid guestId,
+        DateOnly currentDate,
+        DateOnly upcomingThroughDate,
+        CancellationToken cancellationToken)
+    {
+        return await EligibleReservations(companyId, guestId, currentDate, upcomingThroughDate)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsByReferenceAsync(
+        Guid companyId,
+        Guid guestId,
+        string normalizedReference,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.Reservations
+            .Include(reservation => reservation.Property)
+            .Where(reservation => reservation.CompanyId == companyId && reservation.PrimaryGuestId == guestId)
+            .Where(reservation => reservation.Status != ReservationStatus.Cancelled && reservation.Status != ReservationStatus.NoShow)
+            .Where(reservation =>
+                (reservation.ExternalReservationReference != null && reservation.ExternalReservationReference.ToUpper() == normalizedReference)
+                || (reservation.ConfirmationNumber != null && reservation.ConfirmationNumber.ToUpper() == normalizedReference))
+            .OrderBy(reservation => reservation.CheckInDate)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsByPropertyNameAsync(
+        Guid companyId,
+        Guid guestId,
+        DateOnly currentDate,
+        DateOnly upcomingThroughDate,
+        string normalizedPropertyName,
+        CancellationToken cancellationToken)
+    {
+        return await EligibleReservations(companyId, guestId, currentDate, upcomingThroughDate)
+            .Where(reservation => EF.Functions.ILike(reservation.Property.Name, $"%{normalizedPropertyName}%"))
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task AddAsync(Reservation reservation, CancellationToken cancellationToken)
     {
         await dbContext.Reservations.AddAsync(reservation, cancellationToken);
@@ -99,5 +155,26 @@ public sealed class ReservationRepository(ApplicationDbContext dbContext) : IRes
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private IQueryable<Reservation> EligibleReservations(Guid companyId, Guid guestId, DateOnly currentDate, DateOnly upcomingThroughDate)
+    {
+        return dbContext.Reservations
+            .Include(reservation => reservation.Property)
+            .Where(reservation => reservation.CompanyId == companyId && reservation.PrimaryGuestId == guestId)
+            .Where(reservation => reservation.Status != ReservationStatus.Cancelled && reservation.Status != ReservationStatus.NoShow)
+            .Where(reservation =>
+                ((reservation.Status == ReservationStatus.ReadyForCheckIn
+                    || reservation.Status == ReservationStatus.CheckedIn
+                    || reservation.Status == ReservationStatus.ActiveStay
+                    || reservation.Status == ReservationStatus.CheckOutPending)
+                    && reservation.CheckInDate <= currentDate
+                    && reservation.CheckOutDate >= currentDate)
+                || ((reservation.Status == ReservationStatus.Confirmed
+                    || reservation.Status == ReservationStatus.PreArrival
+                    || reservation.Status == ReservationStatus.ReadyForCheckIn)
+                    && reservation.CheckInDate >= currentDate
+                    && reservation.CheckInDate <= upcomingThroughDate))
+            .OrderBy(reservation => reservation.CheckInDate);
     }
 }

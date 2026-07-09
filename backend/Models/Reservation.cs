@@ -26,4 +26,5 @@ public sealed class Reservation : AuditableEntity
     public Company Company { get; set; } = null!;
     public Property Property { get; set; } = null!;
     public Guest PrimaryGuest { get; set; } = null!;
+    public ICollection<Conversation> Conversations { get; set; } = [];
 }
