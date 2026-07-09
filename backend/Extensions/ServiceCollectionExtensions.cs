@@ -16,6 +16,10 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.MaxHouseRules >= 0 && options.MaxHouseRules <= 50, "AI context house rule limit must be between 0 and 50.")
             .Validate(options => options.MaxEmergencyContacts >= 0 && options.MaxEmergencyContacts <= 50, "AI context emergency contact limit must be between 0 and 50.")
             .ValidateOnStart();
+        services.AddOptions<Services.AIPromptOptions>()
+            .Bind(configuration.GetSection(Services.AIPromptOptions.SectionName))
+            .Validate(options => options.MaxResponseCharacters >= 200 && options.MaxResponseCharacters <= 4000, "AI prompt response character limit must be between 200 and 4000.")
+            .ValidateOnStart();
         services.AddScoped<Services.ICurrentTenantContext, Services.CurrentTenantContext>();
         services.AddScoped<Repositories.ICompanyRepository, Repositories.CompanyRepository>();
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
@@ -30,6 +34,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();
         services.AddSingleton<Services.IQuestionRelevanceClassifier, Services.KeywordQuestionRelevanceClassifier>();
         services.AddScoped<Services.IAIContextBuilder, Services.AIContextBuilder>();
+        services.AddSingleton<Services.IAIPromptBuilder, Services.AIPromptBuilder>();
+        services.AddScoped<Services.IAIResponseValidator, Services.AIResponseValidator>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();
         services.AddScoped<Services.IPasswordHasher, Services.Pbkdf2PasswordHasher>();
         services.AddScoped<Services.IJwtTokenService, Services.JwtTokenService>();
