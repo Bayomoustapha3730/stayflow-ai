@@ -20,6 +20,10 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(Services.AIPromptOptions.SectionName))
             .Validate(options => options.MaxResponseCharacters >= 200 && options.MaxResponseCharacters <= 4000, "AI prompt response character limit must be between 200 and 4000.")
             .ValidateOnStart();
+        services.AddOptions<Services.AIProviderOptions>()
+            .Bind(configuration.GetSection(Services.AIProviderOptions.SectionName))
+            .Validate(options => options.Provider.Equals("Development", StringComparison.OrdinalIgnoreCase), "Only the Development AI provider is supported in this build.")
+            .ValidateOnStart();
         services.AddScoped<Services.ICurrentTenantContext, Services.CurrentTenantContext>();
         services.AddScoped<Repositories.ICompanyRepository, Repositories.CompanyRepository>();
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
@@ -36,6 +40,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IAIContextBuilder, Services.AIContextBuilder>();
         services.AddSingleton<Services.IAIPromptBuilder, Services.AIPromptBuilder>();
         services.AddScoped<Services.IAIResponseValidator, Services.AIResponseValidator>();
+        services.AddScoped<Services.DevelopmentAIProvider>();
+        services.AddScoped<Services.IAIProvider, Services.DevelopmentAIProvider>();
+        services.AddScoped<Services.IAIOrchestrator, Services.AIOrchestrator>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();
         services.AddScoped<Services.IPasswordHasher, Services.Pbkdf2PasswordHasher>();
         services.AddScoped<Services.IJwtTokenService, Services.JwtTokenService>();

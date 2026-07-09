@@ -1,0 +1,252 @@
+using System.Text.Json;
+using StayFlow.Api.DTOs.AIContext;
+using StayFlow.Api.DTOs.AIPrompt;
+using StayFlow.Api.DTOs.AIProvider;
+using StayFlow.Api.DTOs.AIResponseValidation;
+using StayFlow.Api.DTOs.AIOrchestration;
+using StayFlow.Api.Models;
+using StayFlow.Api.Repositories;
+
+namespace StayFlow.Api.Services;
+
+public sealed class AIOrchestrator(
+    IAIContextBuilder aiContextBuilder,
+    IAIPromptBuilder aiPromptBuilder,
+    IAIProvider aiProvider,
+    IAIResponseValidator aiResponseValidator,
+    IAIContextRepository aiContextRepository,
+    ICurrentTenantContext currentTenantContext) : IAIOrchestrator
+{
+    public async Task<AIOrchestrationResult> ProcessAsync(AIOrchestrationRequest request, CancellationToken cancellationToken)
+    {
+        AIContextBuildResult? contextResult = null;
+        AIProviderResult? providerResult = null;
+        AIResponseValidationResult? validationResult = null;
+
+        try
+        {
+            contextResult = await aiContextBuilder.BuildAsync(new AIContextRequest
+            {
+                GuestQuestion = request.GuestMessage,
+                GuestId = request.GuestId,
+                ConversationId = request.ConversationId,
+                Channel = request.Channel,
+                ChannelIdentity = request.ChannelIdentity,
+                ExplicitReservationReference = request.ExplicitReservationReference,
+                ExplicitPropertyName = request.ExplicitPropertyName,
+                CurrentTimestamp = request.CurrentTimestamp
+            }, cancellationToken);
+
+            if (contextResult.Outcome == AIContextBuildOutcome.ClarificationRequired)
+            {
+                var result = new AIOrchestrationResult
+                {
+                    Outcome = AIOrchestrationOutcome.ClarificationRequired,
+                    GuestSafeMessage = AIOrchestrationSafeMessages.ClarificationRequired,
+                    CandidateLabels = contextResult.CandidateLabels,
+                    QuestionCategories = contextResult.QuestionCategories
+                };
+                await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
+                return result;
+            }
+
+            if (contextResult.Outcome == AIContextBuildOutcome.EscalationRequired)
+            {
+                var result = new AIOrchestrationResult
+                {
+                    Outcome = AIOrchestrationOutcome.EscalationRequired,
+                    GuestSafeMessage = AIOrchestrationSafeMessages.HostAssistanceRequired,
+                    QuestionCategories = contextResult.QuestionCategories
+                };
+                await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
+                return result;
+            }
+
+            if (contextResult.Outcome == AIContextBuildOutcome.NoEligibleReservation && !CanUseGeneralContext(contextResult))
+            {
+                var result = new AIOrchestrationResult
+                {
+                    Outcome = AIOrchestrationOutcome.NoEligibleReservation,
+                    GuestSafeMessage = AIOrchestrationSafeMessages.NoEligibleReservation,
+                    QuestionCategories = contextResult.QuestionCategories
+                };
+                await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
+                return result;
+            }
+
+            if (contextResult.Context is null)
+            {
+                var result = new AIOrchestrationResult
+                {
+                    Outcome = AIOrchestrationOutcome.EscalationRequired,
+                    GuestSafeMessage = AIOrchestrationSafeMessages.HostAssistanceRequired,
+                    QuestionCategories = contextResult.QuestionCategories
+                };
+                await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
+                return result;
+            }
+
+            var promptPackage = aiPromptBuilder.Build(new AIPromptBuildRequest
+            {
+                GuestQuestion = request.GuestMessage,
+                AIContext = contextResult.Context,
+                QuestionCategories = contextResult.QuestionCategories
+            });
+
+            providerResult = await aiProvider.GenerateAsync(new AIProviderRequest
+            {
+                PromptPackage = promptPackage,
+                RenderedMessages = promptPackage.RenderedMessages,
+                ResponseConstraints = promptPackage.ResponseConstraints,
+                QuestionCategories = contextResult.QuestionCategories,
+                CorrelationId = currentTenantContext.CorrelationId
+            }, cancellationToken);
+
+            if (providerResult.Outcome == AIProviderOutcome.Unavailable)
+            {
+                var result = ProviderUnavailable(providerResult, contextResult.QuestionCategories);
+                await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
+                return result;
+            }
+
+            if (providerResult.Outcome == AIProviderOutcome.Failed)
+            {
+                var result = ProviderUnavailable(providerResult, contextResult.QuestionCategories);
+                await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
+                return result;
+            }
+
+            validationResult = aiResponseValidator.Validate(new AIResponseValidationRequest
+            {
+                ModelResponse = providerResult.ResponseText,
+                AIContext = contextResult.Context,
+                QuestionCategories = contextResult.QuestionCategories,
+                PromptPackage = promptPackage,
+                ProtectedIdentifiers = new AIProtectedIdentifiers
+                {
+                    GuestId = request.GuestId
+                }
+            });
+
+            var mapped = MapValidationResult(providerResult, validationResult, contextResult.QuestionCategories);
+            await AuditAsync(mapped, contextResult, providerResult, validationResult, cancellationToken);
+            return mapped;
+        }
+        catch
+        {
+            var result = new AIOrchestrationResult
+            {
+                Outcome = AIOrchestrationOutcome.ProviderUnavailable,
+                GuestSafeMessage = AIOrchestrationSafeMessages.ProviderUnavailable,
+                QuestionCategories = contextResult?.QuestionCategories ?? []
+            };
+            await AuditAsync(result, contextResult, providerResult, validationResult, cancellationToken);
+            return result;
+        }
+    }
+
+    private static AIOrchestrationResult MapValidationResult(
+        AIProviderResult providerResult,
+        AIResponseValidationResult validationResult,
+        IReadOnlyCollection<QuestionContextCategory> categories)
+    {
+        return validationResult.Outcome switch
+        {
+            AIResponseValidationOutcome.Valid => new AIOrchestrationResult
+            {
+                Outcome = AIOrchestrationOutcome.Responded,
+                GuestSafeMessage = providerResult.ResponseText ?? AIOrchestrationSafeMessages.GeneralResponseUnavailable,
+                QuestionCategories = categories,
+                ProviderMetadata = Metadata(providerResult)
+            },
+            AIResponseValidationOutcome.Blocked => new AIOrchestrationResult
+            {
+                Outcome = AIOrchestrationOutcome.Blocked,
+                GuestSafeMessage = validationResult.SafeMessage ?? AIResponseSafeMessages.GeneralValidationFailure,
+                QuestionCategories = categories,
+                ValidationViolations = validationResult.Violations,
+                ProviderMetadata = Metadata(providerResult)
+            },
+            AIResponseValidationOutcome.EscalationRequired => new AIOrchestrationResult
+            {
+                Outcome = AIOrchestrationOutcome.EscalationRequired,
+                GuestSafeMessage = validationResult.SafeMessage ?? AIOrchestrationSafeMessages.HostAssistanceRequired,
+                QuestionCategories = categories,
+                ValidationViolations = validationResult.Violations,
+                ProviderMetadata = Metadata(providerResult)
+            },
+            _ => new AIOrchestrationResult
+            {
+                Outcome = AIOrchestrationOutcome.Blocked,
+                GuestSafeMessage = AIResponseSafeMessages.GeneralValidationFailure,
+                QuestionCategories = categories,
+                ProviderMetadata = Metadata(providerResult)
+            }
+        };
+    }
+
+    private static AIOrchestrationResult ProviderUnavailable(AIProviderResult providerResult, IReadOnlyCollection<QuestionContextCategory> categories)
+    {
+        return new AIOrchestrationResult
+        {
+            Outcome = AIOrchestrationOutcome.ProviderUnavailable,
+            GuestSafeMessage = AIOrchestrationSafeMessages.ProviderUnavailable,
+            QuestionCategories = categories,
+            ProviderMetadata = Metadata(providerResult)
+        };
+    }
+
+    private static AIProviderMetadata Metadata(AIProviderResult providerResult)
+    {
+        return new AIProviderMetadata
+        {
+            ProviderName = providerResult.ProviderName,
+            ModelName = providerResult.ModelName,
+            RequestId = providerResult.RequestId,
+            DurationMs = providerResult.DurationMs
+        };
+    }
+
+    private static bool CanUseGeneralContext(AIContextBuildResult contextResult)
+    {
+        return contextResult.Context is not null
+            && !contextResult.Context.Safety.RequiresPropertyAccessAuthorization
+            && contextResult.Context.Reservation is null
+            && contextResult.Context.Property is null;
+    }
+
+    private async Task AuditAsync(
+        AIOrchestrationResult result,
+        AIContextBuildResult? contextResult,
+        AIProviderResult? providerResult,
+        AIResponseValidationResult? validationResult,
+        CancellationToken cancellationToken)
+    {
+        if (result.Outcome == AIOrchestrationOutcome.Responded)
+        {
+            return;
+        }
+
+        await aiContextRepository.AddAuditLogAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            EntityName = "AIOrchestration",
+            EntityId = Guid.Empty,
+            Action = result.Outcome.ToString(),
+            Details = JsonSerializer.Serialize(new
+            {
+                currentTenantContext.CorrelationId,
+                OrchestrationOutcome = result.Outcome.ToString(),
+                ContextBuildOutcome = contextResult?.Outcome.ToString(),
+                QuestionCategories = result.QuestionCategories.Select(category => category.ToString()).ToList(),
+                ProviderName = providerResult?.ProviderName,
+                ProviderModel = providerResult?.ModelName,
+                ProviderDurationMs = providerResult?.DurationMs,
+                ValidationOutcome = validationResult?.Outcome.ToString(),
+                ValidationViolationCodes = validationResult?.Violations.Select(violation => violation.ToString()).ToList() ?? []
+            }),
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+        await aiContextRepository.SaveChangesAsync(cancellationToken);
+    }
+}
