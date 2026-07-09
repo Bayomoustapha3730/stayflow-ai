@@ -15,7 +15,8 @@ public sealed class AIOrchestrator(
     IAIProvider aiProvider,
     IAIResponseValidator aiResponseValidator,
     IAIContextRepository aiContextRepository,
-    ICurrentTenantContext currentTenantContext) : IAIOrchestrator
+    ICurrentTenantContext currentTenantContext,
+    ILogger<AIOrchestrator> logger) : IAIOrchestrator
 {
     public async Task<AIOrchestrationResult> ProcessAsync(AIOrchestrationRequest request, CancellationToken cancellationToken)
     {
@@ -25,6 +26,13 @@ public sealed class AIOrchestrator(
 
         try
         {
+            logger.LogInformation(
+                "AI orchestration request accepted. CorrelationId={CorrelationId} HasGuestId={HasGuestId} HasConversationId={HasConversationId} Channel={Channel}",
+                currentTenantContext.CorrelationId,
+                request.GuestId.HasValue,
+                request.ConversationId.HasValue,
+                request.Channel);
+
             contextResult = await aiContextBuilder.BuildAsync(new AIContextRequest
             {
                 GuestQuestion = request.GuestMessage,
@@ -37,8 +45,20 @@ public sealed class AIOrchestrator(
                 CurrentTimestamp = request.CurrentTimestamp
             }, cancellationToken);
 
+            logger.LogInformation(
+                "AI orchestration context built. CorrelationId={CorrelationId} Outcome={Outcome} Categories={Categories} CandidateCount={CandidateCount} EscalationReason={EscalationReason}",
+                currentTenantContext.CorrelationId,
+                contextResult.Outcome,
+                contextResult.QuestionCategories.Select(category => category.ToString()).ToArray(),
+                contextResult.CandidateLabels.Count,
+                contextResult.EscalationReason);
+
             if (contextResult.Outcome == AIContextBuildOutcome.ClarificationRequired)
             {
+                logger.LogInformation(
+                    "AI orchestration candidate labels generated. CorrelationId={CorrelationId} CandidateCount={CandidateCount}",
+                    currentTenantContext.CorrelationId,
+                    contextResult.CandidateLabels.Count);
                 var result = new AIOrchestrationResult
                 {
                     Outcome = AIOrchestrationOutcome.ClarificationRequired,
@@ -52,6 +72,10 @@ public sealed class AIOrchestrator(
 
             if (contextResult.Outcome == AIContextBuildOutcome.EscalationRequired)
             {
+                logger.LogWarning(
+                    "AI orchestration escalated before provider invocation. CorrelationId={CorrelationId} EscalationReason={EscalationReason}",
+                    currentTenantContext.CorrelationId,
+                    contextResult.EscalationReason);
                 var result = new AIOrchestrationResult
                 {
                     Outcome = AIOrchestrationOutcome.EscalationRequired,
@@ -76,6 +100,11 @@ public sealed class AIOrchestrator(
 
             if (contextResult.Context is null)
             {
+                logger.LogWarning(
+                    "AI orchestration escalated because context was missing. CorrelationId={CorrelationId} ContextBuildOutcome={ContextBuildOutcome} EscalationReason={EscalationReason}",
+                    currentTenantContext.CorrelationId,
+                    contextResult.Outcome,
+                    contextResult.EscalationReason);
                 var result = new AIOrchestrationResult
                 {
                     Outcome = AIOrchestrationOutcome.EscalationRequired,
@@ -93,6 +122,14 @@ public sealed class AIOrchestrator(
                 QuestionCategories = contextResult.QuestionCategories
             });
 
+            logger.LogInformation(
+                "AI provider selected. CorrelationId={CorrelationId} ProviderType={ProviderType}",
+                currentTenantContext.CorrelationId,
+                aiProvider.GetType().Name);
+            logger.LogInformation(
+                "AI provider invocation started. CorrelationId={CorrelationId} MessageCount={MessageCount}",
+                currentTenantContext.CorrelationId,
+                promptPackage.RenderedMessages.Count);
             providerResult = await aiProvider.GenerateAsync(new AIProviderRequest
             {
                 PromptPackage = promptPackage,
@@ -101,6 +138,14 @@ public sealed class AIOrchestrator(
                 QuestionCategories = contextResult.QuestionCategories,
                 CorrelationId = currentTenantContext.CorrelationId
             }, cancellationToken);
+
+            logger.LogInformation(
+                "AI provider response received. CorrelationId={CorrelationId} Outcome={Outcome} ProviderName={ProviderName} ModelName={ModelName} FailureCategory={FailureCategory}",
+                currentTenantContext.CorrelationId,
+                providerResult.Outcome,
+                providerResult.ProviderName,
+                providerResult.ModelName,
+                providerResult.FailureCategory);
 
             if (providerResult.Outcome == AIProviderOutcome.Unavailable)
             {
@@ -131,12 +176,24 @@ public sealed class AIOrchestrator(
                 }
             });
 
+            logger.LogInformation(
+                "AI response validation completed. CorrelationId={CorrelationId} Outcome={Outcome} Violations={Violations}",
+                currentTenantContext.CorrelationId,
+                validationResult.Outcome,
+                validationResult.Violations.Select(violation => violation.ToString()).ToArray());
+
             var mapped = MapValidationResult(providerResult, validationResult, contextResult.QuestionCategories);
             await AuditAsync(mapped, contextResult, providerResult, validationResult, cancellationToken);
             return mapped;
         }
-        catch
+        catch (Exception exception)
         {
+            logger.LogError(
+                exception,
+                "AI orchestration failed unexpectedly. CorrelationId={CorrelationId} ContextBuildOutcome={ContextBuildOutcome} ProviderOutcome={ProviderOutcome}",
+                currentTenantContext.CorrelationId,
+                contextResult?.Outcome,
+                providerResult?.Outcome);
             var result = new AIOrchestrationResult
             {
                 Outcome = AIOrchestrationOutcome.ProviderUnavailable,
@@ -241,6 +298,7 @@ public sealed class AIOrchestrator(
                 currentTenantContext.CorrelationId,
                 OrchestrationOutcome = result.Outcome.ToString(),
                 ContextBuildOutcome = contextResult?.Outcome.ToString(),
+                EscalationReason = contextResult?.EscalationReason,
                 QuestionCategories = result.QuestionCategories.Select(category => category.ToString()).ToList(),
                 ProviderName = providerResult?.ProviderName,
                 ProviderModel = providerResult?.ModelName,

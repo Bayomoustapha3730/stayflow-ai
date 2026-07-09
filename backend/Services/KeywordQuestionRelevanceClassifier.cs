@@ -6,7 +6,7 @@ public sealed class KeywordQuestionRelevanceClassifier : IQuestionRelevanceClass
 {
     private static readonly IReadOnlyDictionary<QuestionContextCategory, string[]> Keywords = new Dictionary<QuestionContextCategory, string[]>
     {
-        [QuestionContextCategory.WiFi] = ["wifi", "wi-fi", "internet", "password", "network"],
+        [QuestionContextCategory.WiFi] = ["wifi", "wi fi", "wi-fi", "internet", "password", "network"],
         [QuestionContextCategory.CheckIn] = ["check in", "check-in", "arrival", "arrive", "early check"],
         [QuestionContextCategory.CheckOut] = ["check out", "check-out", "checkout", "leave", "departure", "late checkout"],
         [QuestionContextCategory.Parking] = ["parking", "park", "garage", "car"],

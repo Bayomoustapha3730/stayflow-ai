@@ -12,11 +12,21 @@ public sealed class AIContextBuilder(
     IReservationContextResolver reservationContextResolver,
     IQuestionRelevanceClassifier questionRelevanceClassifier,
     ICurrentTenantContext currentTenantContext,
-    IOptions<AIContextOptions> options) : IAIContextBuilder
+    IOptions<AIContextOptions> options,
+    ILogger<AIContextBuilder> logger) : IAIContextBuilder
 {
     public async Task<AIContextBuildResult> BuildAsync(AIContextRequest request, CancellationToken cancellationToken)
     {
         var categories = questionRelevanceClassifier.Classify(request.GuestQuestion);
+        logger.LogInformation(
+            "AI context request accepted. CorrelationId={CorrelationId} HasGuestId={HasGuestId} HasConversationId={HasConversationId}",
+            currentTenantContext.CorrelationId,
+            request.GuestId.HasValue,
+            request.ConversationId.HasValue);
+        logger.LogInformation(
+            "AI question categories classified. CorrelationId={CorrelationId} Categories={Categories}",
+            currentTenantContext.CorrelationId,
+            categories.Select(category => category.ToString()).ToArray());
 
         if (!TryGetCompanyId(out var companyId, out var tenantError))
         {
@@ -41,8 +51,19 @@ public sealed class AIContextBuilder(
             ChannelIdentity = request.ChannelIdentity,
             ExplicitReservationReference = request.ExplicitReservationReference,
             ExplicitPropertyName = request.ExplicitPropertyName,
+            QuestionCategories = categories,
             CurrentTimestamp = request.CurrentTimestamp
         }, cancellationToken);
+
+        logger.LogInformation(
+            "AI reservation context resolved. CorrelationId={CorrelationId} Outcome={Outcome} GuestResolved={GuestResolved} ReservationResolved={ReservationResolved} PropertyResolved={PropertyResolved} CandidateCount={CandidateCount} EscalationReason={EscalationReason}",
+            currentTenantContext.CorrelationId,
+            reservationContext.Outcome,
+            reservationContext.GuestId.HasValue,
+            reservationContext.ReservationId.HasValue,
+            reservationContext.PropertyId.HasValue,
+            reservationContext.CandidateLabels.Count,
+            reservationContext.EscalationReason);
 
         var result = reservationContext.Outcome switch
         {
@@ -62,6 +83,13 @@ public sealed class AIContextBuilder(
 
         var knowledgeCount = result.Context?.Knowledge.Articles.Count ?? 0;
         var recommendationCount = result.Context?.Knowledge.Recommendations.Count ?? 0;
+        logger.LogInformation(
+            "AI context build completed. CorrelationId={CorrelationId} Outcome={Outcome} KnowledgeArticleCount={KnowledgeArticleCount} RecommendationCount={RecommendationCount} EscalationReason={EscalationReason}",
+            currentTenantContext.CorrelationId,
+            result.Outcome,
+            knowledgeCount,
+            recommendationCount,
+            result.EscalationReason);
         await AuditAsync(companyId, reservationContext.GuestId, reservationContext.ReservationId, reservationContext.Outcome.ToString(), categories, result, knowledgeCount, recommendationCount, cancellationToken);
         return result;
     }
@@ -398,7 +426,8 @@ public sealed class AIContextBuilder(
                 QuestionCategories = categories.Select(category => category.ToString()).ToList(),
                 KnowledgeArticleCount = knowledgeArticleCount,
                 RecommendationCount = recommendationCount,
-                ContextBuildOutcome = result.Outcome.ToString()
+                ContextBuildOutcome = result.Outcome.ToString(),
+                result.EscalationReason
             }),
             CreatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);

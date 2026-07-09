@@ -112,6 +112,25 @@ public sealed class ReservationRepository(ApplicationDbContext dbContext) : IRes
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyCollection<Reservation>> GetFutureReservationsForGuestAsync(
+        Guid companyId,
+        Guid guestId,
+        DateOnly currentDate,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.Reservations
+            .Include(reservation => reservation.Property)
+            .Where(reservation => reservation.CompanyId == companyId && reservation.PrimaryGuestId == guestId)
+            .Where(reservation => reservation.IsActive && !reservation.IsDeleted)
+            .Where(reservation =>
+                reservation.Status == ReservationStatus.Confirmed
+                || reservation.Status == ReservationStatus.PreArrival
+                || reservation.Status == ReservationStatus.ReadyForCheckIn)
+            .Where(reservation => reservation.CheckInDate >= currentDate)
+            .OrderBy(reservation => reservation.CheckInDate)
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsByReferenceAsync(
         Guid companyId,
         Guid guestId,
@@ -121,6 +140,7 @@ public sealed class ReservationRepository(ApplicationDbContext dbContext) : IRes
         return await dbContext.Reservations
             .Include(reservation => reservation.Property)
             .Where(reservation => reservation.CompanyId == companyId && reservation.PrimaryGuestId == guestId)
+            .Where(reservation => reservation.IsActive && !reservation.IsDeleted)
             .Where(reservation => reservation.Status != ReservationStatus.Cancelled && reservation.Status != ReservationStatus.NoShow)
             .Where(reservation =>
                 (reservation.ExternalReservationReference != null && reservation.ExternalReservationReference.ToUpper() == normalizedReference)
@@ -162,6 +182,7 @@ public sealed class ReservationRepository(ApplicationDbContext dbContext) : IRes
         return dbContext.Reservations
             .Include(reservation => reservation.Property)
             .Where(reservation => reservation.CompanyId == companyId && reservation.PrimaryGuestId == guestId)
+            .Where(reservation => reservation.IsActive && !reservation.IsDeleted)
             .Where(reservation => reservation.Status != ReservationStatus.Cancelled && reservation.Status != ReservationStatus.NoShow)
             .Where(reservation =>
                 ((reservation.Status == ReservationStatus.ReadyForCheckIn

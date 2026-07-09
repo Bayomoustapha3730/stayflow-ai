@@ -6,5 +6,6 @@ public enum ReservationContextResolutionMethod
     ExplicitReservationReference,
     ExplicitPropertyName,
     SingleActiveReservation,
-    SingleUpcomingReservation
+    SingleUpcomingReservation,
+    SingleFutureReservationForDateQuestion
 }

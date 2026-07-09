@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
+using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.DTOs.Reservations;
@@ -85,6 +87,45 @@ public sealed class ReservationContextResolverTests
 
         Assert.Equal(ReservationContextResolutionOutcome.NoEligibleReservation, result.Outcome);
         Assert.Null(result.ReservationId);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithSingleFutureReservationOutsideWindowForDateQuestion_Resolves()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = repository.NewReservation(status: ReservationStatus.Confirmed, checkInDate: CurrentDate.AddDays(30), checkOutDate: CurrentDate.AddDays(34));
+        repository.Reservations.Add(reservation);
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            QuestionCategories = [QuestionContextCategory.CheckIn, QuestionContextCategory.CheckOut]
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.Resolved, result.Outcome);
+        Assert.Equal(ReservationContextResolutionMethod.SingleFutureReservationForDateQuestion, result.ResolutionMethod);
+        Assert.Equal(reservation.Id, result.ReservationId);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithMultipleFutureReservationsForDateQuestion_ReturnsClarification()
+    {
+        var repository = new FakeReservationRepository();
+        repository.Reservations.Add(repository.NewReservation(property: repository.NewProperty(name: "Future A"), status: ReservationStatus.Confirmed, checkInDate: CurrentDate.AddDays(30), checkOutDate: CurrentDate.AddDays(34)));
+        repository.Reservations.Add(repository.NewReservation(property: repository.NewProperty(name: "Future B"), status: ReservationStatus.Confirmed, checkInDate: CurrentDate.AddDays(45), checkOutDate: CurrentDate.AddDays(48)));
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            QuestionCategories = [QuestionContextCategory.CheckIn]
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.ClarificationRequired, result.Outcome);
+        Assert.Equal(2, result.CandidateLabels.Count);
     }
 
     [Fact]
@@ -316,7 +357,8 @@ public sealed class ReservationContextResolverTests
         return new ReservationContextResolver(
             repository,
             currentTenantContext ?? new FakeCurrentTenantContext(repository.CompanyId),
-            Options.Create(new ReservationContextOptions { PreArrivalWindowDays = 7 }));
+            Options.Create(new ReservationContextOptions { PreArrivalWindowDays = 7 }),
+            NullLogger<ReservationContextResolver>.Instance);
     }
 
     private sealed class FakeCurrentTenantContext(
@@ -403,6 +445,17 @@ public sealed class ReservationContextResolverTests
         {
             CandidateQueryCompanyIds.Add(companyId);
             return Task.FromResult<IReadOnlyCollection<Reservation>>(Eligible(companyId, guestId, currentDate, upcomingThroughDate).ToList());
+        }
+
+        public Task<IReadOnlyCollection<Reservation>> GetFutureReservationsForGuestAsync(Guid companyId, Guid guestId, DateOnly currentDate, CancellationToken cancellationToken)
+        {
+            CandidateQueryCompanyIds.Add(companyId);
+            return Task.FromResult<IReadOnlyCollection<Reservation>>(Reservations
+                .Where(reservation => reservation.CompanyId == companyId && reservation.PrimaryGuestId == guestId && reservation.IsActive && !reservation.IsDeleted)
+                .Where(reservation => reservation.Status is ReservationStatus.Confirmed or ReservationStatus.PreArrival or ReservationStatus.ReadyForCheckIn)
+                .Where(reservation => reservation.CheckInDate >= currentDate)
+                .OrderBy(reservation => reservation.CheckInDate)
+                .ToList());
         }
 
         public Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsByReferenceAsync(Guid companyId, Guid guestId, string normalizedReference, CancellationToken cancellationToken)

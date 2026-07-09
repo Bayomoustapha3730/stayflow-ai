@@ -648,6 +648,15 @@ public sealed class ReservationServiceTests
             return Task.FromResult<IReadOnlyCollection<Reservation>>([]);
         }
 
+        public Task<IReadOnlyCollection<Reservation>> GetFutureReservationsForGuestAsync(
+            Guid companyId,
+            Guid guestId,
+            DateOnly currentDate,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyCollection<Reservation>>([]);
+        }
+
         public Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsByReferenceAsync(
             Guid companyId,
             Guid guestId,

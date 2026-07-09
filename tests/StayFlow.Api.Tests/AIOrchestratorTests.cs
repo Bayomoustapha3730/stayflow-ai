@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.AIPrompt;
 using StayFlow.Api.DTOs.AIProvider;
@@ -37,6 +38,36 @@ public sealed class AIOrchestratorTests
         Assert.Equal(AIOrchestrationOutcome.Responded, result.Outcome);
         Assert.Equal("Safe response", result.GuestSafeMessage);
         Assert.Equal("Fake", result.ProviderMetadata!.ProviderName);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ReservationContextQuestionSuccessInvokesProvider()
+    {
+        var fixture = new Fixture();
+        fixture.ContextBuilder.Result = Fixture.ReadyContext([QuestionContextCategory.CheckIn, QuestionContextCategory.CheckOut]);
+        fixture.Provider.Result = AIProviderResult.Success("Your check-in date is 2026-08-01 and check-out date is 2026-08-04.", "Fake", "fake-model", "req-1", 10);
+
+        var result = await fixture.ProcessAsync("What are my check-in and check-out dates?", Guid.NewGuid());
+
+        Assert.Equal(AIOrchestrationOutcome.Responded, result.Outcome);
+        Assert.True(fixture.Provider.WasCalled);
+        Assert.NotNull(result.ProviderMetadata);
+        Assert.Contains("check-in date", result.GuestSafeMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_MissingPropertyKnowledgeUsesProviderFallback()
+    {
+        var fixture = new Fixture();
+        fixture.ContextBuilder.Result = Fixture.ReadyContext([QuestionContextCategory.WiFi]);
+        fixture.Provider.Result = AIProviderResult.Success("I do not have approved Wi-Fi details available yet. Please contact the host.", "Fake", "fake-model", "req-1", 10);
+
+        var result = await fixture.ProcessAsync("What is the Wi-Fi information?", Guid.NewGuid());
+
+        Assert.Equal(AIOrchestrationOutcome.Responded, result.Outcome);
+        Assert.True(fixture.Provider.WasCalled);
+        Assert.NotNull(result.ProviderMetadata);
+        Assert.Contains("do not have approved Wi-Fi details", result.GuestSafeMessage);
     }
 
     [Fact]
@@ -166,6 +197,26 @@ public sealed class AIOrchestratorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_ProviderFailureFallbackIncludesProviderMetadata()
+    {
+        var fixture = new Fixture();
+        fixture.Provider.Result = new AIProviderResult
+        {
+            Outcome = AIProviderOutcome.Unavailable,
+            ProviderName = "OpenAI",
+            ModelName = "gpt-test",
+            FailureCategory = OpenAIProviderFailureCategories.RateLimited,
+            DurationMs = 25
+        };
+
+        var result = await fixture.ProcessAsync("What are my check-in and check-out dates?", Guid.NewGuid());
+
+        Assert.Equal(AIOrchestrationOutcome.ProviderUnavailable, result.Outcome);
+        Assert.NotNull(result.ProviderMetadata);
+        Assert.Equal("OpenAI", result.ProviderMetadata.ProviderName);
+    }
+
+    [Fact]
     public async Task ProcessAsync_ProviderFailureReturnsSafeFallback()
     {
         var fixture = new Fixture();
@@ -216,6 +267,23 @@ public sealed class AIOrchestratorTests
         var result = await fixture.ProcessAsync();
 
         Assert.Equal(AIOrchestrationOutcome.EscalationRequired, result.Outcome);
+        Assert.False(fixture.Provider.WasCalled);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_EscalationReasonIsLogged()
+    {
+        var fixture = new Fixture();
+        fixture.ContextBuilder.Result = new AIContextBuildResult
+        {
+            Outcome = AIContextBuildOutcome.EscalationRequired,
+            QuestionCategories = [QuestionContextCategory.CheckIn],
+            EscalationReason = "ResolvedContextValidationFailed"
+        };
+
+        await fixture.ProcessAsync("What are my check-in and check-out dates?", Guid.NewGuid());
+
+        Assert.Contains(fixture.Logger.Messages, message => message.Contains("ResolvedContextValidationFailed", StringComparison.OrdinalIgnoreCase));
         Assert.False(fixture.Provider.WasCalled);
     }
 
@@ -427,7 +495,8 @@ public sealed class AIOrchestratorTests
                 Provider,
                 Validator,
                 Repository,
-                new FakeCurrentTenantContext());
+                new FakeCurrentTenantContext(),
+                Logger);
         }
 
         public FakeAIContextRepository Repository { get; }
@@ -435,6 +504,7 @@ public sealed class AIOrchestratorTests
         public FakePromptBuilder PromptBuilder { get; }
         public FakeProvider Provider { get; }
         public CapturingValidator Validator { get; }
+        public CapturingLogger<AIOrchestrator> Logger { get; } = new();
         private AIOrchestrator Orchestrator { get; }
 
         public Task<AIOrchestrationResult> ProcessAsync(string message = "What is the wifi?", Guid? guestId = null)
@@ -580,5 +650,23 @@ public sealed class AIOrchestratorTests
         public Guid? UserId { get; } = Guid.NewGuid();
         public string? CorrelationId { get; } = "orchestration-test";
         public bool IsAuthenticated { get; } = true;
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+        }
     }
 }

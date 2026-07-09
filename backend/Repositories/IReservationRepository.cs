@@ -14,6 +14,7 @@ public interface IReservationRepository
     Task<Guest?> GetGuestAsync(Guid guestId, Guid companyId, CancellationToken cancellationToken);
     Task<Conversation?> GetConversationAsync(Guid conversationId, Guid companyId, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsForGuestAsync(Guid companyId, Guid guestId, DateOnly currentDate, DateOnly upcomingThroughDate, CancellationToken cancellationToken);
+    Task<IReadOnlyCollection<Reservation>> GetFutureReservationsForGuestAsync(Guid companyId, Guid guestId, DateOnly currentDate, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsByReferenceAsync(Guid companyId, Guid guestId, string normalizedReference, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsByPropertyNameAsync(Guid companyId, Guid guestId, DateOnly currentDate, DateOnly upcomingThroughDate, string normalizedPropertyName, CancellationToken cancellationToken);
     Task AddAsync(Reservation reservation, CancellationToken cancellationToken);

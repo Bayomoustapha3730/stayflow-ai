@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
 using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
@@ -432,7 +433,8 @@ public sealed class AIContextBuilderTests
                 Resolver,
                 new KeywordQuestionRelevanceClassifier(),
                 new FakeCurrentTenantContext(CompanyId),
-                Options.Create(options ?? new AIContextOptions()));
+                Options.Create(options ?? new AIContextOptions()),
+                NullLogger<AIContextBuilder>.Instance);
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();

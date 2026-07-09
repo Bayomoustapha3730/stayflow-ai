@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
@@ -9,10 +10,18 @@ namespace StayFlow.Api.Services;
 public sealed class ReservationContextResolver(
     IReservationRepository reservationRepository,
     ICurrentTenantContext currentTenantContext,
-    IOptions<ReservationContextOptions> options) : IReservationContextResolver
+    IOptions<ReservationContextOptions> options,
+    ILogger<ReservationContextResolver> logger) : IReservationContextResolver
 {
     public async Task<ReservationContextResolutionResult> ResolveAsync(ReservationContextRequest request, CancellationToken cancellationToken)
     {
+        logger.LogInformation(
+            "Reservation context request accepted. CorrelationId={CorrelationId} HasGuestId={HasGuestId} HasConversationId={HasConversationId} Categories={Categories}",
+            currentTenantContext.CorrelationId,
+            request.GuestId.HasValue,
+            request.ConversationId.HasValue,
+            request.QuestionCategories.Select(category => category.ToString()).ToArray());
+
         if (!TryGetCompanyId(out var companyId, out var tenantError))
         {
             var failure = Escalation(tenantError, null, "TenantContextUnavailable");
@@ -82,6 +91,11 @@ public sealed class ReservationContextResolver(
             return result;
         }
 
+        logger.LogInformation(
+            "Reservation context guest resolved. CorrelationId={CorrelationId} GuestId={GuestId}",
+            currentTenantContext.CorrelationId,
+            guest.Id);
+
         if (!string.IsNullOrWhiteSpace(request.ChannelIdentity)
             && !string.IsNullOrWhiteSpace(guest.PhoneNumber)
             && !NormalizePhone(request.ChannelIdentity).Equals(NormalizePhone(guest.PhoneNumber), StringComparison.OrdinalIgnoreCase))
@@ -114,6 +128,12 @@ public sealed class ReservationContextResolver(
                 upcomingThroughDate,
                 cancellationToken))
             .ToList();
+        logger.LogInformation(
+            "Reservation context eligible candidates loaded. CorrelationId={CorrelationId} CandidateCount={CandidateCount} CurrentDate={CurrentDate} UpcomingThroughDate={UpcomingThroughDate}",
+            currentTenantContext.CorrelationId,
+            candidates.Count,
+            currentDate,
+            upcomingThroughDate);
 
         if (!string.IsNullOrWhiteSpace(request.ExplicitPropertyName))
         {
@@ -157,6 +177,29 @@ public sealed class ReservationContextResolver(
             return result;
         }
 
+        if (IsReservationDateQuestion(request.QuestionCategories))
+        {
+            var futureCandidates = (await reservationRepository.GetFutureReservationsForGuestAsync(companyId, guest.Id, currentDate, cancellationToken)).ToList();
+            logger.LogInformation(
+                "Reservation context future date candidates loaded. CorrelationId={CorrelationId} CandidateCount={CandidateCount}",
+                currentTenantContext.CorrelationId,
+                futureCandidates.Count);
+
+            if (futureCandidates.Count == 1)
+            {
+                var result = ToResolved(futureCandidates[0], companyId, guest.Id, ReservationContextResolutionMethod.SingleFutureReservationForDateQuestion, request.CurrentTimestamp);
+                await PersistBindingAndAuditAsync(conversation, result, futureCandidates.Count, cancellationToken);
+                return result;
+            }
+
+            if (futureCandidates.Count > 1)
+            {
+                var result = Clarification(futureCandidates, companyId, guest.Id);
+                await PersistBindingAndAuditAsync(conversation, result, futureCandidates.Count, cancellationToken);
+                return result;
+            }
+        }
+
         var finalResult = upcomingCandidates.Count > 1
             ? Clarification(upcomingCandidates, companyId, guest.Id)
             : new ReservationContextResolutionResult
@@ -180,6 +223,13 @@ public sealed class ReservationContextResolver(
             conversation.ReservationContextResolutionMethod = result.ResolutionMethod?.ToString();
         }
 
+        logger.LogInformation(
+            "Reservation context resolution completed. CorrelationId={CorrelationId} Outcome={Outcome} ResolutionMethod={ResolutionMethod} CandidateCount={CandidateCount} EscalationReason={EscalationReason}",
+            currentTenantContext.CorrelationId,
+            result.Outcome,
+            result.ResolutionMethod,
+            candidateCount,
+            result.EscalationReason);
         await AddAuditLogAsync(result.CompanyId, result.GuestId, candidateCount, result, cancellationToken);
         await reservationRepository.SaveChangesAsync(cancellationToken);
     }
@@ -317,5 +367,11 @@ public sealed class ReservationContextResolver(
     private static string NormalizePhone(string value)
     {
         return new string(value.Where(char.IsDigit).ToArray());
+    }
+
+    private static bool IsReservationDateQuestion(IReadOnlyCollection<QuestionContextCategory> categories)
+    {
+        return categories.Contains(QuestionContextCategory.CheckIn)
+            || categories.Contains(QuestionContextCategory.CheckOut);
     }
 }
