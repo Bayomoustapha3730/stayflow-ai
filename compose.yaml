@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: stayflow-postgres
+    environment:
+      POSTGRES_DB: stayflow_ai_dev
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - stayflow_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d stayflow_ai_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    container_name: stayflow-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /workspace/backend
+    command: dotnet run --urls http://0.0.0.0:5243
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://0.0.0.0:5243
+      ConnectionStrings__DefaultConnection: Host=postgres;Port=5432;Database=stayflow_ai_dev;Username=postgres;Password=postgres
+      AIProvider__Provider: Development
+    ports:
+      - "5243:5243"
+    volumes:
+      - .:/workspace:cached
+      - stayflow_nuget_packages:/root/.nuget/packages
+
+volumes:
+  stayflow_postgres_data:
+  stayflow_nuget_packages:

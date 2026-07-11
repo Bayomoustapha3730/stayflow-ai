@@ -1,0 +1,46 @@
+{
+  "name": "StayFlow AI Backend",
+  "dockerComposeFile": "../compose.yaml",
+  "service": "api",
+  "workspaceFolder": "/workspace",
+  "runServices": [
+    "api",
+    "postgres"
+  ],
+  "overrideCommand": true,
+  "forwardPorts": [
+    5243,
+    5432
+  ],
+  "portsAttributes": {
+    "5243": {
+      "label": "StayFlow API",
+      "onAutoForward": "notify"
+    },
+    "5432": {
+      "label": "PostgreSQL",
+      "onAutoForward": "silent"
+    }
+  },
+  "containerEnv": {
+    "ASPNETCORE_ENVIRONMENT": "Development",
+    "ConnectionStrings__DefaultConnection": "Host=postgres;Port=5432;Database=stayflow_ai_dev;Username=postgres;Password=postgres",
+    "AIProvider__Provider": "Development"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csharp",
+        "ms-dotnettools.csdevkit",
+        "ms-azuretools.vscode-docker",
+        "eamodio.gitlens"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "postCreateCommand": "dotnet restore backend/backend.csproj && dotnet restore tests/StayFlow.Api.Tests/StayFlow.Api.Tests.csproj",
+  "postStartCommand": "dotnet --info",
+  "remoteUser": "root"
+}
