@@ -41,6 +41,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Repositories.IReservationRepository, Repositories.ReservationRepository>();
         services.AddSingleton<Services.IReservationStatusTransitionPolicy, Services.ReservationStatusTransitionPolicy>();
         services.AddScoped<Services.IReservationService, Services.ReservationService>();
+        services.AddScoped<Repositories.IChatRepository, Repositories.ChatRepository>();
+        services.AddScoped<Services.IChatService, Services.ChatService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();
         services.AddSingleton<Services.IQuestionRelevanceClassifier, Services.KeywordQuestionRelevanceClassifier>();

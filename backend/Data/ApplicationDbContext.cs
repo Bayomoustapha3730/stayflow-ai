@@ -17,6 +17,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<KnowledgeBaseItem> KnowledgeBaseItems => Set<KnowledgeBaseItem>();
     public DbSet<PropertyKnowledgeArticle> PropertyKnowledgeArticles => Set<PropertyKnowledgeArticle>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
     public DbSet<Models.ServiceProvider> ServiceProviders => Set<Models.ServiceProvider>();
     public DbSet<ServiceRequest> ServiceRequests => Set<ServiceRequest>();
     public DbSet<Payment> Payments => Set<Payment>();

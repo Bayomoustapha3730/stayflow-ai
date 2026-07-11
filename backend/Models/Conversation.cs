@@ -16,5 +16,6 @@ public sealed class Conversation : AuditableEntity
     public Property Property { get; set; } = null!;
     public Guest Guest { get; set; } = null!;
     public Reservation? Reservation { get; set; }
+    public ICollection<ConversationMessage> Messages { get; set; } = [];
     public ICollection<ServiceRequest> ServiceRequests { get; set; } = [];
 }
