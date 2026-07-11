@@ -11,11 +11,21 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
         builder.ToTable("ConversationMessages");
 
         builder.HasKey(message => message.Id);
-        builder.HasQueryFilter(message => !message.Conversation.Property.IsDeleted && !message.Conversation.Guest.IsDeleted);
+        builder.HasQueryFilter(message =>
+            !message.IsDeleted
+            && !message.Conversation.IsDeleted
+            && !message.Conversation.Guest.IsDeleted
+            && (message.Conversation.Property == null || !message.Conversation.Property.IsDeleted));
 
-        builder.Property(message => message.SenderType).HasMaxLength(40).IsRequired();
-        builder.Property(message => message.Body).HasMaxLength(4000).IsRequired();
+        builder.Property(message => message.SenderType).HasConversion<string>().HasMaxLength(40).IsRequired();
+        builder.Property(message => message.Content).HasMaxLength(4000).IsRequired();
+        builder.Property(message => message.MessageType).HasConversion<string>().HasMaxLength(40).IsRequired();
+        builder.Property(message => message.ExternalMessageId).HasMaxLength(160);
+        builder.Property(message => message.ProviderName).HasMaxLength(80);
+        builder.Property(message => message.ProviderModel).HasMaxLength(120);
+        builder.Property(message => message.ProviderRequestId).HasMaxLength(160);
         builder.Property(message => message.AIOutcome).HasMaxLength(80);
+        builder.Property(message => message.FailureCategory).HasMaxLength(80);
         builder.Property(message => message.EscalationReason).HasMaxLength(120);
 
         builder.HasOne(message => message.Company)
@@ -30,7 +40,14 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
 
         builder.HasIndex(message => message.CompanyId);
         builder.HasIndex(message => message.ConversationId);
+        builder.HasIndex(message => message.SentAt);
         builder.HasIndex(message => message.CreatedAt);
-        builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.CreatedAt });
+        builder.HasIndex(message => message.ExternalMessageId);
+        builder.HasIndex(message => message.IsDeleted);
+        builder.HasIndex(message => new { message.ConversationId, message.SentAt });
+        builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.SentAt });
+        builder.HasIndex(message => new { message.CompanyId, message.ExternalMessageId })
+            .IsUnique()
+            .HasFilter("\"ExternalMessageId\" IS NOT NULL");
     }
 }

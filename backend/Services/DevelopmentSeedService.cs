@@ -154,13 +154,7 @@ public sealed class DevelopmentSeedService(
         }
 
         // Create role with required permissions
-        var requiredPermissions = new[]
-        {
-            "auth.me",
-            "guests.read",
-            "reservations.read",
-            "ai.orchestrate"
-        };
+        var requiredPermissions = RequiredPermissions();
 
         var permissions = new List<Permission>();
         foreach (var permissionName in requiredPermissions)
@@ -201,13 +195,7 @@ public sealed class DevelopmentSeedService(
 
     private async Task EnsureRolePermissionsAsync(Role role, CancellationToken cancellationToken)
     {
-        var requiredPermissions = new[]
-        {
-            "auth.me",
-            "guests.read",
-            "reservations.read",
-            "ai.orchestrate"
-        };
+        var requiredPermissions = RequiredPermissions();
 
         foreach (var permissionName in requiredPermissions)
         {
@@ -231,5 +219,22 @@ public sealed class DevelopmentSeedService(
                 role.RolePermissions.Add(new RolePermission { PermissionId = permission.Id });
             }
         }
+    }
+
+    private static IReadOnlyCollection<string> RequiredPermissions()
+    {
+        return
+        [
+            "auth.me",
+            "guests.read",
+            "reservations.read",
+            "ai.orchestrate",
+            "conversations.read",
+            "conversations.create",
+            "conversations.reply",
+            "conversations.escalate",
+            "conversations.manage",
+            "conversations.notes"
+        ];
     }
 }

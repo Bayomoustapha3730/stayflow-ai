@@ -19,4 +19,5 @@ public sealed class User : AuditableEntity
     public ICollection<PasswordResetToken> PasswordResetTokens { get; set; } = [];
     public ICollection<EmailVerificationToken> EmailVerificationTokens { get; set; } = [];
     public ICollection<UserRole> UserRoles { get; set; } = [];
+    public ICollection<Conversation> AssignedConversations { get; set; } = [];
 }

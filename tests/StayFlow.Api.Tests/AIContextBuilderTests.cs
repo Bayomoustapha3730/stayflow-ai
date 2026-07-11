@@ -423,8 +423,8 @@ public sealed class AIContextBuilderTests
                 PropertyId = PropertyId,
                 GuestId = GuestId,
                 ReservationId = ReservationId,
-                Channel = "WhatsApp",
-                Status = "Open"
+                Channel = GuestChannel.WhatsApp,
+                Status = ConversationStatus.Open
             };
             Repository = new FakeAIContextRepository(this);
             Resolver = new FakeReservationContextResolver(this);

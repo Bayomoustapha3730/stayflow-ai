@@ -199,8 +199,8 @@ public sealed class AIContextBuilder(
                     ? null
                     : new AIConversationContext
                     {
-                        Channel = conversation.Channel,
-                        Status = conversation.Status,
+                        Channel = conversation.Channel.ToString(),
+                        Status = conversation.Status.ToString(),
                         HasVerifiedReservationBinding = conversation.ReservationId == reservation.Id
                     },
                 Safety = new AISafetyContext

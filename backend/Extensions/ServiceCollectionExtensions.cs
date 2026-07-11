@@ -20,6 +20,12 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(Services.AIPromptOptions.SectionName))
             .Validate(options => options.MaxResponseCharacters >= 200 && options.MaxResponseCharacters <= 4000, "AI prompt response character limit must be between 200 and 4000.")
             .ValidateOnStart();
+        services.AddOptions<Services.ConversationOptions>()
+            .Bind(configuration.GetSection(Services.ConversationOptions.SectionName))
+            .Validate(options => options.MaxMessageCharacters >= 1 && options.MaxMessageCharacters <= 4000, "Conversation message limit must be between 1 and 4000.")
+            .Validate(options => options.ReuseOpenConversationMinutes >= 0 && options.ReuseOpenConversationMinutes <= 10080, "Conversation reuse window must be between 0 and 10080 minutes.")
+            .Validate(options => options.MaxHistoryMessages >= 1 && options.MaxHistoryMessages <= 500, "Conversation history limit must be between 1 and 500.")
+            .ValidateOnStart();
         services.AddOptions<Services.AIProviderOptions>()
             .Bind(configuration.GetSection(Services.AIProviderOptions.SectionName))
             .Validate(
@@ -41,8 +47,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Repositories.IReservationRepository, Repositories.ReservationRepository>();
         services.AddSingleton<Services.IReservationStatusTransitionPolicy, Services.ReservationStatusTransitionPolicy>();
         services.AddScoped<Services.IReservationService, Services.ReservationService>();
-        services.AddScoped<Repositories.IChatRepository, Repositories.ChatRepository>();
-        services.AddScoped<Services.IChatService, Services.ChatService>();
+        services.AddScoped<Repositories.IConversationRepository, Repositories.ConversationRepository>();
+        services.AddSingleton<Services.IConversationStatusTransitionPolicy, Services.ConversationStatusTransitionPolicy>();
+        services.AddScoped<Services.IConversationService, Services.ConversationService>();
+        services.AddScoped<Services.IConversationAIExchangeService, Services.ConversationAIExchangeService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();
         services.AddSingleton<Services.IQuestionRelevanceClassifier, Services.KeywordQuestionRelevanceClassifier>();

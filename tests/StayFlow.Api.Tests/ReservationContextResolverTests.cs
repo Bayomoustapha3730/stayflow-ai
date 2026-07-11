@@ -736,9 +736,9 @@ public sealed class ReservationContextResolverTests
                 GuestId = GuestId,
                 ReservationId = reservation?.Id,
                 Reservation = reservation,
-                Channel = "WhatsApp",
+                Channel = GuestChannel.WhatsApp,
                 ExternalThreadId = "whatsapp:+254700123456",
-                Status = "Open",
+                Status = ConversationStatus.Open,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
