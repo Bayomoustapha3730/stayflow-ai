@@ -234,7 +234,11 @@ public sealed class DevelopmentSeedService(
             "conversations.reply",
             "conversations.escalate",
             "conversations.manage",
-            "conversations.notes"
+            "conversations.notes",
+            "chat.send",
+            "chat.read",
+            "chat.escalate",
+            "chat.end"
         ];
     }
 }

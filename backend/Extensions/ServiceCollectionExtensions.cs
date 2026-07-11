@@ -51,6 +51,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IConversationStatusTransitionPolicy, Services.ConversationStatusTransitionPolicy>();
         services.AddScoped<Services.IConversationService, Services.ConversationService>();
         services.AddScoped<Services.IConversationAIExchangeService, Services.ConversationAIExchangeService>();
+        services.AddScoped<Services.IChatService, Services.ChatService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();
         services.AddSingleton<Services.IQuestionRelevanceClassifier, Services.KeywordQuestionRelevanceClassifier>();
