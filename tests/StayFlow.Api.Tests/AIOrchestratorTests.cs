@@ -319,6 +319,30 @@ public sealed class AIOrchestratorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_InDevelopmentWebReservationQuestionReportsReadyDiagnosticsAndInvokesProvider()
+    {
+        var fixture = new Fixture();
+        fixture.ContextBuilder.Result = Fixture.ReadyContext([QuestionContextCategory.CheckIn, QuestionContextCategory.CheckOut]);
+        fixture.ContextBuilder.Result.ReservationContextOutcome = "Resolved";
+        fixture.ContextBuilder.Result.ReservationContextMessage = "Reservation context resolved.";
+        fixture.Provider.Result = AIProviderResult.Success("Your check-in date is 2026-08-01 and check-out date is 2026-08-04.", "DevelopmentAIProvider", "development", "dev-1", 1);
+
+        var result = await fixture.ProcessAsync(
+            "What are my check-in and check-out dates?",
+            Guid.Parse("44444444-4444-4444-4444-444444444444"),
+            channel: "Web");
+
+        Assert.Equal(AIOrchestrationOutcome.Responded, result.Outcome);
+        Assert.Equal("Ready", result.ContextBuildOutcome);
+        Assert.Null(result.EscalationReason);
+        Assert.Equal("Resolved", result.ReservationContextOutcome);
+        Assert.Equal("FakeProvider", result.ProviderSelected);
+        Assert.True(result.ProviderWasInvoked);
+        Assert.NotNull(result.ProviderMetadata);
+        Assert.Equal("DevelopmentAIProvider", result.ProviderMetadata.ProviderName);
+    }
+
+    [Fact]
     public async Task ProcessAsync_OutsideDevelopmentOmitsDiagnostics()
     {
         var fixture = new Fixture(environmentName: Environments.Production);
@@ -564,12 +588,14 @@ public sealed class AIOrchestratorTests
         public CapturingLogger<AIOrchestrator> Logger { get; } = new();
         private AIOrchestrator Orchestrator { get; }
 
-        public Task<AIOrchestrationResult> ProcessAsync(string message = "What is the wifi?", Guid? guestId = null)
+        public Task<AIOrchestrationResult> ProcessAsync(string message = "What is the wifi?", Guid? guestId = null, string? channel = null, string? channelIdentity = null)
         {
             return Orchestrator.ProcessAsync(new AIOrchestrationRequest
             {
                 GuestMessage = message,
                 GuestId = guestId,
+                Channel = channel,
+                ChannelIdentity = channelIdentity,
                 CurrentTimestamp = DateTimeOffset.UtcNow
             }, CancellationToken.None);
         }

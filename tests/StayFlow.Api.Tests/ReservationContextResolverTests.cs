@@ -254,7 +254,27 @@ public sealed class ReservationContextResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_WithConflictingChannelIdentity_ReturnsEscalation()
+    public async Task ResolveAsync_WithWhatsAppMatchingPhone_Resolves()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = repository.NewReservation(status: ReservationStatus.CheckedIn, checkInDate: CurrentDate.AddDays(-1), checkOutDate: CurrentDate.AddDays(2));
+        repository.Reservations.Add(reservation);
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "WhatsApp",
+            ChannelIdentity = "+254 700 123456"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.Resolved, result.Outcome);
+        Assert.Equal(reservation.Id, result.ReservationId);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithWhatsAppMismatchedPhone_ReturnsEscalation()
     {
         var repository = new FakeReservationRepository();
         var resolver = CreateResolver(repository);
@@ -263,6 +283,217 @@ public sealed class ReservationContextResolverTests
         {
             GuestId = repository.GuestId,
             CurrentTimestamp = CurrentTimestamp,
+            Channel = "WhatsApp",
+            ChannelIdentity = "+254 700 999999"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.EscalationRequired, result.Outcome);
+        Assert.Equal("ConflictingChannelIdentity", result.EscalationReason);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithSmsMatchingPhone_Resolves()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = repository.NewReservation(status: ReservationStatus.CheckedIn, checkInDate: CurrentDate.AddDays(-1), checkOutDate: CurrentDate.AddDays(2));
+        repository.Reservations.Add(reservation);
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "SMS",
+            ChannelIdentity = "+254 700 123456"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.Resolved, result.Outcome);
+        Assert.Equal(reservation.Id, result.ReservationId);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithEmailMatchingAddress_Resolves()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = repository.NewReservation(status: ReservationStatus.CheckedIn, checkInDate: CurrentDate.AddDays(-1), checkOutDate: CurrentDate.AddDays(2));
+        repository.Reservations.Add(reservation);
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "Email",
+            ChannelIdentity = "amina@example.com"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.Resolved, result.Outcome);
+        Assert.Equal(reservation.Id, result.ReservationId);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithEmailMatchingAddressCaseInsensitive_Resolves()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = repository.NewReservation(status: ReservationStatus.CheckedIn, checkInDate: CurrentDate.AddDays(-1), checkOutDate: CurrentDate.AddDays(2));
+        repository.Reservations.Add(reservation);
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "Email",
+            ChannelIdentity = " AMINA@EXAMPLE.COM "
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.Resolved, result.Outcome);
+        Assert.Equal(reservation.Id, result.ReservationId);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithEmailMismatchedAddress_ReturnsEscalation()
+    {
+        var repository = new FakeReservationRepository();
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "Email",
+            ChannelIdentity = "other@example.com"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.EscalationRequired, result.Outcome);
+        Assert.Equal("ConflictingChannelIdentity", result.EscalationReason);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithWebGuestIdAndNoChannelIdentity_Resolves()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = repository.NewReservation(status: ReservationStatus.CheckedIn, checkInDate: CurrentDate.AddDays(-1), checkOutDate: CurrentDate.AddDays(2));
+        repository.Reservations.Add(reservation);
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "Web"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.Resolved, result.Outcome);
+        Assert.Equal(reservation.Id, result.ReservationId);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithWebArbitrarySessionIdentity_ReturnsUnsupportedWebIdentityType()
+    {
+        var repository = new FakeReservationRepository();
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "Web",
+            ChannelIdentity = "web-session-abc-123"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.EscalationRequired, result.Outcome);
+        Assert.Equal("UnsupportedWebIdentityType", result.EscalationReason);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithWebSupportedEmailIdentity_Resolves()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = repository.NewReservation(status: ReservationStatus.CheckedIn, checkInDate: CurrentDate.AddDays(-1), checkOutDate: CurrentDate.AddDays(2));
+        repository.Reservations.Add(reservation);
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "Web",
+            ChannelIdentity = "email:AMINA@example.com"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.Resolved, result.Outcome);
+        Assert.Equal(reservation.Id, result.ReservationId);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithUnsupportedChannel_ReturnsEscalation()
+    {
+        var repository = new FakeReservationRepository();
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "LegacyChat",
+            ChannelIdentity = "identity"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.EscalationRequired, result.Outcome);
+        Assert.Equal("UnsupportedChannel", result.EscalationReason);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithIdentityButNoChannel_ReturnsUnsupportedChannel()
+    {
+        var repository = new FakeReservationRepository();
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = repository.GuestId,
+            CurrentTimestamp = CurrentTimestamp,
+            ChannelIdentity = "+254 700 123456"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.EscalationRequired, result.Outcome);
+        Assert.Equal("UnsupportedChannel", result.EscalationReason);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithCrossTenantGuestId_ReturnsGuestTenantMismatch()
+    {
+        var repository = new FakeReservationRepository();
+        repository.Reservations.Add(repository.NewReservation(status: ReservationStatus.CheckedIn, checkInDate: CurrentDate.AddDays(-1), checkOutDate: CurrentDate.AddDays(2)));
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            GuestId = Guid.NewGuid(),
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "Web"
+        }, CancellationToken.None);
+
+        Assert.Equal(ReservationContextResolutionOutcome.EscalationRequired, result.Outcome);
+        Assert.Equal("GuestTenantMismatch", result.EscalationReason);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WithVerifiedConversationAndMismatchedChannelIdentity_ReturnsEscalation()
+    {
+        var repository = new FakeReservationRepository();
+        var reservation = repository.NewReservation(status: ReservationStatus.ActiveStay, checkInDate: CurrentDate.AddDays(-1), checkOutDate: CurrentDate.AddDays(2));
+        repository.Reservations.Add(reservation);
+        var conversation = repository.NewConversation(reservation);
+        repository.Conversations.Add(conversation);
+        var resolver = CreateResolver(repository);
+
+        var result = await resolver.ResolveAsync(new ReservationContextRequest
+        {
+            ConversationId = conversation.Id,
+            CurrentTimestamp = CurrentTimestamp,
+            Channel = "WhatsApp",
             ChannelIdentity = "+254 700 999999"
         }, CancellationToken.None);
 

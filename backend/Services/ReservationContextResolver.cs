@@ -56,22 +56,6 @@ public sealed class ReservationContextResolver(
 
             guestId ??= conversation.GuestId;
 
-            if (conversation.Reservation is not null
-                && conversation.Reservation.PrimaryGuestId == guestId
-                && IsEligible(conversation.Reservation, currentDate, upcomingThroughDate))
-            {
-                var result = ReservationContextResolutionResult.Resolved(
-                    companyId,
-                    conversation.GuestId,
-                    conversation.Reservation.Id,
-                    conversation.Reservation.PropertyId,
-                    ReservationContextResolutionMethod.VerifiedConversationBinding,
-                    request.CurrentTimestamp);
-
-                await AddAuditLogAsync(companyId, conversation.GuestId, 1, result, cancellationToken);
-                await reservationRepository.SaveChangesAsync(cancellationToken);
-                return result;
-            }
         }
 
         if (guestId is null || guestId == Guid.Empty)
@@ -96,12 +80,28 @@ public sealed class ReservationContextResolver(
             currentTenantContext.CorrelationId,
             guest.Id);
 
-        if (!string.IsNullOrWhiteSpace(request.ChannelIdentity)
-            && !string.IsNullOrWhiteSpace(guest.PhoneNumber)
-            && !NormalizePhone(request.ChannelIdentity).Equals(NormalizePhone(guest.PhoneNumber), StringComparison.OrdinalIgnoreCase))
+        var channelValidation = ValidateChannelIdentity(request, guest);
+        if (!channelValidation.IsValid)
         {
-            var result = Escalation("Channel identity conflicts with the resolved guest identity.", guest.Id, "ConflictingChannelIdentity");
+            var result = Escalation(channelValidation.Message, guest.Id, channelValidation.EscalationReason);
             await AddAuditLogAsync(companyId, guest.Id, 0, result, cancellationToken);
+            await reservationRepository.SaveChangesAsync(cancellationToken);
+            return result;
+        }
+
+        if (conversation?.Reservation is not null
+            && conversation.Reservation.PrimaryGuestId == guest.Id
+            && IsEligible(conversation.Reservation, currentDate, upcomingThroughDate))
+        {
+            var result = ReservationContextResolutionResult.Resolved(
+                companyId,
+                conversation.GuestId,
+                conversation.Reservation.Id,
+                conversation.Reservation.PropertyId,
+                ReservationContextResolutionMethod.VerifiedConversationBinding,
+                request.CurrentTimestamp);
+
+            await AddAuditLogAsync(companyId, conversation.GuestId, 1, result, cancellationToken);
             await reservationRepository.SaveChangesAsync(cancellationToken);
             return result;
         }
@@ -369,9 +369,122 @@ public sealed class ReservationContextResolver(
         return new string(value.Where(char.IsDigit).ToArray());
     }
 
+    private static string NormalizeEmail(string value)
+    {
+        return value.Trim().ToUpperInvariant();
+    }
+
+    private static ChannelIdentityValidationResult ValidateChannelIdentity(ReservationContextRequest request, Guest guest)
+    {
+        var hasChannel = !string.IsNullOrWhiteSpace(request.Channel);
+        var hasChannelIdentity = !string.IsNullOrWhiteSpace(request.ChannelIdentity);
+
+        if (!hasChannel)
+        {
+            return hasChannelIdentity
+                ? ChannelIdentityValidationResult.Fail("UnsupportedChannel", "A supported guest communication channel is required when channel identity is supplied.")
+                : ChannelIdentityValidationResult.Success();
+        }
+
+        if (!TryParseChannel(request.Channel, out var channel))
+        {
+            return ChannelIdentityValidationResult.Fail("UnsupportedChannel", "The supplied guest communication channel is not supported.");
+        }
+
+        return channel switch
+        {
+            GuestChannel.WhatsApp or GuestChannel.SMS => ValidatePhoneChannelIdentity(request.ChannelIdentity, guest.PhoneNumber),
+            GuestChannel.Email => ValidateEmailChannelIdentity(request.ChannelIdentity, guest.Email),
+            GuestChannel.Web => ValidateWebChannelIdentity(request.ChannelIdentity, guest),
+            _ => ChannelIdentityValidationResult.Fail("UnsupportedChannel", "The supplied guest communication channel is not supported.")
+        };
+    }
+
+    private static bool TryParseChannel(string? value, out GuestChannel channel)
+    {
+        channel = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.Trim().Replace("-", string.Empty, StringComparison.Ordinal).Replace("_", string.Empty, StringComparison.Ordinal);
+        if (string.Equals(normalized, "Whatsapp", StringComparison.OrdinalIgnoreCase))
+        {
+            channel = GuestChannel.WhatsApp;
+            return true;
+        }
+
+        return Enum.TryParse(normalized, ignoreCase: true, out channel)
+            && Enum.IsDefined(channel);
+    }
+
+    private static ChannelIdentityValidationResult ValidatePhoneChannelIdentity(string? channelIdentity, string? guestPhoneNumber)
+    {
+        if (string.IsNullOrWhiteSpace(channelIdentity) || string.IsNullOrWhiteSpace(guestPhoneNumber))
+        {
+            return ChannelIdentityValidationResult.Fail("MissingChannelIdentity", "Phone channel identity is required to verify the resolved guest.");
+        }
+
+        return string.Equals(NormalizePhone(channelIdentity), NormalizePhone(guestPhoneNumber), StringComparison.Ordinal)
+            ? ChannelIdentityValidationResult.Success()
+            : ChannelIdentityValidationResult.Fail("ConflictingChannelIdentity", "Channel identity conflicts with the resolved guest identity.");
+    }
+
+    private static ChannelIdentityValidationResult ValidateEmailChannelIdentity(string? channelIdentity, string? guestEmail)
+    {
+        if (string.IsNullOrWhiteSpace(channelIdentity) || string.IsNullOrWhiteSpace(guestEmail))
+        {
+            return ChannelIdentityValidationResult.Fail("MissingChannelIdentity", "Email channel identity is required to verify the resolved guest.");
+        }
+
+        return string.Equals(NormalizeEmail(channelIdentity), NormalizeEmail(guestEmail), StringComparison.Ordinal)
+            ? ChannelIdentityValidationResult.Success()
+            : ChannelIdentityValidationResult.Fail("ConflictingChannelIdentity", "Channel identity conflicts with the resolved guest identity.");
+    }
+
+    private static ChannelIdentityValidationResult ValidateWebChannelIdentity(string? channelIdentity, Guest guest)
+    {
+        if (string.IsNullOrWhiteSpace(channelIdentity))
+        {
+            return ChannelIdentityValidationResult.Success();
+        }
+
+        var trimmedIdentity = channelIdentity.Trim();
+        if (trimmedIdentity.StartsWith("email:", StringComparison.OrdinalIgnoreCase))
+        {
+            return ValidateEmailChannelIdentity(trimmedIdentity["email:".Length..], guest.Email);
+        }
+
+        if (trimmedIdentity.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
+        {
+            return ValidateEmailChannelIdentity(trimmedIdentity["mailto:".Length..], guest.Email);
+        }
+
+        if (trimmedIdentity.StartsWith("phone:", StringComparison.OrdinalIgnoreCase))
+        {
+            return ValidatePhoneChannelIdentity(trimmedIdentity["phone:".Length..], guest.PhoneNumber);
+        }
+
+        return ChannelIdentityValidationResult.Fail("UnsupportedWebIdentityType", "The supplied web channel identity type is not supported for guest verification.");
+    }
+
     private static bool IsReservationDateQuestion(IReadOnlyCollection<QuestionContextCategory> categories)
     {
         return categories.Contains(QuestionContextCategory.CheckIn)
             || categories.Contains(QuestionContextCategory.CheckOut);
+    }
+
+    private readonly record struct ChannelIdentityValidationResult(bool IsValid, string EscalationReason, string Message)
+    {
+        public static ChannelIdentityValidationResult Success()
+        {
+            return new ChannelIdentityValidationResult(true, string.Empty, string.Empty);
+        }
+
+        public static ChannelIdentityValidationResult Fail(string escalationReason, string message)
+        {
+            return new ChannelIdentityValidationResult(false, escalationReason, message);
+        }
     }
 }
