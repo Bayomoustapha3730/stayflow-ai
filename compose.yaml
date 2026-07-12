@@ -35,6 +35,23 @@ services:
       - .:/workspace:cached
       - stayflow_nuget_packages:/root/.nuget/packages
 
+  frontend:
+    image: node:22-alpine
+    container_name: stayflow-frontend
+    depends_on:
+      - api
+    working_dir: /workspace/frontend
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_STAYFLOW_API_URL: http://localhost:5243
+      VITE_DEMO_GUEST_ID: 44444444-4444-4444-4444-444444444444
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/workspace:cached
+      - stayflow_frontend_node_modules:/workspace/frontend/node_modules
+
 volumes:
   stayflow_postgres_data:
   stayflow_nuget_packages:
+  stayflow_frontend_node_modules:

@@ -13,3 +13,7 @@ obj/
 
 outputs/
 work/
+
+node_modules/
+dist/
+coverage/

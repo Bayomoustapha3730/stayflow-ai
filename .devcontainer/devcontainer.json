@@ -5,12 +5,14 @@
   "workspaceFolder": "/workspace",
   "runServices": [
     "api",
-    "postgres"
+    "postgres",
+    "frontend"
   ],
   "overrideCommand": true,
   "forwardPorts": [
     5243,
-    5432
+    5432,
+    5173
   ],
   "portsAttributes": {
     "5243": {
@@ -20,6 +22,10 @@
     "5432": {
       "label": "PostgreSQL",
       "onAutoForward": "silent"
+    },
+    "5173": {
+      "label": "StayFlow Frontend",
+      "onAutoForward": "notify"
     }
   },
   "containerEnv": {
@@ -40,7 +46,7 @@
       }
     }
   },
-  "postCreateCommand": "dotnet restore backend/backend.csproj && dotnet restore tests/StayFlow.Api.Tests/StayFlow.Api.Tests.csproj",
+  "postCreateCommand": "dotnet restore backend/backend.csproj && dotnet restore tests/StayFlow.Api.Tests/StayFlow.Api.Tests.csproj && cd frontend && npm install",
   "postStartCommand": "dotnet --info",
   "remoteUser": "root"
 }

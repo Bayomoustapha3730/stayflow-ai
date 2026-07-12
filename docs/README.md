@@ -6,6 +6,7 @@ This folder contains the working documentation for StayFlow AI. Documentation sh
 
 - [`architecture`](architecture/README.md) - system design and architectural guidance.
 - [`api`](api/README.md) - API contracts and endpoint documentation.
+- [`frontend`](frontend/README.md) - browser experiences, widgets, theming, and frontend development notes.
 - [`database`](database/README.md) - data model and database operations.
 - [`ui-ux`](ui-ux/README.md) - user experience and interface design guidance.
 - [`security`](security/README.md) - security controls, risks, and operational safeguards.

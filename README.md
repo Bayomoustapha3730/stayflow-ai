@@ -8,6 +8,7 @@ Project documentation is organized under [`/docs`](docs/README.md):
 
 - [`docs/architecture`](docs/architecture/README.md) - system design, backend structure, integration boundaries, and architectural diagrams.
 - [`docs/api`](docs/api/README.md) - API contracts, endpoint behavior, request/response examples, and integration notes.
+- [`docs/frontend`](docs/frontend/README.md) - frontend applications, widgets, theming, and browser integration guidance.
 - [`docs/database`](docs/database/README.md) - data model documentation, migrations, seed data, and database conventions.
 - [`docs/security`](docs/security/README.md) - security architecture, controls, threat modeling, and operational practices.
 - [`docs/product`](docs/product/README.md) - product requirements, feature scope, user journeys, and roadmap notes.
@@ -20,3 +21,7 @@ Project documentation is organized under [`/docs`](docs/README.md):
 ## Backend
 
 The ASP.NET Core backend lives in [`/backend`](backend/README.md). See the backend README for setup, local development, migrations, health checks, and available API endpoints.
+
+## Frontend
+
+The React guest chat widget lives in [`/frontend`](frontend/README.md). It provides the Sprint 3 authenticated demo chat experience for the protected StayFlow chat API.

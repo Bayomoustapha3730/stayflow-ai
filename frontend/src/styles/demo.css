@@ -1,0 +1,111 @@
+:root {
+  background: #eef2f1;
+  color: #17202a;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.sf-demo-page {
+  min-height: 100vh;
+}
+
+.sf-demo-content {
+  margin: 0 auto;
+  max-width: 1120px;
+  padding: 56px 24px 120px;
+}
+
+.sf-demo-hero {
+  align-items: end;
+  background:
+    linear-gradient(120deg, rgba(15, 61, 62, 0.88), rgba(19, 78, 74, 0.74)),
+    url("https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1400&q=80");
+  background-position: center;
+  background-size: cover;
+  border-radius: 28px;
+  color: #fff;
+  display: flex;
+  min-height: 420px;
+  overflow: hidden;
+  padding: 48px;
+}
+
+.sf-demo-hero h1 {
+  font-size: clamp(42px, 8vw, 84px);
+  line-height: 0.94;
+  margin: 12px 0 18px;
+  max-width: 820px;
+}
+
+.sf-demo-hero p {
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 20px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 640px;
+}
+
+.sf-demo-kicker {
+  color: #f2a65a;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.sf-demo-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.sf-demo-grid article {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.sf-demo-grid h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.sf-demo-grid p {
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .sf-demo-content {
+    padding: 24px 16px 112px;
+  }
+
+  .sf-demo-hero {
+    border-radius: 20px;
+    min-height: 360px;
+    padding: 28px;
+  }
+
+  .sf-demo-grid {
+    grid-template-columns: 1fr;
+  }
+}
