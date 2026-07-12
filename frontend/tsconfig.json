@@ -17,6 +17,14 @@
     "jsx": "react-jsx",
     "types": ["vitest/globals", "@testing-library/jest-dom"]
   },
+  
   "include": ["src", "tests", "vite.config.ts"],
+  "exclude": [
+    "vitest.config.ts",
+    "vite.config.ts",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/test"
+  ],
   "references": []
 }
