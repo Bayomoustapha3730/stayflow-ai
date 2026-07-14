@@ -36,6 +36,9 @@ export function DemoPage() {
       </main>
 
       <StayFlowChatWidget
+        const apiBaseUrl ={
+    import.meta.env.VITE_STAYFLOW_API_URL ??
+    "http://localhost:5243"}
         guestId={demoGuestId}
         reservationId={demoReservationId}
         propertyId={demoPropertyId}

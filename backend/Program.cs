@@ -5,12 +5,36 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("StayFlowFrontendDevelopment", policy =>
     {
-        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
-        policy.WithOrigins(allowedOrigins)
+        policy
+            .SetIsOriginAllowed(origin =>
+            {
+                if (string.IsNullOrWhiteSpace(origin))
+                {
+                    return false;
+                }
+
+                if (origin is "http://localhost:5173"
+                    or "http://127.0.0.1:5173"
+                    or "http://localhost:5174"
+                    or "http://127.0.0.1:5174")
+                {
+                    return true;
+                }
+
+                return Uri.TryCreate(
+                           origin,
+                           UriKind.Absolute,
+                           out var uri)
+                       && uri.Scheme == Uri.UriSchemeHttps
+                       && uri.Host.EndsWith(
+                           ".app.github.dev",
+                           StringComparison.OrdinalIgnoreCase);
+            })
             .AllowAnyHeader()
             .AllowAnyMethod();
     });
@@ -29,11 +53,17 @@ app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
-    app.UseCors("StayFlowFrontendDevelopment");
+
     using var scope = app.Services.CreateAsyncScope();
-    await scope.ServiceProvider.GetRequiredService<StayFlow.Api.Services.IDevelopmentSeedService>()
+
+    await scope.ServiceProvider
+        .GetRequiredService<
+            StayFlow.Api.Services.IDevelopmentSeedService
+        >()
         .SeedAsync(CancellationToken.None);
 }
+
+app.UseCors("StayFlowFrontendDevelopment");
 
 app.UseHttpsRedirection();
 app.UseAuthentication();

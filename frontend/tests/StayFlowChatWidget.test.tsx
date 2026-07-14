@@ -91,7 +91,7 @@ async function openAndLogin(fetchMock: ReturnType<typeof vi.fn>) {
     <StayFlowChatWidget
       guestId={guestId}
       apiBaseUrl="http://localhost:5243"
-      demoEmail="guest@example.com"
+      demoEmail="demo.user@stayflow.local"
     />
   );
 
