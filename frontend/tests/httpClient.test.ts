@@ -42,7 +42,7 @@ describe("HttpClient", () => {
       })
     );
 
-    const http = new HttpClient({ baseUrl: "http://localhost:5243" });
+    const http = new HttpClient({ baseUrl: "https://bug-free-space-train-w4wvq5wxp4qfv9w9.github.dev/" });
     await expect(http.get("/chat/test")).rejects.toMatchObject({
       name: "Error",
       message: expect.stringContaining("Your session has expired")
