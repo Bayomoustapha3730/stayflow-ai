@@ -152,7 +152,9 @@ describe("StayFlowChatWidget", () => {
 
     const chatMessageCall = fetchMock.mock.calls.find(
       ([url, options]) =>
-        url === "http://localhost:5243/chat/message" &&
+      /*  url === "http://localhost:5243/chat/message" */
+      new URL(url).pathname === "/chat/message"
+      &&
         options?.method === "POST"
     );
 
@@ -223,7 +225,9 @@ describe("StayFlowChatWidget", () => {
 
     const chatMessageCalls = fetchMock.mock.calls.filter(
       ([url, options]) =>
-        url === "http://localhost:5243/chat/message" &&
+        //url === "http://localhost:5243/chat/message" 
+      new URL(url).pathname === "/chat/message"
+      &&
         options?.method === "POST"
     );
 
