@@ -1,52 +1,61 @@
 {
-  "name": "StayFlow AI Backend",
+  "name": "StayFlow AI Development",
+
   "dockerComposeFile": "../compose.yaml",
   "service": "api",
   "workspaceFolder": "/workspace",
+
   "runServices": [
-    "api",
     "postgres",
-    "frontend"
+    "api"
   ],
+
+  "shutdownAction": "stopCompose",
   "overrideCommand": true,
+  "remoteUser": "root",
+
   "forwardPorts": [
+    5173,
     5243,
-    5432,
-    5173
+    5432
   ],
+
   "portsAttributes": {
+    "5173": {
+      "label": "StayFlow Frontend",
+      "onAutoForward": "openBrowser",
+      "visibility": "public"
+    },
     "5243": {
       "label": "StayFlow API",
-      "onAutoForward": "notify"
+      "onAutoForward": "notify",
+      "visibility": "public"
     },
     "5432": {
       "label": "PostgreSQL",
-      "onAutoForward": "silent"
-    },
-    "5173": {
-      "label": "StayFlow Frontend",
-      "onAutoForward": "notify"
+      "onAutoForward": "silent",
+      "visibility": "private"
     }
   },
-  "containerEnv": {
-    "ASPNETCORE_ENVIRONMENT": "Development",
-    "ConnectionStrings__DefaultConnection": "Host=postgres;Port=5432;Database=stayflow_ai_dev;Username=postgres;Password=postgres",
-    "AIProvider__Provider": "Development"
-  },
+
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-dotnettools.csharp",
         "ms-dotnettools.csdevkit",
         "ms-azuretools.vscode-docker",
-        "eamodio.gitlens"
+        "eamodio.gitlens",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
       ],
       "settings": {
-        "terminal.integrated.defaultProfile.linux": "bash"
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "editor.formatOnSave": true,
+        "files.eol": "\n"
       }
     }
   },
-  "postCreateCommand": "dotnet restore backend/backend.csproj && dotnet restore tests/StayFlow.Api.Tests/StayFlow.Api.Tests.csproj && cd frontend && npm install",
-  "postStartCommand": "dotnet --info",
-  "remoteUser": "root"
+
+  "postCreateCommand": "bash .devcontainer/postCreate.sh",
+  "postStartCommand": "bash .devcontainer/start.sh"
 }

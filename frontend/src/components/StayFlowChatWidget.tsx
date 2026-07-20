@@ -1,4 +1,3 @@
-console.log("Widget prop apiBaseUrl =", apiBaseUrl);
 import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import { useChat } from "../hooks/useChat";
@@ -21,7 +20,7 @@ export function StayFlowChatWidget({
   reservationId,
   propertyId,
   channelIdentity,
-  apiBaseUrl = import.meta.env.VITE_STAYFLOW_API_URL ?? "https://bug-free-space-train-w4wvq5wxp4qfv9w9-5243.app.github.dev",
+  apiBaseUrl = import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
   demoEmail,
   theme
 }: StayFlowChatWidgetProps) {

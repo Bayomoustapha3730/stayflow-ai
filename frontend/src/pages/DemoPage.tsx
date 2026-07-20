@@ -1,9 +1,4 @@
-
 import { StayFlowChatWidget } from "../components";
-
-const apiBaseUrl =
-  import.meta.env.VITE_STAYFLOW_API_URL ??
-  "https://bug-free-space-train-w4wvq5wxp4qfv9w9-5243.app.github.dev";
 
 const demoGuestId =
   import.meta.env.VITE_DEMO_GUEST_ID ??
@@ -18,6 +13,10 @@ const demoPropertyId =
 const demoEmail =
   import.meta.env.VITE_DEMO_EMAIL;
 
+const apiBaseUrl =
+  import.meta.env.VITE_STAYFLOW_API_URL ??
+  "http://localhost:5243";
+
 export function DemoPage() {
   return (
     <div className="sf-demo-page">
@@ -31,9 +30,9 @@ export function DemoPage() {
             <h1>Guest concierge chat widget</h1>
 
             <p>
-              A protected web chat experience for
-              Airbnb-style stays, connected to the
-              StayFlow conversation engine.
+              A protected web chat experience for Airbnb-style
+              stays, connected to the StayFlow conversation
+              engine.
             </p>
           </div>
         </section>
@@ -45,26 +44,24 @@ export function DemoPage() {
           <article>
             <h2>Westlands Apartment</h2>
             <p>
-              Fast answers for check-in, Wi-Fi, house
-              rules, and host escalation.
+              Fast answers for check-in, Wi-Fi, house rules,
+              and host escalation.
             </p>
           </article>
 
           <article>
             <h2>Authenticated by design</h2>
             <p>
-              The widget uses the existing JWT login flow
-              and never sends tenant identifiers from the
-              browser.
+              The widget uses the existing JWT login flow and
+              never sends tenant identifiers from the browser.
             </p>
           </article>
 
           <article>
             <h2>Human handoff</h2>
             <p>
-              Guests can ask the host for support, and
-              closed conversations stop accepting new
-              messages.
+              Guests can ask the host for support, and closed
+              conversations stop accepting new messages.
             </p>
           </article>
         </section>

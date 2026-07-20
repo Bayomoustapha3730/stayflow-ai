@@ -18,10 +18,9 @@ builder.Services.AddCors(options =>
                     return false;
                 }
 
-                if (origin is "http://localhost:5173"
-                    or "http://127.0.0.1:5173"
-                    or "http://localhost:5174"
-                    or "http://127.0.0.1:5174")
+                if (origin is
+                    "http://localhost:5173" or
+                    "http://127.0.0.1:5173")
                 {
                     return true;
                 }
@@ -45,10 +44,16 @@ builder.Services.AddApplicationServices(builder.Configuration);
 builder.Services.AddApplicationAuthentication(builder.Configuration);
 builder.Services.AddHealthChecks();
 
+/*
+ * Build only after every builder.Services registration
+ * has completed.
+ */
 var app = builder.Build();
 
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
+
+app.UseCors("StayFlowFrontendDevelopment");
 
 if (app.Environment.IsDevelopment())
 {
@@ -63,11 +68,11 @@ if (app.Environment.IsDevelopment())
         .SeedAsync(CancellationToken.None);
 }
 
-app.UseCors("StayFlowFrontendDevelopment");
-
 app.UseHttpsRedirection();
+
 app.UseAuthentication();
 app.UseAuthorization();
+
 app.UseMiddleware<PermissionAuthorizationMiddleware>();
 
 app.MapControllers();
