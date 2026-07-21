@@ -44,6 +44,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IPropertyService, Services.PropertyService>();
         services.AddScoped<Repositories.IGuestRepository, Repositories.GuestRepository>();
         services.AddScoped<Services.IGuestService, Services.GuestService>();
+        services.AddScoped<Repositories.IConversationRepository, Repositories.ConversationRepository>();
+        services.AddScoped<Services.IConversationService, Services.ConversationService>();
         services.AddScoped<Repositories.IReservationRepository, Repositories.ReservationRepository>();
         services.AddSingleton<Services.IReservationStatusTransitionPolicy, Services.ReservationStatusTransitionPolicy>();
         services.AddScoped<Services.IReservationService, Services.ReservationService>();

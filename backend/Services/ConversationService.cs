@@ -1,15 +1,21 @@
+<<<<<<< HEAD
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIOrchestration;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.Models;
+=======
+using StayFlow.Api.Common;
+using StayFlow.Api.DTOs.Conversations;
+>>>>>>> 297967c (Implement host conversation inbox endpoint)
 using StayFlow.Api.Repositories;
 
 namespace StayFlow.Api.Services;
 
 public sealed class ConversationService(
     IConversationRepository conversationRepository,
+<<<<<<< HEAD
     ICurrentTenantContext currentTenantContext,
     IConversationStatusTransitionPolicy transitionPolicy,
     IOptions<ConversationOptions> options) : IConversationService
@@ -180,10 +186,17 @@ public sealed class ConversationService(
         AIOrchestrationResult? aiResult,
         bool isInternal,
         string auditAction,
+=======
+    ICurrentTenantContext currentTenantContext) : IConversationService
+{
+    public async Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(
+        ConversationListQueryParameters query,
+>>>>>>> 297967c (Implement host conversation inbox endpoint)
         CancellationToken cancellationToken)
     {
         if (!TryGetCompanyId(out var companyId, out var tenantError))
         {
+<<<<<<< HEAD
             return ApiResponse<ConversationMessageResponse>.Fail(tenantError, [tenantError]);
         }
 
@@ -330,6 +343,39 @@ public sealed class ConversationService(
         }
 
         return errors;
+=======
+            return ApiResponse<ConversationListResponse>.Fail(tenantError, [tenantError], currentTenantContext.CorrelationId);
+        }
+
+        var validationErrors = Validate(query);
+        if (validationErrors.Count > 0)
+        {
+            return ApiResponse<ConversationListResponse>.Fail(
+                "Conversation list query validation failed.",
+                validationErrors,
+                currentTenantContext.CorrelationId);
+        }
+
+        var normalizedQuery = new ConversationListQueryParameters
+        {
+            Page = query.Page,
+            PageSize = query.PageSize,
+            Status = query.Status,
+            PropertyId = query.PropertyId,
+            RequiresHostAttention = query.RequiresHostAttention,
+            Search = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim()
+        };
+
+        var conversations = await conversationRepository.GetInboxAsync(companyId, normalizedQuery, cancellationToken);
+        return ApiResponse<ConversationListResponse>.Ok(new ConversationListResponse
+        {
+            Items = conversations.Items,
+            TotalCount = conversations.TotalCount,
+            Page = conversations.PageNumber,
+            PageSize = conversations.PageSize,
+            TotalPages = conversations.TotalPages
+        }, correlationId: currentTenantContext.CorrelationId);
+>>>>>>> 297967c (Implement host conversation inbox endpoint)
     }
 
     private bool TryGetCompanyId(out Guid companyId, out string error)
@@ -353,6 +399,7 @@ public sealed class ConversationService(
         return true;
     }
 
+<<<<<<< HEAD
     private async Task AuditAsync(Guid companyId, Guid conversationId, string action, ConversationStatus status, ConversationSenderType? senderType, CancellationToken cancellationToken)
     {
         await conversationRepository.AddAuditLogAsync(new AuditLog
@@ -446,4 +493,30 @@ public sealed class ConversationService(
     }
 
     private sealed record AssociationValidationResult(Guid? ReservationPropertyId);
+=======
+    private static IReadOnlyCollection<string> Validate(ConversationListQueryParameters query)
+    {
+        var errors = new List<string>();
+        if (query.Page < 1)
+        {
+            errors.Add("Page must be greater than or equal to 1.");
+        }
+
+        if (query.PageSize < 1)
+        {
+            errors.Add("PageSize must be greater than or equal to 1.");
+        }
+        else if (query.PageSize > 100)
+        {
+            errors.Add("PageSize must be 100 or fewer.");
+        }
+
+        if (query.PropertyId == Guid.Empty)
+        {
+            errors.Add("PropertyId must be a valid identifier.");
+        }
+
+        return errors;
+    }
+>>>>>>> 297967c (Implement host conversation inbox endpoint)
 }
