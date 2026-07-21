@@ -5,6 +5,7 @@ namespace StayFlow.Api.Services;
 
 public interface IConversationService
 {
+<<<<<<< HEAD
     Task<ApiResponse<ConversationDetailResponse>> CreateOrGetConversationAsync(CreateConversationRequest request, CancellationToken cancellationToken);
     Task<ApiResponse<ConversationDetailResponse>> GetConversationAsync(Guid conversationId, CancellationToken cancellationToken);
     Task<ApiResponse<ConversationHistoryResponse>> GetConversationHistoryAsync(Guid conversationId, ConversationHistoryQueryParameters query, CancellationToken cancellationToken);
@@ -17,4 +18,9 @@ public interface IConversationService
     Task<ApiResponse<ConversationDetailResponse>> ReturnToAIModeAsync(Guid conversationId, CancellationToken cancellationToken);
     Task<ApiResponse<ConversationDetailResponse>> ResolveConversationAsync(Guid conversationId, CancellationToken cancellationToken);
     Task<ApiResponse<ConversationDetailResponse>> CloseConversationAsync(Guid conversationId, CancellationToken cancellationToken);
+=======
+    Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(
+        ConversationListQueryParameters query,
+        CancellationToken cancellationToken);
+>>>>>>> 297967c (Implement host conversation inbox endpoint)
 }
