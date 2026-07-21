@@ -1,21 +1,15 @@
-<<<<<<< HEAD
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIOrchestration;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.Models;
-=======
-using StayFlow.Api.Common;
-using StayFlow.Api.DTOs.Conversations;
->>>>>>> 297967c (Implement host conversation inbox endpoint)
 using StayFlow.Api.Repositories;
 
 namespace StayFlow.Api.Services;
 
 public sealed class ConversationService(
     IConversationRepository conversationRepository,
-<<<<<<< HEAD
     ICurrentTenantContext currentTenantContext,
     IConversationStatusTransitionPolicy transitionPolicy,
     IOptions<ConversationOptions> options) : IConversationService
@@ -176,6 +170,45 @@ public sealed class ConversationService(
         }, cancellationToken);
     }
 
+    public async Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(
+        ConversationListQueryParameters query,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<ConversationListResponse>.Fail(tenantError, [tenantError], currentTenantContext.CorrelationId);
+        }
+
+        var validationErrors = Validate(query);
+        if (validationErrors.Count > 0)
+        {
+            return ApiResponse<ConversationListResponse>.Fail(
+                "Conversation list query validation failed.",
+                validationErrors,
+                currentTenantContext.CorrelationId);
+        }
+
+        var normalizedQuery = new ConversationListQueryParameters
+        {
+            Page = query.Page,
+            PageSize = query.PageSize,
+            Status = query.Status,
+            PropertyId = query.PropertyId,
+            RequiresHostAttention = query.RequiresHostAttention,
+            Search = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim()
+        };
+
+        var conversations = await conversationRepository.GetInboxAsync(companyId, normalizedQuery, cancellationToken);
+        return ApiResponse<ConversationListResponse>.Ok(new ConversationListResponse
+        {
+            Items = conversations.Items,
+            TotalCount = conversations.TotalCount,
+            Page = conversations.PageNumber,
+            PageSize = conversations.PageSize,
+            TotalPages = conversations.TotalPages
+        }, correlationId: currentTenantContext.CorrelationId);
+    }
+
     private async Task<ApiResponse<ConversationMessageResponse>> AddMessageAsync(
         Guid conversationId,
         ConversationSenderType senderType,
@@ -186,17 +219,10 @@ public sealed class ConversationService(
         AIOrchestrationResult? aiResult,
         bool isInternal,
         string auditAction,
-=======
-    ICurrentTenantContext currentTenantContext) : IConversationService
-{
-    public async Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(
-        ConversationListQueryParameters query,
->>>>>>> 297967c (Implement host conversation inbox endpoint)
         CancellationToken cancellationToken)
     {
         if (!TryGetCompanyId(out var companyId, out var tenantError))
         {
-<<<<<<< HEAD
             return ApiResponse<ConversationMessageResponse>.Fail(tenantError, [tenantError]);
         }
 
@@ -343,39 +369,6 @@ public sealed class ConversationService(
         }
 
         return errors;
-=======
-            return ApiResponse<ConversationListResponse>.Fail(tenantError, [tenantError], currentTenantContext.CorrelationId);
-        }
-
-        var validationErrors = Validate(query);
-        if (validationErrors.Count > 0)
-        {
-            return ApiResponse<ConversationListResponse>.Fail(
-                "Conversation list query validation failed.",
-                validationErrors,
-                currentTenantContext.CorrelationId);
-        }
-
-        var normalizedQuery = new ConversationListQueryParameters
-        {
-            Page = query.Page,
-            PageSize = query.PageSize,
-            Status = query.Status,
-            PropertyId = query.PropertyId,
-            RequiresHostAttention = query.RequiresHostAttention,
-            Search = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim()
-        };
-
-        var conversations = await conversationRepository.GetInboxAsync(companyId, normalizedQuery, cancellationToken);
-        return ApiResponse<ConversationListResponse>.Ok(new ConversationListResponse
-        {
-            Items = conversations.Items,
-            TotalCount = conversations.TotalCount,
-            Page = conversations.PageNumber,
-            PageSize = conversations.PageSize,
-            TotalPages = conversations.TotalPages
-        }, correlationId: currentTenantContext.CorrelationId);
->>>>>>> 297967c (Implement host conversation inbox endpoint)
     }
 
     private bool TryGetCompanyId(out Guid companyId, out string error)
@@ -399,7 +392,6 @@ public sealed class ConversationService(
         return true;
     }
 
-<<<<<<< HEAD
     private async Task AuditAsync(Guid companyId, Guid conversationId, string action, ConversationStatus status, ConversationSenderType? senderType, CancellationToken cancellationToken)
     {
         await conversationRepository.AddAuditLogAsync(new AuditLog
@@ -431,10 +423,11 @@ public sealed class ConversationService(
         return new ConversationDetailResponse
         {
             Id = conversation.Id,
+            ConversationId = conversation.Id,
             GuestId = conversation.GuestId,
             ReservationId = conversation.ReservationId,
             PropertyId = conversation.PropertyId,
-            Channel = conversation.Channel,
+            Channel = conversation.Channel.ToString(),
             ChannelIdentity = conversation.ChannelIdentity,
             Status = conversation.Status,
             Subject = conversation.Subject,
@@ -446,7 +439,11 @@ public sealed class ConversationService(
             Guest = new ConversationGuestSummary
             {
                 Id = conversation.GuestId,
+                GuestId = conversation.GuestId,
                 FullName = conversation.Guest is null ? string.Empty : $"{conversation.Guest.FirstName} {conversation.Guest.LastName}".Trim(),
+                FirstName = conversation.Guest?.FirstName ?? string.Empty,
+                LastName = conversation.Guest?.LastName ?? string.Empty,
+                Email = conversation.Guest?.Email,
                 PreferredLanguage = conversation.Guest?.PreferredLanguage ?? string.Empty
             },
             Reservation = conversation.Reservation is null
@@ -454,6 +451,7 @@ public sealed class ConversationService(
                 : new ConversationReservationSummary
                 {
                     Id = conversation.Reservation.Id,
+                    ReservationId = conversation.Reservation.Id,
                     ConfirmationNumber = conversation.Reservation.ConfirmationNumber,
                     CheckInDate = conversation.Reservation.CheckInDate,
                     CheckOutDate = conversation.Reservation.CheckOutDate,
@@ -464,6 +462,7 @@ public sealed class ConversationService(
                 : new ConversationPropertySummary
                 {
                     Id = conversation.Property.Id,
+                    PropertyId = conversation.Property.Id,
                     Name = conversation.Property.Name,
                     City = conversation.Property.City
                 },
@@ -472,6 +471,7 @@ public sealed class ConversationService(
                 : new ConversationAssignedUserSummary
                 {
                     Id = conversation.AssignedUser.Id,
+                    UserId = conversation.AssignedUser.Id,
                     FullName = conversation.AssignedUser.FullName
                 },
             Messages = conversation.Messages.Where(message => !message.IsInternal).OrderBy(message => message.SentAt).Select(MapMessage).ToList()
@@ -492,8 +492,6 @@ public sealed class ConversationService(
         };
     }
 
-    private sealed record AssociationValidationResult(Guid? ReservationPropertyId);
-=======
     private static IReadOnlyCollection<string> Validate(ConversationListQueryParameters query)
     {
         var errors = new List<string>();
@@ -518,5 +516,6 @@ public sealed class ConversationService(
 
         return errors;
     }
->>>>>>> 297967c (Implement host conversation inbox endpoint)
+
+    private sealed record AssociationValidationResult(Guid? ReservationPropertyId);
 }

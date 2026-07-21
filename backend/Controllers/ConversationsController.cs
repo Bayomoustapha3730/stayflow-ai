@@ -8,11 +8,7 @@ using StayFlow.Api.Services;
 namespace StayFlow.Api.Controllers;
 
 /// <summary>
-<<<<<<< HEAD
 /// Staff API for tenant-scoped guest conversation management.
-=======
-/// Staff API for tenant-scoped host conversation inbox operations.
->>>>>>> 297967c (Implement host conversation inbox endpoint)
 /// </summary>
 [ApiController]
 [Route("conversations")]
@@ -20,7 +16,6 @@ namespace StayFlow.Api.Controllers;
 [Authorize]
 public sealed class ConversationsController(IConversationService conversationService) : ControllerBase
 {
-<<<<<<< HEAD
     [HttpPost]
     [RequiresPermission("conversations.create")]
     [ProducesResponseType(typeof(ApiResponse<ConversationDetailResponse>), StatusCodes.Status200OK)]
@@ -125,10 +120,6 @@ public sealed class ConversationsController(IConversationService conversationSer
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
-    private ActionResult<ApiResponse<T>> ToFailureResult<T>(ApiResponse<T> response)
-    {
-        return response.Errors.Count > 0 ? BadRequest(response) : NotFound(response);
-=======
     /// <summary>
     /// Gets tenant-scoped conversations for the host inbox.
     /// </summary>
@@ -142,6 +133,10 @@ public sealed class ConversationsController(IConversationService conversationSer
     {
         var response = await conversationService.GetConversationsAsync(query, cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
->>>>>>> 297967c (Implement host conversation inbox endpoint)
+    }
+
+    private ActionResult<ApiResponse<T>> ToFailureResult<T>(ApiResponse<T> response)
+    {
+        return response.Errors.Count > 0 ? BadRequest(response) : NotFound(response);
     }
 }

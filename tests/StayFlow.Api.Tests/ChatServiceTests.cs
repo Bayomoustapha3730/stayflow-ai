@@ -362,6 +362,9 @@ public sealed class ChatServiceTests
             });
         }
 
+        public Task<PagedResult<ConversationSummaryResponse>> GetInboxAsync(Guid requestedCompanyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
+            => Task.FromResult(new PagedResult<ConversationSummaryResponse> { Items = [], PageNumber = 1, PageSize = 20, TotalCount = 0 });
+
         public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid requestedCompanyId, string externalMessageId, CancellationToken cancellationToken)
         {
             return Task.FromResult(Messages.FirstOrDefault(message => message.CompanyId == requestedCompanyId && message.ExternalMessageId == externalMessageId));

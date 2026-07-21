@@ -403,7 +403,7 @@ public sealed class ChatService(
             GuestId = conversation.GuestId,
             ReservationId = conversation.ReservationId,
             PropertyId = conversation.PropertyId,
-            Channel = conversation.Channel,
+            Channel = conversation.Channel.ToString(),
             ChannelIdentity = conversation.ChannelIdentity,
             Status = conversation.Status,
             Subject = conversation.Subject,
@@ -412,7 +412,7 @@ public sealed class ChatService(
             StartedAt = conversation.StartedAt,
             LastActivityAt = conversation.LastActivityAt,
             ClosedAt = conversation.ClosedAt,
-            Guest = new ConversationGuestSummary { Id = conversation.GuestId }
+            Guest = new ConversationGuestSummary { Id = conversation.GuestId, GuestId = conversation.GuestId }
         };
     }
 
