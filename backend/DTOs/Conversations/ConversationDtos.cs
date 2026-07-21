@@ -73,7 +73,6 @@ public sealed class ConversationListResponse
 
 public class ConversationSummaryResponse
 {
-    public Guid Id { get; init; }
     public Guid ConversationId { get; init; }
     public Guid GuestId { get; init; }
     public Guid? ReservationId { get; init; }
@@ -122,7 +121,6 @@ public sealed class ConversationHistoryResponse
 
 public sealed class ConversationGuestSummary
 {
-    public Guid Id { get; init; }
     public Guid GuestId { get; init; }
     public string FullName { get; init; } = string.Empty;
     public string FirstName { get; init; } = string.Empty;
@@ -133,7 +131,6 @@ public sealed class ConversationGuestSummary
 
 public sealed class ConversationPropertySummary
 {
-    public Guid Id { get; init; }
     public Guid PropertyId { get; init; }
     public string Name { get; init; } = string.Empty;
     public string City { get; init; } = string.Empty;
@@ -141,7 +138,6 @@ public sealed class ConversationPropertySummary
 
 public sealed class ConversationReservationSummary
 {
-    public Guid Id { get; init; }
     public Guid ReservationId { get; init; }
     public string? ConfirmationNumber { get; init; }
     public DateOnly CheckInDate { get; init; }
@@ -151,7 +147,6 @@ public sealed class ConversationReservationSummary
 
 public sealed class ConversationAssignedUserSummary
 {
-    public Guid Id { get; init; }
     public Guid UserId { get; init; }
     public string FullName { get; init; } = string.Empty;
 }

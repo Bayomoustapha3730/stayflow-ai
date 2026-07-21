@@ -98,7 +98,7 @@ public sealed class ConversationServiceTests
         }, CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Equal(existing.Id, response.Data!.Id);
+        Assert.Equal(existing.Id, response.Data!.ConversationId);
         Assert.Single(fixture.Repository.Conversations);
     }
 

@@ -422,7 +422,6 @@ public sealed class ConversationService(
     {
         return new ConversationDetailResponse
         {
-            Id = conversation.Id,
             ConversationId = conversation.Id,
             GuestId = conversation.GuestId,
             ReservationId = conversation.ReservationId,
@@ -438,7 +437,6 @@ public sealed class ConversationService(
             ClosedAt = conversation.ClosedAt,
             Guest = new ConversationGuestSummary
             {
-                Id = conversation.GuestId,
                 GuestId = conversation.GuestId,
                 FullName = conversation.Guest is null ? string.Empty : $"{conversation.Guest.FirstName} {conversation.Guest.LastName}".Trim(),
                 FirstName = conversation.Guest?.FirstName ?? string.Empty,
@@ -450,7 +448,6 @@ public sealed class ConversationService(
                 ? null
                 : new ConversationReservationSummary
                 {
-                    Id = conversation.Reservation.Id,
                     ReservationId = conversation.Reservation.Id,
                     ConfirmationNumber = conversation.Reservation.ConfirmationNumber,
                     CheckInDate = conversation.Reservation.CheckInDate,
@@ -461,7 +458,6 @@ public sealed class ConversationService(
                 ? null
                 : new ConversationPropertySummary
                 {
-                    Id = conversation.Property.Id,
                     PropertyId = conversation.Property.Id,
                     Name = conversation.Property.Name,
                     City = conversation.Property.City
@@ -470,7 +466,6 @@ public sealed class ConversationService(
                 ? null
                 : new ConversationAssignedUserSummary
                 {
-                    Id = conversation.AssignedUser.Id,
                     UserId = conversation.AssignedUser.Id,
                     FullName = conversation.AssignedUser.FullName
                 },

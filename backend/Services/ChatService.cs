@@ -81,7 +81,7 @@ public sealed class ChatService(
             return ApiResponse<ChatMessageResponse>.Fail(conversationResponse.Message, conversationResponse.Errors);
         }
 
-        var conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversationResponse.Data.Id, cancellationToken);
+        var conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversationResponse.Data.ConversationId, cancellationToken);
         if (conversation is null)
         {
             return ApiResponse<ChatMessageResponse>.Fail("Conversation was not found.");
@@ -387,7 +387,7 @@ public sealed class ChatService(
     {
         return new ChatStatusResponse
         {
-            ConversationId = conversation.Id,
+            ConversationId = conversation.ConversationId,
             Status = conversation.Status,
             HumanTakeoverEnabled = conversation.HumanTakeoverEnabled,
             RequiresHostAttention = RequiresHostAttention(conversation.Status, conversation.HumanTakeoverEnabled),
@@ -399,7 +399,7 @@ public sealed class ChatService(
     {
         return new ConversationDetailResponse
         {
-            Id = conversation.Id,
+            ConversationId = conversation.Id,
             GuestId = conversation.GuestId,
             ReservationId = conversation.ReservationId,
             PropertyId = conversation.PropertyId,
@@ -412,7 +412,7 @@ public sealed class ChatService(
             StartedAt = conversation.StartedAt,
             LastActivityAt = conversation.LastActivityAt,
             ClosedAt = conversation.ClosedAt,
-            Guest = new ConversationGuestSummary { Id = conversation.GuestId, GuestId = conversation.GuestId }
+            Guest = new ConversationGuestSummary { GuestId = conversation.GuestId }
         };
     }
 

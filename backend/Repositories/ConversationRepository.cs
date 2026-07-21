@@ -239,10 +239,4 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             || status == ConversationStatus.HumanManaged;
     }
 
-    private static ConversationStatus ParseStatus(string status)
-    {
-        return Enum.TryParse<ConversationStatus>(status, ignoreCase: true, out var parsed)
-            ? parsed
-            : ConversationStatus.Open;
-    }
 }
