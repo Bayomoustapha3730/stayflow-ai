@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/StayFlow.Api.Tests/StayFlow.Api.Tests.csproj" />
+  </Folder>
+  <Project Path="backend/backend.csproj" />
+</Solution>

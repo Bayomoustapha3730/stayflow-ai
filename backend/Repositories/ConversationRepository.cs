@@ -2,17 +2,20 @@ using Microsoft.EntityFrameworkCore;
 using StayFlow.Api.Common;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Conversations;
-<<<<<<< HEAD
 using StayFlow.Api.DTOs.ReservationContext;
-=======
->>>>>>> 297967c (Implement host conversation inbox endpoint)
 using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Repositories;
 
 public sealed class ConversationRepository(ApplicationDbContext dbContext) : IConversationRepository
 {
-<<<<<<< HEAD
+    private static readonly ConversationStatus[] HostAttentionStatuses =
+    [
+        ConversationStatus.AwaitingHost,
+        ConversationStatus.Escalated,
+        ConversationStatus.HumanManaged
+    ];
+
     public Task<Conversation?> GetByIdForCompanyAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken)
     {
         return dbContext.Conversations
@@ -61,13 +64,10 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
         {
             Items = items,
             PageNumber = pageNumber,
-=======
-    private static readonly string[] HostAttentionStatuses =
-    [
-        ConversationStatus.AwaitingHost.ToString(),
-        ConversationStatus.Escalated.ToString(),
-        ConversationStatus.HumanManaged.ToString()
-    ];
+            PageSize = pageSize,
+            TotalCount = totalCount
+        };
+    }
 
     public async Task<PagedResult<ConversationSummaryResponse>> GetInboxAsync(
         Guid companyId,
@@ -82,8 +82,7 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
 
         if (query.Status is { } status)
         {
-            var statusValue = status.ToString();
-            conversationsQuery = conversationsQuery.Where(conversation => conversation.Status == statusValue);
+            conversationsQuery = conversationsQuery.Where(conversation => conversation.Status == status);
         }
 
         if (query.PropertyId is { } propertyId)
@@ -121,7 +120,7 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             {
                 ConversationId = conversation.Id,
                 conversation.Status,
-                Channel = conversation.Channel,
+                Channel = conversation.Channel.ToString(),
                 Subject = conversation.ExternalThreadId,
                 conversation.GuestId,
                 conversation.Guest.FirstName,
@@ -137,12 +136,11 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             .ToListAsync(cancellationToken);
         var items = rows.Select(row =>
         {
-            var status = ParseStatus(row.Status);
             var requiresHostAttention = IsHostAttentionStatus(row.Status);
             return new ConversationSummaryResponse
             {
                 ConversationId = row.ConversationId,
-                Status = status,
+                Status = row.Status,
                 Channel = row.Channel,
                 Subject = row.Subject,
                 Guest = new ConversationGuestSummary
@@ -154,7 +152,7 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
                 },
                 Property = new ConversationPropertySummary
                 {
-                    PropertyId = row.PropertyId,
+                    PropertyId = row.PropertyId ?? Guid.Empty,
                     Name = row.PropertyName
                 },
                 Reservation = row.ReservationId is null
@@ -170,7 +168,7 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
                 EscalationReason = null,
                 StartedAt = row.StartedAt,
                 LastActivityAt = row.LastActivityAt,
-                ClosedAt = status == ConversationStatus.Closed ? row.LastActivityAt : null,
+                ClosedAt = row.Status == ConversationStatus.Closed ? row.LastActivityAt : null,
                 LatestVisibleMessagePreview = null,
                 LatestVisibleMessageSenderType = null,
                 LatestVisibleMessageTimestamp = null,
@@ -182,13 +180,11 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
         {
             Items = items,
             PageNumber = page,
->>>>>>> 297967c (Implement host conversation inbox endpoint)
             PageSize = pageSize,
             TotalCount = totalCount
         };
     }
 
-<<<<<<< HEAD
     public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid companyId, string externalMessageId, CancellationToken cancellationToken)
     {
         return dbContext.ConversationMessages
@@ -234,19 +230,13 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return dbContext.SaveChangesAsync(cancellationToken);
-=======
-    private static bool IsHostAttentionStatus(string status)
-    {
-        return status == ConversationStatus.AwaitingHost.ToString()
-            || status == ConversationStatus.Escalated.ToString()
-            || status == ConversationStatus.HumanManaged.ToString();
     }
 
-    private static ConversationStatus ParseStatus(string status)
+    private static bool IsHostAttentionStatus(ConversationStatus status)
     {
-        return Enum.TryParse<ConversationStatus>(status, ignoreCase: true, out var parsed)
-            ? parsed
-            : ConversationStatus.Open;
->>>>>>> 297967c (Implement host conversation inbox endpoint)
+        return status == ConversationStatus.AwaitingHost
+            || status == ConversationStatus.Escalated
+            || status == ConversationStatus.HumanManaged;
     }
+
 }

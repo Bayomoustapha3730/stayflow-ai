@@ -1,30 +1,21 @@
-<<<<<<< HEAD
 using Microsoft.Extensions.Options;
-using StayFlow.Api.Common;
-using StayFlow.Api.DTOs.Conversations;
-using StayFlow.Api.DTOs.ReservationContext;
-using StayFlow.Api.Models;
-using StayFlow.Api.Repositories;
-using StayFlow.Api.Services;
-=======
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.Controllers;
 using StayFlow.Api.DTOs.Conversations;
+using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Extensions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
->>>>>>> 297967c (Implement host conversation inbox endpoint)
 
 namespace StayFlow.Api.Tests;
 
 public sealed class ConversationServiceTests
 {
     [Fact]
-<<<<<<< HEAD
     public async Task CreateOrGetConversationAsync_WithValidTenantGuest_CreatesConversation()
     {
         var fixture = new Fixture();
@@ -107,7 +98,7 @@ public sealed class ConversationServiceTests
         }, CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Equal(existing.Id, response.Data!.Id);
+        Assert.Equal(existing.Id, response.Data!.ConversationId);
         Assert.Single(fixture.Repository.Conversations);
     }
 
@@ -229,13 +220,15 @@ public sealed class ConversationServiceTests
 
         Assert.False(response.Success);
         Assert.Equal("Conversation was not found.", response.Message);
-=======
+    }
+
+    [Fact]
     public async Task GetConversationsAsync_ReturnsTenantScopedConversationsOnly()
     {
         var fixture = new Fixture();
-        var tenantConversation = fixture.Repository.NewConversation(subject: "Tenant conversation");
-        var crossTenantConversation = fixture.Repository.NewConversation(companyId: Guid.NewGuid(), subject: "Other tenant");
-        fixture.Repository.Conversations.AddRange([tenantConversation, crossTenantConversation]);
+        var tenantConversation = fixture.Repository.NewInboxConversation(subject: "Tenant conversation");
+        var crossTenantConversation = fixture.Repository.NewInboxConversation(overrideCompanyId: Guid.NewGuid(), subject: "Other tenant");
+        fixture.Repository.InboxConversations.AddRange([tenantConversation, crossTenantConversation]);
 
         var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
 
@@ -249,10 +242,10 @@ public sealed class ConversationServiceTests
     public async Task GetConversationsAsync_OrdersHostAttentionConversationsBeforeOpenConversations()
     {
         var fixture = new Fixture();
-        var oldAttention = fixture.Repository.NewConversation(status: ConversationStatus.Escalated, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-2));
-        var newestOpen = fixture.Repository.NewConversation(status: ConversationStatus.Open, lastActivityAt: DateTimeOffset.UtcNow);
-        var newerAttention = fixture.Repository.NewConversation(status: ConversationStatus.HumanManaged, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-1));
-        fixture.Repository.Conversations.AddRange([oldAttention, newestOpen, newerAttention]);
+        var oldAttention = fixture.Repository.NewInboxConversation(status: ConversationStatus.Escalated, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-2));
+        var newestOpen = fixture.Repository.NewInboxConversation(status: ConversationStatus.Open, lastActivityAt: DateTimeOffset.UtcNow);
+        var newerAttention = fixture.Repository.NewInboxConversation(status: ConversationStatus.HumanManaged, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-1));
+        fixture.Repository.InboxConversations.AddRange([oldAttention, newestOpen, newerAttention]);
 
         var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
 
@@ -266,8 +259,8 @@ public sealed class ConversationServiceTests
     public async Task GetConversationsAsync_FiltersByStatus()
     {
         var fixture = new Fixture();
-        var escalated = fixture.Repository.NewConversation(status: ConversationStatus.Escalated);
-        fixture.Repository.Conversations.AddRange([fixture.Repository.NewConversation(status: ConversationStatus.Open), escalated]);
+        var escalated = fixture.Repository.NewInboxConversation(status: ConversationStatus.Escalated);
+        fixture.Repository.InboxConversations.AddRange([fixture.Repository.NewInboxConversation(status: ConversationStatus.Open), escalated]);
 
         var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Status = ConversationStatus.Escalated }, CancellationToken.None);
 
@@ -281,8 +274,8 @@ public sealed class ConversationServiceTests
     {
         var fixture = new Fixture();
         var propertyId = Guid.NewGuid();
-        var target = fixture.Repository.NewConversation(propertyId: propertyId);
-        fixture.Repository.Conversations.AddRange([fixture.Repository.NewConversation(), target]);
+        var target = fixture.Repository.NewInboxConversation(propertyId: propertyId);
+        fixture.Repository.InboxConversations.AddRange([fixture.Repository.NewInboxConversation(), target]);
 
         var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { PropertyId = propertyId }, CancellationToken.None);
 
@@ -295,8 +288,8 @@ public sealed class ConversationServiceTests
     public async Task GetConversationsAsync_FiltersByRequiresHostAttention()
     {
         var fixture = new Fixture();
-        var attention = fixture.Repository.NewConversation(status: ConversationStatus.AwaitingHost);
-        fixture.Repository.Conversations.AddRange([fixture.Repository.NewConversation(status: ConversationStatus.Open), attention]);
+        var attention = fixture.Repository.NewInboxConversation(status: ConversationStatus.AwaitingHost);
+        fixture.Repository.InboxConversations.AddRange([fixture.Repository.NewInboxConversation(status: ConversationStatus.Open), attention]);
 
         var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { RequiresHostAttention = true }, CancellationToken.None);
 
@@ -314,14 +307,14 @@ public sealed class ConversationServiceTests
     public async Task GetConversationsAsync_SearchesSupportedFields(string search)
     {
         var fixture = new Fixture();
-        var conversation = fixture.Repository.NewConversation(
+        var conversation = fixture.Repository.NewInboxConversation(
             guestFirstName: "Demo",
             guestLastName: "Guest",
             guestEmail: "demo.guest@example.com",
             propertyName: "Westlands Apartment",
             confirmationNumber: "CONF-001",
             subject: "Arrival help");
-        fixture.Repository.Conversations.Add(conversation);
+        fixture.Repository.InboxConversations.Add(conversation);
 
         var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Search = $"  {search}  " }, CancellationToken.None);
 
@@ -335,11 +328,11 @@ public sealed class ConversationServiceTests
     public async Task GetConversationsAsync_InternalNotesAreExcludedFromPreviewAndVisibleCount()
     {
         var fixture = new Fixture();
-        var conversation = fixture.Repository.NewConversation(
+        var conversation = fixture.Repository.NewInboxConversation(
             latestVisibleMessagePreview: "Visible guest message",
             latestVisibleMessageSenderType: ConversationSenderType.Guest,
             totalVisibleMessageCount: 1);
-        fixture.Repository.Conversations.Add(conversation);
+        fixture.Repository.InboxConversations.Add(conversation);
 
         var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
 
@@ -354,7 +347,7 @@ public sealed class ConversationServiceTests
     public async Task GetConversationsAsync_ReturnsPaginationMetadata()
     {
         var fixture = new Fixture();
-        fixture.Repository.Conversations.AddRange(Enumerable.Range(0, 3).Select(index => fixture.Repository.NewConversation(subject: $"Conversation {index}")));
+        fixture.Repository.InboxConversations.AddRange(Enumerable.Range(0, 3).Select(index => fixture.Repository.NewInboxConversation(subject: $"Conversation {index}")));
 
         var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Page = 2, PageSize = 2 }, CancellationToken.None);
 
@@ -399,12 +392,11 @@ public sealed class ConversationServiceTests
 
         Assert.Contains(services, service => service.ServiceType == typeof(IConversationRepository) && service.ImplementationType == typeof(ConversationRepository));
         Assert.Contains(services, service => service.ServiceType == typeof(IConversationService) && service.ImplementationType == typeof(ConversationService));
->>>>>>> 297967c (Implement host conversation inbox endpoint)
     }
 
     private sealed class Fixture
     {
-<<<<<<< HEAD
+
         public Fixture(int maxMessageCharacters = 2000)
         {
             Repository = new FakeConversationRepository(CompanyId);
@@ -427,18 +419,8 @@ public sealed class ConversationServiceTests
         public Reservation Reservation { get; }
         public FakeConversationRepository Repository { get; }
         public ConversationService Service { get; }
-=======
-        public Guid CompanyId { get; } = Guid.NewGuid();
-        public FakeConversationRepository Repository { get; }
-        public ConversationService Service { get; }
-
-        public Fixture()
-        {
-            Repository = new FakeConversationRepository(CompanyId);
-            Service = new ConversationService(Repository, new FakeCurrentTenantContext(CompanyId));
-        }
->>>>>>> 297967c (Implement host conversation inbox endpoint)
     }
+
 
     private sealed class FakeCurrentTenantContext(Guid companyId) : ICurrentTenantContext
     {
@@ -448,7 +430,7 @@ public sealed class ConversationServiceTests
         public bool IsAuthenticated { get; } = true;
     }
 
-<<<<<<< HEAD
+
     private sealed class FakeConversationRepository(Guid companyId) : IConversationRepository
     {
         public List<Conversation> Conversations { get; } = [];
@@ -458,6 +440,9 @@ public sealed class ConversationServiceTests
         public List<Reservation> Reservations { get; } = [];
         public List<User> Users { get; } = [];
         public List<AuditLog> AuditLogs { get; } = [];
+        public List<FakeConversation> InboxConversations { get; } = [];
+        public Guid? LastCompanyId { get; private set; }
+        public ConversationListQueryParameters? LastQuery { get; private set; }
 
         public Task<Conversation?> GetByIdForCompanyAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
         {
@@ -489,6 +474,62 @@ public sealed class ConversationServiceTests
                 PageNumber = 1,
                 PageSize = messages.Count,
                 TotalCount = messages.Count
+            });
+        }
+
+        public Task<PagedResult<ConversationSummaryResponse>> GetInboxAsync(
+            Guid requestedCompanyId,
+            ConversationListQueryParameters query,
+            CancellationToken cancellationToken)
+        {
+            LastCompanyId = requestedCompanyId;
+            LastQuery = query;
+            var conversations = InboxConversations
+                .Where(conversation => conversation.CompanyId == requestedCompanyId);
+
+            if (query.Status is { } status)
+            {
+                conversations = conversations.Where(conversation => conversation.Status == status);
+            }
+
+            if (query.PropertyId is { } propertyId)
+            {
+                conversations = conversations.Where(conversation => conversation.Property!.PropertyId == propertyId);
+            }
+
+            if (query.RequiresHostAttention is { } requiresHostAttention)
+            {
+                conversations = conversations.Where(conversation => conversation.RequiresHostAttention == requiresHostAttention);
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var search = query.Search.Trim();
+                conversations = conversations.Where(conversation =>
+                    $"{conversation.Guest!.FirstName} {conversation.Guest.LastName}".Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || (conversation.Guest.Email?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || conversation.Property!.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || (conversation.Reservation?.ConfirmationNumber?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (conversation.Subject?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+
+            var ordered = conversations
+                .OrderByDescending(conversation => conversation.RequiresHostAttention)
+                .ThenByDescending(conversation => conversation.LastActivityAt)
+                .ToList();
+            var pageSize = query.NormalizedPageSize;
+            var items = ordered
+                .Skip((query.Page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(conversation => conversation.ToResponse())
+                .ToList();
+
+            return Task.FromResult(new PagedResult<ConversationSummaryResponse>
+            {
+                Items = items,
+                PageNumber = query.Page,
+                PageSize = pageSize,
+                TotalCount = ordered.Count
             });
         }
 
@@ -573,71 +614,11 @@ public sealed class ConversationServiceTests
                 LastActivityAt = DateTimeOffset.UtcNow,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
-=======
-    private sealed class FakeConversationRepository(Guid defaultCompanyId) : IConversationRepository
-    {
-        public List<FakeConversation> Conversations { get; } = [];
-        public Guid? LastCompanyId { get; private set; }
-        public ConversationListQueryParameters? LastQuery { get; private set; }
-
-        public Task<PagedResult<ConversationSummaryResponse>> GetInboxAsync(
-            Guid companyId,
-            ConversationListQueryParameters query,
-            CancellationToken cancellationToken)
-        {
-            LastCompanyId = companyId;
-            LastQuery = query;
-            var conversations = Conversations
-                .Where(conversation => conversation.CompanyId == companyId);
-
-            if (query.Status is { } status)
-            {
-                conversations = conversations.Where(conversation => conversation.Status == status);
-            }
-
-            if (query.PropertyId is { } propertyId)
-            {
-                conversations = conversations.Where(conversation => conversation.Property!.PropertyId == propertyId);
-            }
-
-            if (query.RequiresHostAttention is { } requiresHostAttention)
-            {
-                conversations = conversations.Where(conversation => conversation.RequiresHostAttention == requiresHostAttention);
-            }
-
-            if (!string.IsNullOrWhiteSpace(query.Search))
-            {
-                var search = query.Search.Trim();
-                conversations = conversations.Where(conversation =>
-                    $"{conversation.Guest!.FirstName} {conversation.Guest.LastName}".Contains(search, StringComparison.OrdinalIgnoreCase)
-                    || (conversation.Guest.Email?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
-                    || conversation.Property!.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
-                    || (conversation.Reservation?.ConfirmationNumber?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
-                    || (conversation.Subject?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
-            }
-
-            var ordered = conversations
-                .OrderByDescending(conversation => conversation.RequiresHostAttention)
-                .ThenByDescending(conversation => conversation.LastActivityAt)
-                .ToList();
-            var pageSize = query.NormalizedPageSize;
-            var items = ordered
-                .Skip((query.Page - 1) * pageSize)
-                .Take(pageSize)
-                .Select(conversation => conversation.ToResponse())
-                .ToList();
-
-            return Task.FromResult(new PagedResult<ConversationSummaryResponse>
-            {
-                Items = items,
-                PageNumber = query.Page,
-                PageSize = pageSize,
-                TotalCount = ordered.Count
-            });
+            };
         }
 
-        public FakeConversation NewConversation(
-            Guid? companyId = null,
+        public FakeConversation NewInboxConversation(
+            Guid? overrideCompanyId = null,
             Guid? propertyId = null,
             ConversationStatus status = ConversationStatus.Open,
             DateTimeOffset? lastActivityAt = null,
@@ -654,7 +635,7 @@ public sealed class ConversationServiceTests
             var resolvedPropertyId = propertyId ?? Guid.NewGuid();
             return new FakeConversation
             {
-                CompanyId = companyId ?? defaultCompanyId,
+                CompanyId = overrideCompanyId ?? companyId,
                 ConversationId = Guid.NewGuid(),
                 Status = status,
                 Channel = "WhatsApp",
@@ -726,7 +707,6 @@ public sealed class ConversationServiceTests
                 LatestVisibleMessageSenderType = LatestVisibleMessageSenderType,
                 LatestVisibleMessageTimestamp = LatestVisibleMessagePreview is null ? null : LastActivityAt,
                 TotalVisibleMessageCount = TotalVisibleMessageCount
->>>>>>> 297967c (Implement host conversation inbox endpoint)
             };
         }
     }
