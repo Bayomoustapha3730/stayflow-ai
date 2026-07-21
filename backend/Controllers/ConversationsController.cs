@@ -16,6 +16,18 @@ namespace StayFlow.Api.Controllers;
 [Authorize]
 public sealed class ConversationsController(IConversationService conversationService) : ControllerBase
 {
+    [HttpGet]
+    [RequiresPermission("conversations.read")]
+    [ProducesResponseType(typeof(ApiResponse<ConversationListResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationListResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ConversationListResponse>>> GetConversations(
+        [FromQuery] ConversationListQueryParameters query,
+        CancellationToken cancellationToken)
+    {
+        var response = await conversationService.GetConversationsAsync(query, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
     [HttpPost]
     [RequiresPermission("conversations.create")]
     [ProducesResponseType(typeof(ApiResponse<ConversationDetailResponse>), StatusCodes.Status200OK)]

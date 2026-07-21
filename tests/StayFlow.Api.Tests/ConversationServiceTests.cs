@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Options;
+using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
+using StayFlow.Api.Controllers;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
@@ -10,6 +12,162 @@ namespace StayFlow.Api.Tests;
 
 public sealed class ConversationServiceTests
 {
+    [Fact]
+    public async Task GetConversationsAsync_ReturnsTenantScopedConversationsOnly()
+    {
+        var fixture = new Fixture();
+        var tenantConversation = fixture.Repository.NewConversation();
+        var crossTenantConversation = fixture.Repository.NewConversation(overrideCompanyId: Guid.NewGuid());
+        fixture.Repository.Conversations.AddRange([tenantConversation, crossTenantConversation]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(tenantConversation.Id, response.Data.Items.Single().ConversationId);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_OrdersHostAttentionConversationsFirstThenLastActivity()
+    {
+        var fixture = new Fixture();
+        var oldAttention = fixture.Repository.NewConversation(status: ConversationStatus.Escalated, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-2));
+        var newestOpen = fixture.Repository.NewConversation(status: ConversationStatus.Open, lastActivityAt: DateTimeOffset.UtcNow);
+        var newerAttention = fixture.Repository.NewConversation(status: ConversationStatus.HumanManaged, humanTakeover: true, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-1));
+        fixture.Repository.Conversations.AddRange([oldAttention, newestOpen, newerAttention]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal([newerAttention.Id, oldAttention.Id, newestOpen.Id], response.Data!.Items.Select(item => item.ConversationId).ToList());
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_FiltersByStatus()
+    {
+        var fixture = new Fixture();
+        var escalated = fixture.Repository.NewConversation(status: ConversationStatus.Escalated);
+        fixture.Repository.Conversations.AddRange([fixture.Repository.NewConversation(status: ConversationStatus.Open), escalated]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Status = ConversationStatus.Escalated }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(escalated.Id, response.Data.Items.Single().ConversationId);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_FiltersByProperty()
+    {
+        var fixture = new Fixture();
+        var otherProperty = new Property { Id = Guid.NewGuid(), CompanyId = fixture.CompanyId, Name = "Lavington Villa", City = "Nairobi", CountryCode = "KE", AddressLine1 = "Lane", TimeZone = "Africa/Nairobi", IsActive = true };
+        fixture.Repository.Properties.Add(otherProperty);
+        var target = fixture.Repository.NewConversation(property: otherProperty);
+        fixture.Repository.Conversations.AddRange([fixture.Repository.NewConversation(), target]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { PropertyId = otherProperty.Id }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(target.Id, response.Data.Items.Single().ConversationId);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_FiltersByRequiresHostAttention()
+    {
+        var fixture = new Fixture();
+        var attention = fixture.Repository.NewConversation(status: ConversationStatus.AwaitingHost);
+        fixture.Repository.Conversations.AddRange([fixture.Repository.NewConversation(status: ConversationStatus.Open), attention]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { RequiresHostAttention = true }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(attention.Id, response.Data.Items.Single().ConversationId);
+        Assert.True(response.Data.Items.Single().RequiresHostAttention);
+    }
+
+    [Theory]
+    [InlineData("demo guest")]
+    [InlineData("demo.guest@example.com")]
+    [InlineData("Westlands")]
+    [InlineData("CONF-001")]
+    public async Task GetConversationsAsync_SearchesSupportedFields(string search)
+    {
+        var fixture = new Fixture();
+        fixture.Guest.Email = "demo.guest@example.com";
+        fixture.Property.Name = "Westlands Apartment";
+        fixture.Reservation.ConfirmationNumber = "CONF-001";
+        var conversation = fixture.Repository.NewConversation(reservation: fixture.Reservation, subject: "Arrival help");
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Search = search }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(conversation.Id, response.Data.Items.Single().ConversationId);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_ExcludesInternalNotesFromPreviewAndVisibleCount()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        fixture.Repository.Messages.AddRange(
+        [
+            fixture.Repository.NewMessage(conversation, "Visible guest message", ConversationSenderType.Guest, isInternal: false, sentAt: DateTimeOffset.UtcNow.AddMinutes(-2)),
+            fixture.Repository.NewMessage(conversation, "Host-only internal note", ConversationSenderType.System, ConversationMessageType.InternalNote, isInternal: true, sentAt: DateTimeOffset.UtcNow)
+        ]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
+
+        Assert.True(response.Success);
+        var item = response.Data!.Items.Single();
+        Assert.Equal("Visible guest message", item.LatestVisibleMessagePreview);
+        Assert.Equal(ConversationSenderType.Guest, item.LatestVisibleMessageSenderType);
+        Assert.Equal(1, item.TotalVisibleMessageCount);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_ReturnsPaginationMetadata()
+    {
+        var fixture = new Fixture();
+        fixture.Repository.Conversations.AddRange(Enumerable.Range(0, 3).Select(index => fixture.Repository.NewConversation(subject: $"Conversation {index}")));
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Page = 2, PageSize = 2 }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(3, response.Data!.TotalCount);
+        Assert.Equal(2, response.Data.Page);
+        Assert.Equal(2, response.Data.PageSize);
+        Assert.Equal(2, response.Data.TotalPages);
+        Assert.Single(response.Data.Items);
+    }
+
+    [Theory]
+    [InlineData(0, 25, "Page must be greater than or equal to 1.")]
+    [InlineData(1, 101, "PageSize must be 100 or fewer.")]
+    public async Task GetConversationsAsync_RejectsInvalidPagination(int page, int pageSize, string expectedError)
+    {
+        var fixture = new Fixture();
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Page = page, PageSize = pageSize }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Conversation list query validation failed.", response.Message);
+        Assert.Contains(expectedError, response.Errors);
+    }
+
+    [Fact]
+    public void GetConversations_RequiresConversationsReadPermission()
+    {
+        var method = typeof(ConversationsController).GetMethod(nameof(ConversationsController.GetConversations));
+        var attribute = Assert.Single(method!.GetCustomAttributes(typeof(RequiresPermissionAttribute), inherit: false).Cast<RequiresPermissionAttribute>());
+
+        Assert.Equal("conversations.read", attribute.Permission);
+    }
+
     [Fact]
     public async Task CreateOrGetConversationAsync_WithValidTenantGuest_CreatesConversation()
     {
@@ -261,6 +419,58 @@ public sealed class ConversationServiceTests
         public List<User> Users { get; } = [];
         public List<AuditLog> AuditLogs { get; } = [];
 
+        public Task<PagedResult<ConversationSummaryResponse>> ListConversationsAsync(Guid requestedCompanyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
+        {
+            var conversations = Conversations
+                .Where(conversation => conversation.CompanyId == requestedCompanyId && !conversation.IsDeleted);
+
+            if (query.Status is { } status)
+            {
+                conversations = conversations.Where(conversation => conversation.Status == status);
+            }
+
+            if (query.PropertyId is { } propertyId)
+            {
+                conversations = conversations.Where(conversation => conversation.PropertyId == propertyId);
+            }
+
+            if (query.RequiresHostAttention is { } requiresHostAttention)
+            {
+                conversations = conversations.Where(conversation => IsHostAttentionConversation(conversation) == requiresHostAttention);
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var search = query.Search.Trim();
+                conversations = conversations.Where(conversation =>
+                    $"{conversation.Guest?.FirstName} {conversation.Guest?.LastName}".Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || (conversation.Guest?.Email?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (conversation.Property?.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (conversation.Reservation?.ConfirmationNumber?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (conversation.Subject?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+
+            var ordered = conversations
+                .OrderByDescending(IsHostAttentionConversation)
+                .ThenByDescending(conversation => conversation.LastActivityAt)
+                .ToList();
+            var page = query.Page < 1 ? 1 : query.Page;
+            var pageSize = query.NormalizedPageSize;
+            var items = ordered
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(MapSummary)
+                .ToList();
+
+            return Task.FromResult(new PagedResult<ConversationSummaryResponse>
+            {
+                Items = items,
+                PageNumber = page,
+                PageSize = pageSize,
+                TotalCount = ordered.Count
+            });
+        }
+
         public Task<Conversation?> GetByIdForCompanyAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
         {
             return Task.FromResult(Conversations.FirstOrDefault(conversation => conversation.CompanyId == requestedCompanyId && conversation.Id == conversationId));
@@ -355,10 +565,17 @@ public sealed class ConversationServiceTests
             return Task.CompletedTask;
         }
 
-        public Conversation NewConversation(Guid? overrideCompanyId = null, ConversationStatus status = ConversationStatus.Open, bool humanTakeover = false)
+        public Conversation NewConversation(
+            Guid? overrideCompanyId = null,
+            ConversationStatus status = ConversationStatus.Open,
+            bool humanTakeover = false,
+            DateTimeOffset? lastActivityAt = null,
+            Property? property = null,
+            Reservation? reservation = null,
+            string? subject = null)
         {
             var guest = Guests.Single();
-            var property = Properties.Single();
+            property ??= Properties.First();
             return new Conversation
             {
                 Id = Guid.NewGuid(),
@@ -367,15 +584,109 @@ public sealed class ConversationServiceTests
                 Guest = guest,
                 PropertyId = property.Id,
                 Property = property,
+                ReservationId = reservation?.Id,
+                Reservation = reservation,
                 Channel = GuestChannel.Web,
                 ChannelIdentity = null,
                 Status = status,
+                Subject = subject,
                 HumanTakeoverEnabled = humanTakeover,
                 StartedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
-                LastActivityAt = DateTimeOffset.UtcNow,
+                LastActivityAt = lastActivityAt ?? DateTimeOffset.UtcNow,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
+        }
+
+        public ConversationMessage NewMessage(
+            Conversation conversation,
+            string content,
+            ConversationSenderType senderType,
+            ConversationMessageType messageType = ConversationMessageType.Text,
+            bool isInternal = false,
+            DateTimeOffset? sentAt = null)
+        {
+            return new ConversationMessage
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = conversation.CompanyId,
+                ConversationId = conversation.Id,
+                Conversation = conversation,
+                SenderType = senderType,
+                MessageType = messageType,
+                Content = content,
+                IsInternal = isInternal,
+                SentAt = sentAt ?? DateTimeOffset.UtcNow,
+                CreatedAt = sentAt ?? DateTimeOffset.UtcNow,
+                UpdatedAt = sentAt ?? DateTimeOffset.UtcNow
+            };
+        }
+
+        private ConversationSummaryResponse MapSummary(Conversation conversation)
+        {
+            var visibleMessages = Messages
+                .Where(message => message.CompanyId == conversation.CompanyId && message.ConversationId == conversation.Id && !message.IsInternal && !message.IsDeleted)
+                .OrderByDescending(message => message.SentAt)
+                .ThenByDescending(message => message.CreatedAt)
+                .ToList();
+            var latest = visibleMessages.FirstOrDefault();
+
+            return new ConversationSummaryResponse
+            {
+                Id = conversation.Id,
+                ConversationId = conversation.Id,
+                GuestId = conversation.GuestId,
+                ReservationId = conversation.ReservationId,
+                PropertyId = conversation.PropertyId,
+                Channel = conversation.Channel,
+                Status = conversation.Status,
+                Subject = conversation.Subject,
+                HumanTakeoverEnabled = conversation.HumanTakeoverEnabled,
+                RequiresHostAttention = IsHostAttentionConversation(conversation),
+                EscalationReason = conversation.EscalationReason,
+                StartedAt = conversation.StartedAt,
+                LastActivityAt = conversation.LastActivityAt,
+                ClosedAt = conversation.ClosedAt,
+                Guest = new ConversationGuestSummary
+                {
+                    Id = conversation.GuestId,
+                    FirstName = conversation.Guest?.FirstName ?? string.Empty,
+                    LastName = conversation.Guest?.LastName ?? string.Empty,
+                    FullName = conversation.Guest is null ? string.Empty : $"{conversation.Guest.FirstName} {conversation.Guest.LastName}".Trim(),
+                    Email = conversation.Guest?.Email,
+                    PreferredLanguage = conversation.Guest?.PreferredLanguage ?? string.Empty
+                },
+                Property = conversation.Property is null
+                    ? null
+                    : new ConversationPropertySummary
+                    {
+                        Id = conversation.Property.Id,
+                        Name = conversation.Property.Name,
+                        City = conversation.Property.City
+                    },
+                Reservation = conversation.Reservation is null
+                    ? null
+                    : new ConversationReservationSummary
+                    {
+                        Id = conversation.Reservation.Id,
+                        ConfirmationNumber = conversation.Reservation.ConfirmationNumber,
+                        CheckInDate = conversation.Reservation.CheckInDate,
+                        CheckOutDate = conversation.Reservation.CheckOutDate,
+                        Status = conversation.Reservation.Status
+                    },
+                LatestVisibleMessagePreview = latest?.Content,
+                LatestVisibleMessageSenderType = latest?.SenderType,
+                LatestVisibleMessageTimestamp = latest?.SentAt,
+                TotalVisibleMessageCount = visibleMessages.Count
+            };
+        }
+
+        private static bool IsHostAttentionConversation(Conversation conversation)
+        {
+            return conversation.HumanTakeoverEnabled
+                || conversation.Status == ConversationStatus.AwaitingHost
+                || conversation.Status == ConversationStatus.Escalated
+                || conversation.Status == ConversationStatus.HumanManaged;
         }
     }
 }

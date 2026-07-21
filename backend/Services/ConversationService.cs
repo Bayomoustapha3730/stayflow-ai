@@ -14,6 +14,40 @@ public sealed class ConversationService(
     IConversationStatusTransitionPolicy transitionPolicy,
     IOptions<ConversationOptions> options) : IConversationService
 {
+    public async Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(ConversationListQueryParameters query, CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<ConversationListResponse>.Fail(tenantError, [tenantError]);
+        }
+
+        var validationErrors = ValidateListQuery(query);
+        if (validationErrors.Count > 0)
+        {
+            return ApiResponse<ConversationListResponse>.Fail("Conversation list query validation failed.", validationErrors);
+        }
+
+        var normalizedQuery = new ConversationListQueryParameters
+        {
+            Page = query.Page,
+            PageSize = query.PageSize,
+            Status = query.Status,
+            PropertyId = query.PropertyId,
+            RequiresHostAttention = query.RequiresHostAttention,
+            Search = NormalizeIdentity(query.Search)
+        };
+
+        var result = await conversationRepository.ListConversationsAsync(companyId, normalizedQuery, cancellationToken);
+        return ApiResponse<ConversationListResponse>.Ok(new ConversationListResponse
+        {
+            Items = result.Items,
+            TotalCount = result.TotalCount,
+            Page = result.PageNumber,
+            PageSize = result.PageSize,
+            TotalPages = result.TotalPages
+        });
+    }
+
     public async Task<ApiResponse<ConversationDetailResponse>> CreateOrGetConversationAsync(CreateConversationRequest request, CancellationToken cancellationToken)
     {
         if (!TryGetCompanyId(out var companyId, out var tenantError))
@@ -332,6 +366,31 @@ public sealed class ConversationService(
         return errors;
     }
 
+    private static IReadOnlyCollection<string> ValidateListQuery(ConversationListQueryParameters query)
+    {
+        var errors = new List<string>();
+        if (query.Page < 1)
+        {
+            errors.Add("Page must be greater than or equal to 1.");
+        }
+
+        if (query.PageSize < 1)
+        {
+            errors.Add("PageSize must be greater than or equal to 1.");
+        }
+        else if (query.PageSize > 100)
+        {
+            errors.Add("PageSize must be 100 or fewer.");
+        }
+
+        if (query.PropertyId == Guid.Empty)
+        {
+            errors.Add("PropertyId must be a valid identifier.");
+        }
+
+        return errors;
+    }
+
     private bool TryGetCompanyId(out Guid companyId, out string error)
     {
         if (!currentTenantContext.IsAuthenticated)
@@ -384,6 +443,7 @@ public sealed class ConversationService(
         return new ConversationDetailResponse
         {
             Id = conversation.Id,
+            ConversationId = conversation.Id,
             GuestId = conversation.GuestId,
             ReservationId = conversation.ReservationId,
             PropertyId = conversation.PropertyId,
@@ -392,6 +452,7 @@ public sealed class ConversationService(
             Status = conversation.Status,
             Subject = conversation.Subject,
             HumanTakeoverEnabled = conversation.HumanTakeoverEnabled,
+            RequiresHostAttention = IsHostAttentionConversation(conversation),
             EscalationReason = conversation.EscalationReason,
             StartedAt = conversation.StartedAt,
             LastActivityAt = conversation.LastActivityAt,
@@ -399,7 +460,10 @@ public sealed class ConversationService(
             Guest = new ConversationGuestSummary
             {
                 Id = conversation.GuestId,
+                FirstName = conversation.Guest?.FirstName ?? string.Empty,
+                LastName = conversation.Guest?.LastName ?? string.Empty,
                 FullName = conversation.Guest is null ? string.Empty : $"{conversation.Guest.FirstName} {conversation.Guest.LastName}".Trim(),
+                Email = conversation.Guest?.Email,
                 PreferredLanguage = conversation.Guest?.PreferredLanguage ?? string.Empty
             },
             Reservation = conversation.Reservation is null
@@ -443,6 +507,14 @@ public sealed class ConversationService(
             IsInternal = message.IsInternal,
             SentAt = message.SentAt
         };
+    }
+
+    private static bool IsHostAttentionConversation(Conversation conversation)
+    {
+        return conversation.HumanTakeoverEnabled
+            || conversation.Status == ConversationStatus.AwaitingHost
+            || conversation.Status == ConversationStatus.Escalated
+            || conversation.Status == ConversationStatus.HumanManaged;
     }
 
     private sealed record AssociationValidationResult(Guid? ReservationPropertyId);
