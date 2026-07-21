@@ -329,6 +329,17 @@ public sealed class ChatServiceTests
         public List<User> Users { get; } = [];
         public List<AuditLog> AuditLogs { get; } = [];
 
+        public Task<PagedResult<ConversationSummaryResponse>> ListConversationsAsync(Guid requestedCompanyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new PagedResult<ConversationSummaryResponse>
+            {
+                Items = [],
+                PageNumber = query.Page,
+                PageSize = query.NormalizedPageSize,
+                TotalCount = 0
+            });
+        }
+
         public Task<Conversation?> GetByIdForCompanyAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
         {
             return Task.FromResult(Conversations.FirstOrDefault(conversation => conversation.CompanyId == requestedCompanyId && conversation.Id == conversationId));

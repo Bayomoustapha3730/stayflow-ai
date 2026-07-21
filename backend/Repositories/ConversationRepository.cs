@@ -2,17 +2,149 @@ using Microsoft.EntityFrameworkCore;
 using StayFlow.Api.Common;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Conversations;
-<<<<<<< HEAD
 using StayFlow.Api.DTOs.ReservationContext;
-=======
->>>>>>> 297967c (Implement host conversation inbox endpoint)
 using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Repositories;
 
 public sealed class ConversationRepository(ApplicationDbContext dbContext) : IConversationRepository
 {
-<<<<<<< HEAD
+    public async Task<PagedResult<ConversationSummaryResponse>> ListConversationsAsync(Guid companyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
+    {
+        var page = query.Page < 1 ? 1 : query.Page;
+        var pageSize = query.NormalizedPageSize;
+        var conversationsQuery = dbContext.Conversations
+            .AsNoTracking()
+            .Where(conversation => conversation.CompanyId == companyId && !conversation.IsDeleted);
+
+        if (query.Status is { } status)
+        {
+            conversationsQuery = conversationsQuery.Where(conversation => conversation.Status == status);
+        }
+
+        if (query.PropertyId is { } propertyId)
+        {
+            conversationsQuery = conversationsQuery.Where(conversation => conversation.PropertyId == propertyId);
+        }
+
+        if (query.RequiresHostAttention is { } requiresHostAttention)
+        {
+            conversationsQuery = conversationsQuery.Where(conversation =>
+                (conversation.HumanTakeoverEnabled
+                    || conversation.Status == ConversationStatus.AwaitingHost
+                    || conversation.Status == ConversationStatus.Escalated
+                    || conversation.Status == ConversationStatus.HumanManaged) == requiresHostAttention);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var searchTerm = query.Search.Trim();
+            conversationsQuery = conversationsQuery.Where(conversation =>
+                EF.Functions.ILike(conversation.Guest.FirstName, $"%{searchTerm}%")
+                || EF.Functions.ILike(conversation.Guest.LastName, $"%{searchTerm}%")
+                || (conversation.Guest.Email != null && EF.Functions.ILike(conversation.Guest.Email, $"%{searchTerm}%"))
+                || (conversation.Property != null && EF.Functions.ILike(conversation.Property.Name, $"%{searchTerm}%"))
+                || (conversation.Reservation != null
+                    && conversation.Reservation.ConfirmationNumber != null
+                    && EF.Functions.ILike(conversation.Reservation.ConfirmationNumber, $"%{searchTerm}%"))
+                || (conversation.Subject != null && EF.Functions.ILike(conversation.Subject, $"%{searchTerm}%")));
+        }
+
+        var totalCount = await conversationsQuery.CountAsync(cancellationToken);
+        var items = await conversationsQuery
+            .OrderByDescending(conversation =>
+                conversation.HumanTakeoverEnabled
+                || conversation.Status == ConversationStatus.AwaitingHost
+                || conversation.Status == ConversationStatus.Escalated
+                || conversation.Status == ConversationStatus.HumanManaged)
+            .ThenByDescending(conversation => conversation.LastActivityAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(conversation => new ConversationSummaryResponse
+            {
+                Id = conversation.Id,
+                ConversationId = conversation.Id,
+                GuestId = conversation.GuestId,
+                ReservationId = conversation.ReservationId,
+                PropertyId = conversation.PropertyId,
+                Channel = conversation.Channel,
+                ChannelIdentity = conversation.ChannelIdentity,
+                Status = conversation.Status,
+                Subject = conversation.Subject,
+                HumanTakeoverEnabled = conversation.HumanTakeoverEnabled,
+                RequiresHostAttention = conversation.HumanTakeoverEnabled
+                    || conversation.Status == ConversationStatus.AwaitingHost
+                    || conversation.Status == ConversationStatus.Escalated
+                    || conversation.Status == ConversationStatus.HumanManaged,
+                EscalationReason = conversation.EscalationReason,
+                StartedAt = conversation.StartedAt,
+                LastActivityAt = conversation.LastActivityAt,
+                ClosedAt = conversation.ClosedAt,
+                Guest = new ConversationGuestSummary
+                {
+                    Id = conversation.GuestId,
+                    FirstName = conversation.Guest.FirstName,
+                    LastName = conversation.Guest.LastName,
+                    FullName = conversation.Guest.FirstName + " " + conversation.Guest.LastName,
+                    Email = conversation.Guest.Email,
+                    PreferredLanguage = conversation.Guest.PreferredLanguage
+                },
+                Property = conversation.Property == null
+                    ? null
+                    : new ConversationPropertySummary
+                    {
+                        Id = conversation.Property.Id,
+                        Name = conversation.Property.Name,
+                        City = conversation.Property.City
+                    },
+                Reservation = conversation.Reservation == null
+                    ? null
+                    : new ConversationReservationSummary
+                    {
+                        Id = conversation.Reservation.Id,
+                        ConfirmationNumber = conversation.Reservation.ConfirmationNumber,
+                        CheckInDate = conversation.Reservation.CheckInDate,
+                        CheckOutDate = conversation.Reservation.CheckOutDate,
+                        Status = conversation.Reservation.Status
+                    },
+                AssignedUser = conversation.AssignedUser == null
+                    ? null
+                    : new ConversationAssignedUserSummary
+                    {
+                        Id = conversation.AssignedUser.Id,
+                        FullName = conversation.AssignedUser.FullName
+                    },
+                LatestVisibleMessagePreview = conversation.Messages
+                    .Where(message => !message.IsInternal && !message.IsDeleted)
+                    .OrderByDescending(message => message.SentAt)
+                    .ThenByDescending(message => message.CreatedAt)
+                    .Select(message => message.Content)
+                    .FirstOrDefault(),
+                LatestVisibleMessageSenderType = conversation.Messages
+                    .Where(message => !message.IsInternal && !message.IsDeleted)
+                    .OrderByDescending(message => message.SentAt)
+                    .ThenByDescending(message => message.CreatedAt)
+                    .Select(message => (ConversationSenderType?)message.SenderType)
+                    .FirstOrDefault(),
+                LatestVisibleMessageTimestamp = conversation.Messages
+                    .Where(message => !message.IsInternal && !message.IsDeleted)
+                    .OrderByDescending(message => message.SentAt)
+                    .ThenByDescending(message => message.CreatedAt)
+                    .Select(message => (DateTimeOffset?)message.SentAt)
+                    .FirstOrDefault(),
+                TotalVisibleMessageCount = conversation.Messages.Count(message => !message.IsInternal && !message.IsDeleted)
+            })
+            .ToListAsync(cancellationToken);
+
+        return new PagedResult<ConversationSummaryResponse>
+        {
+            Items = items,
+            PageNumber = page,
+            PageSize = pageSize,
+            TotalCount = totalCount
+        };
+    }
+
     public Task<Conversation?> GetByIdForCompanyAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken)
     {
         return dbContext.Conversations
@@ -61,134 +193,11 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
         {
             Items = items,
             PageNumber = pageNumber,
-=======
-    private static readonly string[] HostAttentionStatuses =
-    [
-        ConversationStatus.AwaitingHost.ToString(),
-        ConversationStatus.Escalated.ToString(),
-        ConversationStatus.HumanManaged.ToString()
-    ];
-
-    public async Task<PagedResult<ConversationSummaryResponse>> GetInboxAsync(
-        Guid companyId,
-        ConversationListQueryParameters query,
-        CancellationToken cancellationToken)
-    {
-        var page = query.Page < 1 ? 1 : query.Page;
-        var pageSize = query.NormalizedPageSize;
-        var conversationsQuery = dbContext.Conversations
-            .AsNoTracking()
-            .Where(conversation => conversation.CompanyId == companyId);
-
-        if (query.Status is { } status)
-        {
-            var statusValue = status.ToString();
-            conversationsQuery = conversationsQuery.Where(conversation => conversation.Status == statusValue);
-        }
-
-        if (query.PropertyId is { } propertyId)
-        {
-            conversationsQuery = conversationsQuery.Where(conversation => conversation.PropertyId == propertyId);
-        }
-
-        if (query.RequiresHostAttention is { } requiresHostAttention)
-        {
-            conversationsQuery = conversationsQuery.Where(conversation =>
-                HostAttentionStatuses.Contains(conversation.Status) == requiresHostAttention);
-        }
-
-        if (!string.IsNullOrWhiteSpace(query.Search))
-        {
-            var searchTerm = query.Search.Trim();
-            conversationsQuery = conversationsQuery.Where(conversation =>
-                EF.Functions.ILike(conversation.Guest.FirstName, $"%{searchTerm}%")
-                || EF.Functions.ILike(conversation.Guest.LastName, $"%{searchTerm}%")
-                || (conversation.Guest.Email != null && EF.Functions.ILike(conversation.Guest.Email, $"%{searchTerm}%"))
-                || EF.Functions.ILike(conversation.Property.Name, $"%{searchTerm}%")
-                || (conversation.Reservation != null
-                    && conversation.Reservation.ConfirmationNumber != null
-                    && EF.Functions.ILike(conversation.Reservation.ConfirmationNumber, $"%{searchTerm}%"))
-                || (conversation.ExternalThreadId != null && EF.Functions.ILike(conversation.ExternalThreadId, $"%{searchTerm}%")));
-        }
-
-        var totalCount = await conversationsQuery.CountAsync(cancellationToken);
-        var rows = await conversationsQuery
-            .OrderByDescending(conversation => HostAttentionStatuses.Contains(conversation.Status))
-            .ThenByDescending(conversation => conversation.UpdatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(conversation => new
-            {
-                ConversationId = conversation.Id,
-                conversation.Status,
-                Channel = conversation.Channel,
-                Subject = conversation.ExternalThreadId,
-                conversation.GuestId,
-                conversation.Guest.FirstName,
-                conversation.Guest.LastName,
-                conversation.Guest.Email,
-                conversation.PropertyId,
-                PropertyName = conversation.Property.Name,
-                ReservationId = conversation.Reservation == null ? null : (Guid?)conversation.Reservation.Id,
-                ConfirmationNumber = conversation.Reservation == null ? null : conversation.Reservation.ConfirmationNumber,
-                StartedAt = conversation.CreatedAt,
-                LastActivityAt = conversation.UpdatedAt
-            })
-            .ToListAsync(cancellationToken);
-        var items = rows.Select(row =>
-        {
-            var status = ParseStatus(row.Status);
-            var requiresHostAttention = IsHostAttentionStatus(row.Status);
-            return new ConversationSummaryResponse
-            {
-                ConversationId = row.ConversationId,
-                Status = status,
-                Channel = row.Channel,
-                Subject = row.Subject,
-                Guest = new ConversationGuestSummary
-                {
-                    GuestId = row.GuestId,
-                    FirstName = row.FirstName,
-                    LastName = row.LastName,
-                    Email = row.Email
-                },
-                Property = new ConversationPropertySummary
-                {
-                    PropertyId = row.PropertyId,
-                    Name = row.PropertyName
-                },
-                Reservation = row.ReservationId is null
-                    ? null
-                    : new ConversationReservationSummary
-                    {
-                        ReservationId = row.ReservationId.Value,
-                        ConfirmationNumber = row.ConfirmationNumber
-                    },
-                AssignedUser = null,
-                HumanTakeoverEnabled = requiresHostAttention,
-                RequiresHostAttention = requiresHostAttention,
-                EscalationReason = null,
-                StartedAt = row.StartedAt,
-                LastActivityAt = row.LastActivityAt,
-                ClosedAt = status == ConversationStatus.Closed ? row.LastActivityAt : null,
-                LatestVisibleMessagePreview = null,
-                LatestVisibleMessageSenderType = null,
-                LatestVisibleMessageTimestamp = null,
-                TotalVisibleMessageCount = 0
-            };
-        }).ToList();
-
-        return new PagedResult<ConversationSummaryResponse>
-        {
-            Items = items,
-            PageNumber = page,
->>>>>>> 297967c (Implement host conversation inbox endpoint)
             PageSize = pageSize,
             TotalCount = totalCount
         };
     }
 
-<<<<<<< HEAD
     public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid companyId, string externalMessageId, CancellationToken cancellationToken)
     {
         return dbContext.ConversationMessages
@@ -234,19 +243,5 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return dbContext.SaveChangesAsync(cancellationToken);
-=======
-    private static bool IsHostAttentionStatus(string status)
-    {
-        return status == ConversationStatus.AwaitingHost.ToString()
-            || status == ConversationStatus.Escalated.ToString()
-            || status == ConversationStatus.HumanManaged.ToString();
-    }
-
-    private static ConversationStatus ParseStatus(string status)
-    {
-        return Enum.TryParse<ConversationStatus>(status, ignoreCase: true, out var parsed)
-            ? parsed
-            : ConversationStatus.Open;
->>>>>>> 297967c (Implement host conversation inbox endpoint)
     }
 }
