@@ -1,7 +1,7 @@
 import {
+  HostConversationDetail,
   HostConversationFilters,
   HostConversationList,
-  HostConversationSelectionPlaceholder,
   HostInboxHeader,
   HostInboxSummary,
   HostLoginPanel
@@ -66,7 +66,7 @@ export function HostInboxPage() {
       />
 
       <div className="sf-host-main-grid">
-        <section>
+        <section className="sf-host-list-column">
           <HostConversationList
             isLoading={conversations.isLoading}
             error={conversations.error}
@@ -101,7 +101,14 @@ export function HostInboxPage() {
           </footer>
         </section>
 
-        <HostConversationSelectionPlaceholder conversationId={selectedConversationId} />
+        <HostConversationDetail
+          conversationId={selectedConversationId}
+          accessToken={auth.accessToken}
+          onUnauthorized={auth.logout}
+          onConversationChanged={() => {
+            void conversations.refresh();
+          }}
+        />
       </div>
     </div>
   );

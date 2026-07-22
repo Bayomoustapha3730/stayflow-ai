@@ -1,5 +1,8 @@
 import type {
+  AddInternalNoteRequest,
+  AddHostMessageRequest,
   ConversationDetailResponse,
+  ConversationHistoryQuery,
   ConversationHistoryResponse,
   ConversationListQuery,
   ConversationListResponse,
@@ -38,21 +41,37 @@ export function createHostConversationsApi(http: HttpClient) {
       return http.get<ConversationDetailResponse>(`/conversations/${conversationId}`);
     },
 
-    getMessages(conversationId: string, page = 1, pageSize = 25) {
-      const params = new URLSearchParams({
-        pageNumber: String(page),
-        pageSize: String(pageSize)
-      });
+    getMessages(conversationId: string, query?: ConversationHistoryQuery) {
+      const params = new URLSearchParams();
 
-      return http.get<ConversationHistoryResponse>(`/conversations/${conversationId}/messages?${params.toString()}`);
+      if (query?.includeInternal !== undefined) {
+        params.set("includeInternal", String(query.includeInternal));
+      }
+
+      if (query?.pageNumber !== undefined) {
+        params.set("pageNumber", String(query.pageNumber));
+      }
+
+      if (query?.pageSize !== undefined) {
+        params.set("pageSize", String(query.pageSize));
+      }
+
+      const queryString = params.toString();
+      const path = queryString
+        ? `/conversations/${conversationId}/messages?${queryString}`
+        : `/conversations/${conversationId}/messages`;
+
+      return http.get<ConversationHistoryResponse>(path);
     },
 
     addHostMessage(conversationId: string, content: string) {
-      return http.post<ConversationMessageResponse>(`/conversations/${conversationId}/messages/host`, { content });
+      const payload: AddHostMessageRequest = { content };
+      return http.post<ConversationMessageResponse>(`/conversations/${conversationId}/messages/host`, payload);
     },
 
     addInternalNote(conversationId: string, content: string) {
-      return http.post<ConversationMessageResponse>(`/conversations/${conversationId}/notes`, { content });
+      const payload: AddInternalNoteRequest = { content };
+      return http.post<ConversationMessageResponse>(`/conversations/${conversationId}/notes`, payload);
     },
 
     enableHumanTakeover(conversationId: string) {

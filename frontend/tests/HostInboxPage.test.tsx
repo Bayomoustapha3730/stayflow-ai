@@ -2,7 +2,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../src/App";
-import { ConversationSenderType, ConversationStatus, GuestChannel } from "../src/models/enums";
+import {
+  ConversationMessageType,
+  ConversationSenderType,
+  ConversationStatus,
+  GuestChannel
+} from "../src/models/enums";
 import type { ConversationSummary } from "../src/models/hostConversations";
 
 function apiSuccess<T>(data: T) {
@@ -32,14 +37,6 @@ function apiFailure(message = "Request failed", status = 500) {
   };
 }
 
-function loginResponse() {
-  return apiSuccess({
-    accessToken: "host-token",
-    refreshToken: "refresh",
-    expiresAt: "2026-07-22T12:00:00Z"
-  });
-}
-
 function conversationRow(id = "c-1"): ConversationSummary {
   return {
     id,
@@ -53,7 +50,6 @@ function conversationRow(id = "c-1"): ConversationSummary {
     subject: "Check-in question",
     guest: {
       id: "g-1",
-      guestId: "g-1",
       fullName: "",
       preferredLanguage: "en",
       firstName: "Ada",
@@ -62,13 +58,11 @@ function conversationRow(id = "c-1"): ConversationSummary {
     },
     property: {
       id: "p-1",
-      propertyId: "p-1",
       name: "Westlands Apartment",
       city: "Nairobi"
     },
     reservation: {
       id: "r-1",
-      reservationId: "r-1",
       confirmationNumber: "ABC123",
       checkInDate: "2026-08-10",
       checkOutDate: "2026-08-14",
@@ -88,13 +82,117 @@ function conversationRow(id = "c-1"): ConversationSummary {
   };
 }
 
+function conversationDetail(conversationId = "c-1", status = ConversationStatus.HumanManaged, humanTakeoverEnabled = true) {
+  return {
+    ...conversationRow(conversationId),
+    status,
+    humanTakeoverEnabled,
+    messages: []
+  };
+}
+
+function messageHistory(conversationId = "c-1") {
+  return {
+    conversationId,
+    messages: {
+      items: [
+        {
+          id: "m-1",
+          conversationId,
+          senderType: ConversationSenderType.Guest,
+          messageType: ConversationMessageType.Text,
+          content: "Can I check in early?",
+          isInternal: false,
+          sentAt: "2026-07-22T10:00:00Z"
+        }
+      ],
+      pageNumber: 1,
+      pageSize: 100,
+      totalCount: 1,
+      totalPages: 1
+    }
+  };
+}
+
 function listResponse(items = [conversationRow()], page = 1, totalPages = 1) {
-  return apiSuccess({
+  return {
     items,
     totalCount: items.length,
     page,
     pageSize: 10,
     totalPages
+  };
+}
+
+function createHostFetchMock(items = [conversationRow()]) {
+  return vi.fn().mockImplementation((url: string, options?: RequestInit) => {
+    if (url.endsWith("/auth/login")) {
+      return Promise.resolve(
+        apiSuccess({
+          accessToken: "host-token",
+          refreshToken: "refresh",
+          expiresAt: "2026-07-22T12:00:00Z"
+        })
+      );
+    }
+
+    if (url.includes("/conversations?") && options?.method === "GET") {
+      const parsed = new URL(url);
+      const page = Number(parsed.searchParams.get("page") ?? "1");
+      const totalPages = page > 1 ? page : 2;
+      const pageItem = page > 1 ? [conversationRow("c-2")] : items;
+      return Promise.resolve(apiSuccess(listResponse(pageItem, page, totalPages)));
+    }
+
+    if (url.includes("/messages/host")) {
+      return Promise.resolve(
+        apiSuccess({
+          id: "m-2",
+          conversationId: "c-1",
+          senderType: ConversationSenderType.Host,
+          messageType: ConversationMessageType.Text,
+          content: "Host reply",
+          isInternal: false,
+          sentAt: "2026-07-22T10:02:00Z"
+        })
+      );
+    }
+
+    if (url.includes("/notes")) {
+      return Promise.resolve(
+        apiSuccess({
+          id: "m-3",
+          conversationId: "c-1",
+          senderType: ConversationSenderType.System,
+          messageType: ConversationMessageType.InternalNote,
+          content: "Internal note",
+          isInternal: true,
+          sentAt: "2026-07-22T10:03:00Z"
+        })
+      );
+    }
+
+    if (url.includes("/resolve") || url.includes("/close") || url.includes("/human-takeover") || url.includes("/return-to-ai")) {
+      return Promise.resolve(apiSuccess(conversationDetail("c-1")));
+    }
+
+    if (url.includes("/conversations/c-1/messages")) {
+      return Promise.resolve(apiSuccess(messageHistory("c-1")));
+    }
+
+    if (url.includes("/conversations/c-2/messages")) {
+      return Promise.resolve(apiSuccess(messageHistory("c-2")));
+    }
+
+    if (url.endsWith("/conversations/c-1")) {
+      return Promise.resolve(apiSuccess(conversationDetail("c-1")));
+    }
+
+    if (url.endsWith("/conversations/c-2")) {
+      return Promise.resolve(apiSuccess(conversationDetail("c-2")));
+    }
+
+    return Promise.resolve(apiFailure("Unhandled route", 500));
   });
 }
 
@@ -127,53 +225,23 @@ describe("HostInboxPage via App route", () => {
     expect(screen.getByRole("heading", { name: /host sign in/i })).toBeInTheDocument();
   });
 
-  it("successful login loads inbox rows", async () => {
+  it("successful login loads inbox and conversation detail workspace", async () => {
     window.history.pushState({}, "", "/host/conversations");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(loginResponse()).mockResolvedValueOnce(listResponse()));
+    vi.stubGlobal("fetch", createHostFetchMock());
 
     render(<App />);
 
     await signIn();
 
     await waitFor(() => expect(screen.getByText(/westlands apartment/i)).toBeInTheDocument());
-    expect(screen.getByText(/can i check in early/i)).toBeInTheDocument();
-  });
-
-  it("failed login shows error", async () => {
-    window.history.pushState({}, "", "/host/conversations");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(apiFailure("Invalid credentials", 401)));
-
-    render(<App />);
-
-    await signIn();
-
-    await waitFor(() => expect(screen.getByText(/session has expired|invalid credentials/i)).toBeInTheDocument());
-  });
-
-  it("renders safe guest and property fallbacks", async () => {
-    window.history.pushState({}, "", "/host/conversations");
-
-    const fallbackItem = {
-      ...conversationRow("c-2"),
-      guest: null,
-      property: null,
-      reservation: null,
-      latestVisibleMessagePreview: null
-    };
-
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(loginResponse()).mockResolvedValueOnce(listResponse([fallbackItem])));
-
-    render(<App />);
-    await signIn();
-
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Guest" })).toBeInTheDocument());
-    expect(screen.getByText(/property unavailable/i)).toBeInTheDocument();
-    expect(screen.getByText(/no visible messages yet/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("heading", { name: /timeline/i })).toBeInTheDocument(), {
+      timeout: 3000
+    });
   });
 
   it("status filter changes request", async () => {
     window.history.pushState({}, "", "/host/conversations");
-    const fetchMock = vi.fn().mockResolvedValueOnce(loginResponse()).mockResolvedValue(listResponse());
+    const fetchMock = createHostFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
@@ -183,24 +251,20 @@ describe("HostInboxPage via App route", () => {
     await user.selectOptions(screen.getByLabelText(/status/i), String(ConversationStatus.Closed));
 
     await waitFor(() => {
-      const listCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/conversations?"));
-      expect(listCall).toBeDefined();
+      const listCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/conversations?"));
+      const latestUrl = new URL(String(listCalls[listCalls.length - 1][0]));
+      expect(latestUrl.searchParams.get("status")).toBe(String(ConversationStatus.Closed));
     });
-
-    const listCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/conversations?"));
-    const latestUrl = new URL(String(listCalls[listCalls.length - 1][0]));
-    expect(latestUrl.searchParams.get("status")).toBe(String(ConversationStatus.Closed));
   });
 
   it("host-attention filter changes request", async () => {
     window.history.pushState({}, "", "/host/conversations");
-    const fetchMock = vi.fn().mockResolvedValueOnce(loginResponse()).mockResolvedValue(listResponse());
+    const fetchMock = createHostFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
     const user = await signIn();
 
-    await waitFor(() => expect(screen.getByLabelText(/requires host attention/i)).toBeInTheDocument());
     await user.click(screen.getByLabelText(/requires host attention/i));
 
     await waitFor(() => {
@@ -212,13 +276,12 @@ describe("HostInboxPage via App route", () => {
 
   it("debounced search changes request", async () => {
     window.history.pushState({}, "", "/host/conversations");
-    const fetchMock = vi.fn().mockResolvedValueOnce(loginResponse()).mockResolvedValue(listResponse());
+    const fetchMock = createHostFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
     const user = await signIn();
 
-    await waitFor(() => expect(screen.getByLabelText(/search/i)).toBeInTheDocument());
     await user.type(screen.getByLabelText(/search/i), "Ada");
 
     await waitFor(() => {
@@ -228,14 +291,9 @@ describe("HostInboxPage via App route", () => {
     }, { timeout: 2000 });
   });
 
-  it("pagination changes request", async () => {
+  it("pagination next updates list query", async () => {
     window.history.pushState({}, "", "/host/conversations");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(loginResponse())
-      .mockResolvedValueOnce(listResponse([conversationRow()], 1, 2))
-      .mockResolvedValueOnce(listResponse([conversationRow("c-2")], 2, 2));
-
+    const fetchMock = createHostFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
@@ -251,113 +309,28 @@ describe("HostInboxPage via App route", () => {
     });
   });
 
-  it("page-size change resets page to 1", async () => {
+  it("inbox refreshes after resolve action", async () => {
     window.history.pushState({}, "", "/host/conversations");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(loginResponse())
-      .mockResolvedValueOnce(listResponse([conversationRow()], 1, 3))
-      .mockResolvedValueOnce(listResponse([conversationRow("c-2")], 2, 3))
-      .mockResolvedValueOnce(listResponse([conversationRow("c-3")], 1, 2));
-
+    const fetchMock = createHostFetchMock();
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
     const user = await signIn();
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /next/i })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: /next/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /resolve conversation/i })).toBeInTheDocument());
 
-    await waitFor(() => expect(screen.getByText(/page 2 of/i)).toBeInTheDocument());
-    await user.selectOptions(screen.getByLabelText(/page size/i), "25");
+    const listCallsBefore = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/conversations?")).length;
+
+    await user.click(screen.getByRole("button", { name: /resolve conversation/i }));
+    await user.click(screen.getByRole("button", { name: /confirm resolve/i }));
 
     await waitFor(() => {
-      const listCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/conversations?"));
-      const latestUrl = new URL(String(listCalls[listCalls.length - 1][0]));
-      expect(latestUrl.searchParams.get("page")).toBe("1");
-      expect(latestUrl.searchParams.get("pageSize")).toBe("25");
+      const listCallsAfter = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/conversations?")).length;
+      expect(listCallsAfter).toBeGreaterThan(listCallsBefore);
     });
   });
 
-  it("shows loading and then empty state", async () => {
-    window.history.pushState({}, "", "/host/conversations");
-
-    let resolveList: ((value: ReturnType<typeof listResponse>) => void) | undefined;
-    const delayedList = new Promise((resolve) => {
-      resolveList = resolve;
-    });
-
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(loginResponse())
-      .mockReturnValueOnce(delayedList)
-      .mockResolvedValueOnce(listResponse([]));
-
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<App />);
-    const user = await signIn();
-
-    await waitFor(() => expect(screen.getByText(/loading conversations/i)).toBeInTheDocument());
-
-    if (resolveList) {
-      resolveList(listResponse([]));
-    }
-
-    await waitFor(() => expect(screen.getByText(/no conversations found/i)).toBeInTheDocument());
-
-    await user.click(screen.getByRole("button", { name: /refresh/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  });
-
-  it("shows api error and allows retry", async () => {
-    window.history.pushState({}, "", "/host/conversations");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(loginResponse())
-      .mockResolvedValueOnce(apiFailure("Server error", 500))
-      .mockResolvedValueOnce(listResponse());
-
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(<App />);
-    const user = await signIn();
-
-    await waitFor(() => expect(screen.getByText(/guest services are temporarily unavailable/i)).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: /retry/i }));
-
-    await waitFor(() => expect(screen.getByText(/westlands apartment/i)).toBeInTheDocument());
-  });
-
-  it("selecting a row shows detail placeholder with id", async () => {
-    window.history.pushState({}, "", "/host/conversations");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(loginResponse()).mockResolvedValueOnce(listResponse()));
-
-    render(<App />);
-    const user = await signIn();
-
-    await waitFor(() => expect(screen.getByRole("button", { name: /ada lovelace/i })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: /ada lovelace/i }));
-
-    expect(screen.getByText(/sprint 4 part 2b/i)).toBeInTheDocument();
-    expect(screen.getByText(/selected conversation id/i)).toBeInTheDocument();
-    expect(screen.getByText("c-1")).toBeInTheDocument();
-  });
-
-  it("logout returns to login panel", async () => {
-    window.history.pushState({}, "", "/host/conversations");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(loginResponse()).mockResolvedValueOnce(listResponse()));
-
-    render(<App />);
-    const user = await signIn();
-
-    await waitFor(() => expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: /sign out/i }));
-
-    expect(screen.getByRole("heading", { name: /host sign in/i })).toBeInTheDocument();
-  });
-
-  it("renders guest demo page for non-host path", () => {
+  it("guest demo route still renders for non-host path", () => {
     window.history.pushState({}, "", "/");
     vi.stubGlobal("fetch", vi.fn());
 

@@ -44,11 +44,13 @@ export interface ConversationSummary {
   totalVisibleMessageCount: number;
 }
 
-export interface ConversationDetailResponse extends ConversationSummary {
-  messages: ConversationMessageResponse[];
+export interface ConversationDetail extends ConversationSummary {
+  messages: ConversationMessage[];
 }
 
-export interface ConversationMessageResponse {
+export type ConversationDetailResponse = ConversationDetail;
+
+export interface ConversationMessage {
   id: string;
   conversationId: string;
   senderType: ConversationSenderType;
@@ -58,14 +60,30 @@ export interface ConversationMessageResponse {
   sentAt: string;
 }
 
+export type ConversationMessageResponse = ConversationMessage;
+
+export interface ConversationHistoryQuery {
+  includeInternal?: boolean;
+  pageNumber?: number;
+  pageSize?: number;
+}
+
 export interface ConversationHistoryResponse {
   conversationId: string;
-  messages: PagedResult<ConversationMessageResponse>;
+  messages: PagedResult<ConversationMessage>;
+}
+
+export interface AddHostMessageRequest {
+  content: string;
+  sentAt?: string;
+}
+
+export interface AddInternalNoteRequest {
+  content: string;
 }
 
 export interface ConversationGuestSummary {
   id: string;
-  guestId: string;
   fullName: string;
   preferredLanguage: string;
   firstName: string;
@@ -75,14 +93,12 @@ export interface ConversationGuestSummary {
 
 export interface ConversationPropertySummary {
   id: string;
-  propertyId: string;
   name: string;
   city: string;
 }
 
 export interface ConversationReservationSummary {
   id: string;
-  reservationId: string;
   confirmationNumber?: string | null;
   checkInDate: string;
   checkOutDate: string;
@@ -91,6 +107,5 @@ export interface ConversationReservationSummary {
 
 export interface ConversationAssignedUserSummary {
   id: string;
-  userId: string;
   fullName: string;
 }
