@@ -1,9 +1,11 @@
 import { createAuthApi } from "./authApi";
 import { createChatApi } from "./chatApi";
+import { createHostCopilotApi } from "./hostCopilotApi";
 import { HttpClient } from "./httpClient";
 
 export { createAuthApi } from "./authApi";
 export { createChatApi } from "./chatApi";
+export { createHostCopilotApi } from "./hostCopilotApi";
 export { ApiError, HttpClient } from "./httpClient";
 
 export function createStayFlowApi(getAccessToken: () => string | null) {
@@ -14,6 +16,7 @@ export function createStayFlowApi(getAccessToken: () => string | null) {
 
   return {
     auth: createAuthApi(http),
-    chat: createChatApi(http)
+    chat: createChatApi(http),
+    hostCopilot: createHostCopilotApi(http)
   };
 }

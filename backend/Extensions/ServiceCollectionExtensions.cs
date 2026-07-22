@@ -54,6 +54,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IConversationStatusTransitionPolicy, Services.ConversationStatusTransitionPolicy>();
         services.AddScoped<Services.IConversationService, Services.ConversationService>();
         services.AddScoped<Services.IConversationAIExchangeService, Services.ConversationAIExchangeService>();
+        services.AddScoped<Services.ICopilotService, Services.CopilotService>();
         services.AddScoped<Services.IConversationRealtimePublisher, Services.ConversationRealtimePublisher>();
         services.AddScoped<Services.IChatService, Services.ChatService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
