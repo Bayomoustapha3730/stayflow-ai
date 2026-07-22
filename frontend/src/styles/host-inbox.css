@@ -540,7 +540,22 @@
 }
 
 .sf-host-copilot-controls {
-  justify-content: flex-end;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.sf-host-copilot-controls label {
+  color: var(--sf-host-muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.sf-host-copilot-controls select {
+  border: 1px solid var(--sf-host-line);
+  border-radius: 10px;
+  min-height: 40px;
+  padding: 0 10px;
 }
 
 .sf-host-copilot-empty {
@@ -549,6 +564,114 @@
   color: var(--sf-host-muted);
   font-size: 14px;
   padding: 10px;
+}
+
+.sf-host-copilot-summary,
+.sf-host-copilot-suggestions {
+  border: 1px solid var(--sf-host-line);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.sf-host-copilot-summary header,
+.sf-host-copilot-suggestions header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.sf-host-copilot-summary h4,
+.sf-host-copilot-suggestions h4,
+.sf-host-copilot-summary h5 {
+  margin: 0;
+}
+
+.sf-host-copilot-summary-body p {
+  margin: 0 0 8px;
+}
+
+.sf-host-copilot-summary-body dl {
+  margin: 0 0 10px;
+}
+
+.sf-host-copilot-summary-body dt {
+  color: var(--sf-host-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sf-host-copilot-summary-body dd {
+  margin: 4px 0 0;
+}
+
+.sf-host-copilot-summary-body ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.sf-host-copilot-summary-body li {
+  margin-bottom: 4px;
+}
+
+.sf-host-copilot-urgency {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 4px 9px;
+  text-transform: uppercase;
+}
+
+.sf-host-copilot-urgency-low {
+  background: #e7f6ed;
+  color: #1f5c43;
+}
+
+.sf-host-copilot-urgency-medium {
+  background: #fff3e8;
+  color: #7d3f08;
+}
+
+.sf-host-copilot-urgency-high {
+  background: #fff1ef;
+  color: #8f2821;
+}
+
+.sf-host-copilot-skeleton {
+  display: grid;
+  gap: 8px;
+}
+
+.sf-host-copilot-skeleton-line {
+  height: 12px;
+}
+
+.sf-host-copilot-skeleton-line.short {
+  width: 70%;
+}
+
+.sf-host-copilot-suggestion-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sf-host-copilot-suggestion-card {
+  background: #f8fbf8;
+  border: 1px solid var(--sf-host-line);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.sf-host-copilot-suggestion-card p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+}
+
+.sf-host-copilot-suggestion-skeleton {
+  height: 78px;
 }
 
 .sf-host-copilot-suggestion {

@@ -127,7 +127,40 @@ function listResponse(items = [conversationRow()], page = 1, totalPages = 1) {
   };
 }
 
-function createHostFetchMock(items = [conversationRow()]) {
+function copilotSummaryResponse(conversationId = "c-1") {
+  return {
+    conversationId,
+    summary: "Guest is requesting early check-in details and timing confirmation.",
+    guestIntent: "Check-in assistance",
+    importantFacts: ["Arrival expected before standard time", "Guest requested confirmation today"],
+    urgency: "medium",
+    latestGuestMessage: "Can I check in early?",
+    visibleMessageCount: 4,
+    generatedAt: "2026-07-22T10:05:00Z"
+  };
+}
+
+function copilotSuggestionsResponse(conversationId = "c-1") {
+  return {
+    conversationId,
+    suggestedReplies: [
+      "Thanks for reaching out. I can confirm early check-in options and update you shortly.",
+      "Happy to help. Could you share your expected arrival time so I can check availability?",
+      "I received your request and I am checking the best check-in option for you now."
+    ],
+    contextMessageCount: 4,
+    generatedAt: "2026-07-22T10:05:30Z"
+  };
+}
+
+function createHostFetchMock(
+  items = [conversationRow()],
+  config?: {
+    failSummary?: boolean;
+    failSuggestions?: boolean;
+    emptySuggestions?: boolean;
+  }
+) {
   return vi.fn().mockImplementation((url: string, options?: RequestInit) => {
     if (url.endsWith("/auth/login")) {
       return Promise.resolve(
@@ -177,6 +210,35 @@ function createHostFetchMock(items = [conversationRow()]) {
 
     if (url.includes("/resolve") || url.includes("/close") || url.includes("/human-takeover") || url.includes("/return-to-ai")) {
       return Promise.resolve(apiSuccess(conversationDetail("c-1")));
+    }
+
+    if (url.includes("/copilot/conversations/c-1/summary")) {
+      if (config?.failSummary) {
+        return Promise.resolve(apiFailure("Summary unavailable", 500));
+      }
+
+      return Promise.resolve(apiSuccess(copilotSummaryResponse("c-1")));
+    }
+
+    if (url.includes("/copilot/conversations/c-2/summary")) {
+      return Promise.resolve(apiSuccess(copilotSummaryResponse("c-2")));
+    }
+
+    if (url.includes("/copilot/conversations/c-1/suggested-replies")) {
+      if (config?.failSuggestions) {
+        return Promise.resolve(apiFailure("Suggestions unavailable", 500));
+      }
+
+      const response = copilotSuggestionsResponse("c-1");
+      if (config?.emptySuggestions) {
+        response.suggestedReplies = [];
+      }
+
+      return Promise.resolve(apiSuccess(response));
+    }
+
+    if (url.includes("/copilot/conversations/c-2/suggested-replies")) {
+      return Promise.resolve(apiSuccess(copilotSuggestionsResponse("c-2")));
     }
 
     if (url.includes("/conversations/c-1/messages")) {
@@ -340,5 +402,101 @@ describe("HostInboxPage via App route", () => {
     render(<App />);
 
     expect(screen.getByText(/guest concierge chat widget/i)).toBeInTheDocument();
+  });
+
+  it("copilot summary shows loading skeleton then success data", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const baseFetch = createHostFetchMock();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string, options?: RequestInit) => {
+        if (url.includes("/copilot/conversations/c-1/summary")) {
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              void Promise.resolve(baseFetch(url, options)).then(resolve);
+            }, 250);
+          });
+        }
+
+        return baseFetch(url, options);
+      })
+    );
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /host copilot/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText(/summary loading skeleton/i)).toBeInTheDocument());
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /conversation summary/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/guest is requesting early check-in details/i)).toBeInTheDocument());
+    expect(screen.getByText(/check-in assistance/i)).toBeInTheDocument();
+  });
+
+  it("copilot summary failure shows retry action", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock([conversationRow()], { failSummary: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /host copilot/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/guest services are temporarily unavailable/i)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /^retry$/i }));
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/copilot/conversations/c-1/summary"));
+      expect(calls.length).toBeGreaterThan(1);
+    });
+  });
+
+  it("copilot suggestions render three reply cards", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock());
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => {
+      const insertButtons = screen.getAllByRole("button", { name: /insert/i });
+      expect(insertButtons.length).toBe(3);
+    });
+  });
+
+  it("changing tone refreshes suggested replies request", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(screen.getByLabelText(/tone/i)).toBeInTheDocument());
+    await user.selectOptions(screen.getByLabelText(/tone/i), "luxury");
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/copilot/conversations/c-1/suggested-replies"));
+      const latest = new URL(String(calls[calls.length - 1][0]));
+      expect(latest.searchParams.get("tone")).toBe("luxury");
+    });
+  });
+
+  it("insert copies suggestion into host reply composer without sending", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /insert/i }).length).toBeGreaterThan(0));
+    await user.click(screen.getAllByRole("button", { name: /insert/i })[0]);
+
+    const replyInput = screen.getByLabelText(/host reply/i, { selector: "textarea" }) as HTMLTextAreaElement;
+    expect(replyInput.value).toContain("Thanks for reaching out");
+
+    const sendCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/messages/host"));
+    expect(sendCalls.length).toBe(0);
   });
 });
