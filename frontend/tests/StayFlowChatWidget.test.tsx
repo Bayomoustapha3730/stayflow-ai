@@ -90,7 +90,7 @@ async function openAndLogin(fetchMock: ReturnType<typeof vi.fn>) {
   render(
     <StayFlowChatWidget
       guestId={guestId}
-      apiBaseUrl="https://bug-free-space-train-w4wvq5wxp4qfv9w9.github.dev/"
+      apiBaseUrl="http://localhost:5243"
       demoEmail="demo.user@stayflow.local"
     />
   );
