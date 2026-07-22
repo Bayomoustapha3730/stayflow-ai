@@ -522,6 +522,8 @@
 }
 
 .sf-host-action-row,
+.sf-host-copilot-controls,
+.sf-host-copilot-actions,
 .sf-host-composer-footer {
   align-items: center;
   display: flex;
@@ -535,6 +537,44 @@
   font-size: 12px;
   justify-content: space-between;
   margin-top: 8px;
+}
+
+.sf-host-copilot-controls {
+  justify-content: flex-end;
+}
+
+.sf-host-copilot-empty {
+  border: 1px dashed var(--sf-host-line);
+  border-radius: 10px;
+  color: var(--sf-host-muted);
+  font-size: 14px;
+  padding: 10px;
+}
+
+.sf-host-copilot-suggestion {
+  background: #f8fbf8;
+  border: 1px solid var(--sf-host-line);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.sf-host-copilot-suggestion header {
+  align-items: center;
+  color: var(--sf-host-muted);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+}
+
+.sf-host-copilot-suggestion p {
+  margin: 8px 0;
+  white-space: pre-wrap;
+}
+
+.sf-host-copilot-suggestion small {
+  color: var(--sf-host-muted);
+  display: block;
+  margin-bottom: 8px;
 }
 
 .sf-host-muted-note {

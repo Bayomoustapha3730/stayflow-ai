@@ -7,6 +7,8 @@ interface HostConversationComposerProps {
   disabled: boolean;
   disabledReason?: string;
   actionError: string | null;
+  externalDraft?: string | null;
+  externalDraftVersion?: number;
   onSend: (content: string) => Promise<boolean>;
   onStartTyping?: () => void;
   onStopTyping?: () => void;
@@ -17,6 +19,8 @@ export function HostConversationComposer({
   disabled,
   disabledReason,
   actionError,
+  externalDraft,
+  externalDraftVersion,
   onSend,
   onStartTyping,
   onStopTyping
@@ -78,6 +82,14 @@ export function HostConversationComposer({
       }
     };
   }, [onStopTyping]);
+
+  useEffect(() => {
+    if (!externalDraft) {
+      return;
+    }
+
+    setContent(externalDraft);
+  }, [externalDraft, externalDraftVersion]);
 
   async function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {

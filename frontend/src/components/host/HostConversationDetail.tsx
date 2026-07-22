@@ -1,5 +1,7 @@
 import { ConversationStatus } from "../../models/enums";
 import { useHostConversationDetail } from "../../hooks/useHostConversationDetail";
+import { useConversationCopilot } from "../../hooks/useConversationCopilot";
+import { CopilotPanel } from "../copilot";
 import { HostConversationActions } from "./HostConversationActions";
 import { HostConversationComposer } from "./HostConversationComposer";
 import { HostConversationDetailError } from "./HostConversationDetailError";
@@ -8,6 +10,7 @@ import { HostConversationHeader } from "./HostConversationHeader";
 import { HostConversationMetadata } from "./HostConversationMetadata";
 import { HostConversationTimeline } from "./HostConversationTimeline";
 import { HostInternalNoteComposer } from "./HostInternalNoteComposer";
+import { useState } from "react";
 
 interface HostConversationDetailProps {
   conversationId: string | null;
@@ -22,11 +25,18 @@ export function HostConversationDetail({
   onUnauthorized,
   onConversationChanged
 }: HostConversationDetailProps) {
+  const [copilotDraft, setCopilotDraft] = useState<string | null>(null);
+  const [copilotDraftVersion, setCopilotDraftVersion] = useState(0);
   const detail = useHostConversationDetail({
     conversationId,
     accessToken,
     onUnauthorized,
     onConversationChanged
+  });
+  const copilot = useConversationCopilot({
+    conversationId,
+    accessToken,
+    onUnauthorized
   });
 
   if (!conversationId) {
@@ -110,11 +120,22 @@ export function HostConversationDetail({
         }}
       />
 
+      <CopilotPanel
+        copilot={copilot}
+        disabled={conversationClosed || detail.isChangingMode || detail.isClosing}
+        onUseDraft={(draft) => {
+          setCopilotDraft(draft);
+          setCopilotDraftVersion((current) => current + 1);
+        }}
+      />
+
       <HostConversationComposer
         isSending={detail.isSendingReply}
         disabled={!canSendHostReply || detail.isChangingMode || detail.isClosing}
         disabledReason={replyDisabledReason}
         actionError={detail.actionError}
+        externalDraft={copilotDraft}
+        externalDraftVersion={copilotDraftVersion}
         onSend={detail.sendHostMessage}
         onStartTyping={() => {
           void detail.startTyping("host");
