@@ -96,4 +96,77 @@ describe("hostConversationsApi", () => {
     expect(parsed.searchParams.get("status")).toBeNull();
     expect(parsed.searchParams.get("requiresHostAttention")).toBeNull();
   });
+
+  it("builds message history query safely", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      successPayload({
+        conversationId: "c-1",
+        messages: {
+          items: [],
+          pageNumber: 2,
+          pageSize: 50,
+          totalCount: 0,
+          totalPages: 0
+        }
+      })
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createHostConversationsApi(
+      new HttpClient({
+        baseUrl: "http://test.local",
+        getAccessToken: () => "host-token"
+      })
+    );
+
+    await api.getMessages("c-1", {
+      includeInternal: true,
+      pageNumber: 2,
+      pageSize: 50
+    });
+
+    const [url] = fetchMock.mock.calls[0];
+    const parsed = new URL(url as string);
+    expect(parsed.pathname).toBe("/conversations/c-1/messages");
+    expect(parsed.searchParams.get("includeInternal")).toBe("true");
+    expect(parsed.searchParams.get("pageNumber")).toBe("2");
+    expect(parsed.searchParams.get("pageSize")).toBe("50");
+  });
+
+  it("calls all conversation mutation endpoints", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(successPayload({ id: "m-1", conversationId: "c-1", senderType: 2, messageType: 0, content: "Hi", isInternal: false, sentAt: "2026-07-22T00:00:00Z" }))
+      .mockResolvedValueOnce(successPayload({ id: "m-2", conversationId: "c-1", senderType: 3, messageType: 3, content: "Note", isInternal: true, sentAt: "2026-07-22T00:00:00Z" }))
+      .mockResolvedValueOnce(successPayload({ conversationId: "c-1" }))
+      .mockResolvedValueOnce(successPayload({ conversationId: "c-1" }))
+      .mockResolvedValueOnce(successPayload({ conversationId: "c-1" }))
+      .mockResolvedValueOnce(successPayload({ conversationId: "c-1" }));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const api = createHostConversationsApi(
+      new HttpClient({
+        baseUrl: "http://test.local",
+        getAccessToken: () => "host-token"
+      })
+    );
+
+    await api.addHostMessage("c-1", "Reply");
+    await api.addInternalNote("c-1", "Internal");
+    await api.enableHumanTakeover("c-1");
+    await api.returnToAI("c-1");
+    await api.resolveConversation("c-1");
+    await api.closeConversation("c-1");
+
+    const calledUrls = fetchMock.mock.calls.map((call) => String(call[0]));
+
+    expect(calledUrls.some((url) => url.endsWith("/conversations/c-1/messages/host"))).toBe(true);
+    expect(calledUrls.some((url) => url.endsWith("/conversations/c-1/notes"))).toBe(true);
+    expect(calledUrls.some((url) => url.endsWith("/conversations/c-1/human-takeover"))).toBe(true);
+    expect(calledUrls.some((url) => url.endsWith("/conversations/c-1/return-to-ai"))).toBe(true);
+    expect(calledUrls.some((url) => url.endsWith("/conversations/c-1/resolve"))).toBe(true);
+    expect(calledUrls.some((url) => url.endsWith("/conversations/c-1/close"))).toBe(true);
+  });
 });
