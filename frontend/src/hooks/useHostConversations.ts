@@ -3,7 +3,7 @@ import { createHostConversationsApi } from "../api/hostConversationsApi";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { useConversationRealtime } from "./useConversationRealtime";
 import type { ConversationListQuery, ConversationListResponse } from "../models/hostConversations";
-import type { ConversationStatus } from "../models/enums";
+import { ConversationMessageType, ConversationSenderType, ConversationStatus, requiresHostAttention as computeRequiresHostAttention } from "../models/enums";
 
 interface UseHostConversationsOptions {
   accessToken: string | null;
@@ -49,6 +49,44 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
   const [refreshKey, setRefreshKey] = useState(0);
 
   const requestVersion = useRef(0);
+  const refreshTimerRef = useRef<number | null>(null);
+
+  const parseRealtimeStatus = useCallback((value?: string): ConversationStatus | undefined => {
+    if (!value) {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    switch (normalized) {
+      case "open":
+        return ConversationStatus.Open;
+      case "awaitingguest":
+        return ConversationStatus.AwaitingGuest;
+      case "awaitinghost":
+        return ConversationStatus.AwaitingHost;
+      case "escalated":
+        return ConversationStatus.Escalated;
+      case "humanmanaged":
+        return ConversationStatus.HumanManaged;
+      case "resolved":
+        return ConversationStatus.Resolved;
+      case "closed":
+        return ConversationStatus.Closed;
+      default:
+        return undefined;
+    }
+  }, []);
+
+  const scheduleRefresh = useCallback((delayMs = 350) => {
+    if (refreshTimerRef.current) {
+      window.clearTimeout(refreshTimerRef.current);
+    }
+
+    refreshTimerRef.current = window.setTimeout(() => {
+      refreshTimerRef.current = null;
+      setRefreshKey((current) => current + 1);
+    }, delayMs);
+  }, []);
 
   const http = useMemo(
     () =>
@@ -133,23 +171,228 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
   }, [debouncedSearch, status, requiresHostAttention, pageSize]);
 
   const refresh = useCallback(async () => {
+    if (refreshTimerRef.current) {
+      window.clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+
     setRefreshKey((current) => current + 1);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
+    };
   }, []);
 
   const realtime = useConversationRealtime({
     accessToken,
     conversationId: null,
     enabled: Boolean(accessToken),
-    onUnreadChanged: () => {
-      void refresh();
+    onMessageCreated: (event) => {
+      setResponse((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const index = current.items.findIndex((item) => item.conversationId === event.conversationId);
+        if (index < 0) {
+          return current;
+        }
+
+        const incomingMessage = event.message;
+        if (incomingMessage.isInternal || incomingMessage.messageType === ConversationMessageType.InternalNote) {
+          return current;
+        }
+
+        const updatedItems = [...current.items];
+        const existing = updatedItems[index];
+        const nextUnreadCount = incomingMessage.senderType === ConversationSenderType.Guest
+          ? existing.unreadMessageCount + 1
+          : existing.unreadMessageCount;
+
+        updatedItems[index] = {
+          ...existing,
+          latestVisibleMessagePreview: incomingMessage.content,
+          latestVisibleMessageSenderType: incomingMessage.senderType,
+          latestVisibleMessageTimestamp: incomingMessage.sentAt,
+          unreadMessageCount: nextUnreadCount,
+          totalVisibleMessageCount: existing.totalVisibleMessageCount + 1,
+          lastActivityAt: incomingMessage.sentAt
+        };
+
+        return {
+          ...current,
+          items: updatedItems,
+          totalUnreadCount: incomingMessage.senderType === ConversationSenderType.Guest
+            ? current.totalUnreadCount + 1
+            : current.totalUnreadCount
+        };
+      });
     },
-    onAssigned: () => {
-      void refresh();
+    onUnreadChanged: (event) => {
+      if (!event.conversationId) {
+        scheduleRefresh();
+        return;
+      }
+
+      scheduleRefresh();
     },
-    onReadStateChanged: () => {
-      void refresh();
+    onAssigned: (event) => {
+      setResponse((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const index = current.items.findIndex((item) => item.conversationId === event.conversationId);
+        if (index < 0) {
+          return current;
+        }
+
+        const updatedItems = [...current.items];
+        const existing = updatedItems[index];
+        const nextStatus = parseRealtimeStatus(event.status) ?? existing.status;
+
+        updatedItems[index] = {
+          ...existing,
+          assignedUser: event.assignedUser === undefined ? existing.assignedUser : event.assignedUser,
+          humanTakeoverEnabled: event.humanTakeoverEnabled ?? existing.humanTakeoverEnabled,
+          status: nextStatus,
+          requiresHostAttention: computeRequiresHostAttention(nextStatus, event.humanTakeoverEnabled ?? existing.humanTakeoverEnabled),
+          lastActivityAt: event.timestamp ?? existing.lastActivityAt
+        };
+
+        return {
+          ...current,
+          items: updatedItems
+        };
+      });
+
+      scheduleRefresh();
+    },
+    onReadStateChanged: (event) => {
+      setResponse((current) => {
+        if (!current) {
+          return current;
+        }
+
+        if (event.participantKind.toLowerCase() !== "hostuser") {
+          return current;
+        }
+
+        const index = current.items.findIndex((item) => item.conversationId === event.conversationId);
+        if (index < 0) {
+          return current;
+        }
+
+        const updatedItems = [...current.items];
+        const existing = updatedItems[index];
+        const totalBefore = current.items.reduce((sum, item) => sum + item.unreadMessageCount, 0);
+        updatedItems[index] = {
+          ...existing,
+          unreadMessageCount: 0,
+          lastReadAt: event.lastReadAt ?? existing.lastReadAt
+        };
+        const totalAfter = updatedItems.reduce((sum, item) => sum + item.unreadMessageCount, 0);
+
+        return {
+          ...current,
+          items: updatedItems,
+          totalUnreadCount: Math.max(0, current.totalUnreadCount - (totalBefore - totalAfter))
+        };
+      });
+
+      scheduleRefresh();
+    },
+    onStateChanged: (event) => {
+      setResponse((current) => {
+        if (!current) {
+          return current;
+        }
+
+        const index = current.items.findIndex((item) => item.conversationId === event.conversationId);
+        if (index < 0) {
+          return current;
+        }
+
+        const updatedItems = [...current.items];
+        const existing = updatedItems[index];
+        const nextStatus = parseRealtimeStatus(event.status) ?? existing.status;
+        const nextTakeover = event.humanTakeoverEnabled ?? existing.humanTakeoverEnabled;
+
+        updatedItems[index] = {
+          ...existing,
+          status: nextStatus,
+          humanTakeoverEnabled: nextTakeover,
+          requiresHostAttention: computeRequiresHostAttention(nextStatus, nextTakeover),
+          lastActivityAt: event.timestamp ?? existing.lastActivityAt
+        };
+
+        return {
+          ...current,
+          items: updatedItems
+        };
+      });
+
+      scheduleRefresh();
     }
   });
+
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+
+    let timerId: number | null = null;
+    let disposed = false;
+
+    const scheduleNext = () => {
+      if (disposed) {
+        return;
+      }
+
+      if (realtime.connectionState === "online") {
+        return;
+      }
+
+      const isVisible = document.visibilityState === "visible";
+      const delayMs = realtime.connectionState === "reconnecting"
+        ? (isVisible ? 15000 : 30000)
+        : (isVisible ? 12000 : 45000);
+
+      timerId = window.setTimeout(async () => {
+        await loadConversations();
+        scheduleNext();
+      }, delayMs);
+    };
+
+    scheduleNext();
+
+    const handleVisibilityChange = () => {
+      if (realtime.connectionState !== "online" && document.visibilityState === "visible") {
+        void loadConversations();
+      }
+
+      if (timerId) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+
+      scheduleNext();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [accessToken, loadConversations, realtime.connectionState]);
 
   const setSafePage = useCallback((value: number) => {
     setPage(Math.max(1, value));

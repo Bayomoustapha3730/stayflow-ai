@@ -81,6 +81,32 @@ export function useChat(options: UseChatOptions): UseChatResult {
   const chatApi = useMemo(() => createChatApi(http), [http]);
   const authApi = useMemo(() => createAuthApi(http), [http]);
 
+  const parseRealtimeStatus = useCallback((value?: string): ConversationStatus | undefined => {
+    if (!value) {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    switch (normalized) {
+      case "open":
+        return ConversationStatus.Open;
+      case "awaitingguest":
+        return ConversationStatus.AwaitingGuest;
+      case "awaitinghost":
+        return ConversationStatus.AwaitingHost;
+      case "escalated":
+        return ConversationStatus.Escalated;
+      case "humanmanaged":
+        return ConversationStatus.HumanManaged;
+      case "resolved":
+        return ConversationStatus.Resolved;
+      case "closed":
+        return ConversationStatus.Closed;
+      default:
+        return undefined;
+    }
+  }, []);
+
   const markReadIfVisible = useCallback(() => {
     if (!conversationId || !options.guestId || !isOpen || document.visibilityState === "hidden") {
       return;
@@ -294,6 +320,25 @@ export function useChat(options: UseChatOptions): UseChatResult {
       if (event.conversationId === conversationId && event.context === "host") {
         setIsHostTyping(false);
       }
+    },
+    onStateChanged: (event) => {
+      if (event.conversationId !== conversationId) {
+        return;
+      }
+
+      const nextStatus = parseRealtimeStatus(event.status);
+      if (nextStatus !== undefined) {
+        setConversationStatus(nextStatus);
+      }
+
+      const nextTakeover = event.humanTakeoverEnabled;
+      if (nextTakeover !== undefined) {
+        setHumanTakeoverEnabled(nextTakeover);
+      }
+
+      const statusForAttention = nextStatus ?? conversationStatus ?? ConversationStatus.Open;
+      const takeoverForAttention = nextTakeover ?? humanTakeoverEnabled;
+      setRequiresAttention(requiresHostAttention(statusForAttention, takeoverForAttention));
     }
   });
 

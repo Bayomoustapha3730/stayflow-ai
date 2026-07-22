@@ -2,10 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createHostConversationsApi } from "../api/hostConversationsApi";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { useConversationRealtime } from "./useConversationRealtime";
-import { ConversationMessageType, ConversationSenderType } from "../models/enums";
+import { ConversationMessageType, ConversationSenderType, ConversationStatus } from "../models/enums";
 import type { ConversationDetail, ConversationMessage } from "../models/hostConversations";
 
-const pollIntervalMs = 10000;
 const maxMessageLength = 2000;
 
 interface UseHostConversationDetailOptions {
@@ -108,6 +107,32 @@ export function useHostConversationDetail({
     }
   }, [accessToken]);
 
+  const parseRealtimeStatus = useCallback((value?: string): ConversationStatus | undefined => {
+    if (!value) {
+      return undefined;
+    }
+
+    const normalized = value.trim().toLowerCase();
+    switch (normalized) {
+      case "open":
+        return ConversationStatus.Open;
+      case "awaitingguest":
+        return ConversationStatus.AwaitingGuest;
+      case "awaitinghost":
+        return ConversationStatus.AwaitingHost;
+      case "escalated":
+        return ConversationStatus.Escalated;
+      case "humanmanaged":
+        return ConversationStatus.HumanManaged;
+      case "resolved":
+        return ConversationStatus.Resolved;
+      case "closed":
+        return ConversationStatus.Closed;
+      default:
+        return undefined;
+    }
+  }, []);
+
   const loadDetailAndHistory = useCallback(
     async (reason: "initial" | "refresh") => {
       if (!conversationId || !accessToken) {
@@ -193,24 +218,6 @@ export function useHostConversationDetail({
 
     return () => {
       requestVersion.current += 1;
-    };
-  }, [accessToken, conversationId, loadDetailAndHistory]);
-
-  useEffect(() => {
-    if (!conversationId || !accessToken) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === "hidden") {
-        return;
-      }
-
-      void loadDetailAndHistory("refresh");
-    }, pollIntervalMs);
-
-    return () => {
-      window.clearInterval(intervalId);
     };
   }, [accessToken, conversationId, loadDetailAndHistory]);
 
@@ -569,8 +576,97 @@ export function useHostConversationDetail({
     },
     onReadStateChanged: () => {
       onConversationChanged?.();
+    },
+    onStateChanged: (event) => {
+      if (event.conversationId !== conversationId) {
+        return;
+      }
+
+      const nextStatus = parseRealtimeStatus(event.status);
+
+      setConversation((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          ...current,
+          status: nextStatus ?? current.status,
+          humanTakeoverEnabled: event.humanTakeoverEnabled ?? current.humanTakeoverEnabled,
+          lastActivityAt: event.timestamp ?? current.lastActivityAt
+        };
+      });
+
+      onConversationChanged?.();
     }
   });
+
+  useEffect(() => {
+    if (!conversationId || !accessToken) {
+      return;
+    }
+
+    let disposed = false;
+    let timerId: number | null = null;
+
+    const computeDelayMs = (): number | null => {
+      if (realtime.connectionState === "online") {
+        return null;
+      }
+
+      const isVisible = document.visibilityState === "visible";
+      if (realtime.connectionState === "reconnecting") {
+        return isVisible ? 15000 : 30000;
+      }
+
+      if (realtime.connectionState === "connecting") {
+        return isVisible ? 12000 : 30000;
+      }
+
+      return isVisible ? 12000 : 45000;
+    };
+
+    const scheduleNextPoll = () => {
+      if (disposed) {
+        return;
+      }
+
+      const delayMs = computeDelayMs();
+      if (delayMs === null) {
+        return;
+      }
+
+      timerId = window.setTimeout(async () => {
+        await loadDetailAndHistory("refresh");
+        scheduleNextPoll();
+      }, delayMs);
+    };
+
+    scheduleNextPoll();
+
+    const handleVisibilityChange = () => {
+      if (timerId) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+
+      if (document.visibilityState === "visible") {
+        void loadDetailAndHistory("refresh");
+      }
+
+      scheduleNextPoll();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [accessToken, conversationId, loadDetailAndHistory, realtime.connectionState]);
 
   useEffect(() => {
     if (!conversationId) {
