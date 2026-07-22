@@ -214,7 +214,7 @@ describe("useHostConversationDetail", () => {
     expect(calledUrls.some((url) => url.endsWith("/conversations/c-1"))).toBe(true);
   });
 
-  it("polls every 10 seconds for selected conversation", async () => {
+  it("polls on the offline fallback cadence for selected conversation", async () => {
     vi.useFakeTimers();
 
     const fetchMock = vi.fn().mockImplementation((url: string) => {
@@ -244,7 +244,7 @@ describe("useHostConversationDetail", () => {
     const beforePoll = fetchMock.mock.calls.length;
 
     await act(async () => {
-      vi.advanceTimersByTime(10000);
+      vi.advanceTimersByTime(12000);
       await Promise.resolve();
     });
 

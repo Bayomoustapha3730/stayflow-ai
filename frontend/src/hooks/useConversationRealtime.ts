@@ -1,26 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HubConnectionState } from "@microsoft/signalr";
-import { createConversationConnection } from "../realtime/conversationConnection";
-
-interface RealtimeMessageEvent {
-  conversationId: string;
-  message: {
-    id: string;
-    conversationId: string;
-    senderType: number;
-    messageType: number;
-    content: string;
-    isInternal: boolean;
-    sentAt: string;
-  };
-}
-
-interface TypingEvent {
-  conversationId: string;
-  context: "guest" | "host" | "internal-note";
-  actorUserId?: string;
-  actorName?: string;
-}
+import {
+  acquireConversationConnection,
+  ensureConversationConnectionStarted,
+  onConversationRealtimeEvent,
+  releaseConversationConnection,
+  subscribeConversationConnectionState,
+  RealtimeMessageEvent,
+  TypingEvent,
+  ConversationUnreadCountChangedEvent,
+  ConversationAssignedEvent,
+  ConversationReadStateChangedEvent,
+  ConversationStateChangedEvent
+} from "../realtime/conversationConnection";
 
 interface UseConversationRealtimeOptions {
   accessToken: string | null;
@@ -29,9 +21,10 @@ interface UseConversationRealtimeOptions {
   onMessageCreated?: (event: RealtimeMessageEvent) => void;
   onTypingStarted?: (event: TypingEvent) => void;
   onTypingStopped?: (event: TypingEvent) => void;
-  onUnreadChanged?: () => void;
-  onAssigned?: () => void;
-  onReadStateChanged?: () => void;
+  onUnreadChanged?: (event: ConversationUnreadCountChangedEvent) => void;
+  onAssigned?: (event: ConversationAssignedEvent) => void;
+  onReadStateChanged?: (event: ConversationReadStateChangedEvent) => void;
+  onStateChanged?: (event: ConversationStateChangedEvent) => void;
 }
 
 export interface UseConversationRealtimeResult {
@@ -55,13 +48,40 @@ export function useConversationRealtime({
   onTypingStopped,
   onUnreadChanged,
   onAssigned,
-  onReadStateChanged
+  onReadStateChanged,
+  onStateChanged
 }: UseConversationRealtimeOptions): UseConversationRealtimeResult {
   const isTestMode = import.meta.env.MODE === "test";
 
   const [connectionState, setConnectionState] = useState<UseConversationRealtimeResult["connectionState"]>("offline");
-  const connectionRef = useRef<ReturnType<typeof createConversationConnection> | null>(null);
+  const connectionRef = useRef<ReturnType<typeof acquireConversationConnection> | null>(null);
   const joinedConversationRef = useRef<string | null>(null);
+  const latestConversationIdRef = useRef<string | null>(conversationId);
+  const callbacksRef = useRef({
+    onMessageCreated,
+    onTypingStarted,
+    onTypingStopped,
+    onUnreadChanged,
+    onAssigned,
+    onReadStateChanged,
+    onStateChanged
+  });
+
+  useEffect(() => {
+    callbacksRef.current = {
+      onMessageCreated,
+      onTypingStarted,
+      onTypingStopped,
+      onUnreadChanged,
+      onAssigned,
+      onReadStateChanged,
+      onStateChanged
+    };
+  }, [onAssigned, onMessageCreated, onReadStateChanged, onStateChanged, onTypingStarted, onTypingStopped, onUnreadChanged]);
+
+  useEffect(() => {
+    latestConversationIdRef.current = conversationId;
+  }, [conversationId]);
 
   const baseUrl = useMemo(() => import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243", []);
 
@@ -71,65 +91,77 @@ export function useConversationRealtime({
       return;
     }
 
-    const connection = createConversationConnection(baseUrl, accessToken);
+    const connection = acquireConversationConnection(baseUrl, accessToken);
     connectionRef.current = connection;
-    setConnectionState("connecting");
+    setConnectionState(connection.state === HubConnectionState.Connected ? "online" : "connecting");
 
-    connection.onreconnecting(() => {
-      setConnectionState("reconnecting");
-    });
+    const unsubscribeConnectionState = subscribeConversationConnectionState(connection, (state) => {
+      setConnectionState(state);
 
-    connection.onreconnected(async () => {
-      setConnectionState("online");
-
-      if (conversationId) {
-        try {
-          await connection.invoke("JoinConversation", conversationId);
-          joinedConversationRef.current = conversationId;
-        } catch {
-          // Ignore; polling remains the fallback path.
-        }
+      if (state !== "online") {
+        return;
       }
 
-      onUnreadChanged?.();
+      const nextConversationId = latestConversationIdRef.current;
+      const previousConversationId = joinedConversationRef.current;
+
+      if (previousConversationId && previousConversationId !== nextConversationId) {
+        void connection.invoke("LeaveConversation", previousConversationId).catch(() => {});
+        joinedConversationRef.current = null;
+      }
+
+      if (nextConversationId && nextConversationId !== joinedConversationRef.current) {
+        void connection.invoke("JoinConversation", nextConversationId)
+          .then(() => {
+            joinedConversationRef.current = nextConversationId;
+          })
+          .catch(() => {
+            // Ignore; polling remains the fallback path.
+          });
+      }
+
+      callbacksRef.current.onUnreadChanged?.({
+        conversationId: nextConversationId ?? undefined,
+        timestamp: new Date().toISOString()
+      });
     });
 
-    connection.onclose(() => {
-      setConnectionState("offline");
-    });
+    const unsubscribers = [
+      onConversationRealtimeEvent(connection, "ConversationMessageCreated", (event: RealtimeMessageEvent) => {
+        callbacksRef.current.onMessageCreated?.(event);
+      }),
+      onConversationRealtimeEvent(connection, "TypingStarted", (event: TypingEvent) => {
+        callbacksRef.current.onTypingStarted?.(event);
+      }),
+      onConversationRealtimeEvent(connection, "TypingStopped", (event: TypingEvent) => {
+        callbacksRef.current.onTypingStopped?.(event);
+      }),
+      onConversationRealtimeEvent(connection, "ConversationUnreadCountChanged", (event: ConversationUnreadCountChangedEvent) => {
+        callbacksRef.current.onUnreadChanged?.(event);
+      }),
+      onConversationRealtimeEvent(connection, "ConversationAssigned", (event: ConversationAssignedEvent) => {
+        callbacksRef.current.onAssigned?.(event);
+      }),
+      onConversationRealtimeEvent(connection, "ConversationReadStateChanged", (event: ConversationReadStateChangedEvent) => {
+        callbacksRef.current.onReadStateChanged?.(event);
+      }),
+      onConversationRealtimeEvent(connection, "ConversationStateChanged", (event: ConversationStateChangedEvent) => {
+        callbacksRef.current.onStateChanged?.(event);
+      })
+    ];
 
-    connection.on("ConversationMessageCreated", (event: RealtimeMessageEvent) => {
-      onMessageCreated?.(event);
-    });
-
-    connection.on("TypingStarted", (event: TypingEvent) => {
-      onTypingStarted?.(event);
-    });
-
-    connection.on("TypingStopped", (event: TypingEvent) => {
-      onTypingStopped?.(event);
-    });
-
-    connection.on("ConversationUnreadCountChanged", () => {
-      onUnreadChanged?.();
-    });
-
-    connection.on("ConversationAssigned", () => {
-      onAssigned?.();
-    });
-
-    connection.on("ConversationReadStateChanged", () => {
-      onReadStateChanged?.();
-    });
-
-    void connection
-      .start()
+    void ensureConversationConnectionStarted(baseUrl, accessToken)
       .then(async () => {
         setConnectionState("online");
 
-        if (conversationId) {
-          await connection.invoke("JoinConversation", conversationId);
-          joinedConversationRef.current = conversationId;
+        const nextConversationId = latestConversationIdRef.current;
+        if (nextConversationId) {
+          try {
+            await connection.invoke("JoinConversation", nextConversationId);
+            joinedConversationRef.current = nextConversationId;
+          } catch {
+            // Ignore; polling remains the fallback path.
+          }
         }
       })
       .catch(() => {
@@ -139,12 +171,24 @@ export function useConversationRealtime({
     return () => {
       const activeConnection = connectionRef.current;
       connectionRef.current = null;
+      const joinedConversationId = joinedConversationRef.current;
       joinedConversationRef.current = null;
+
+      if (activeConnection && joinedConversationId && activeConnection.state === HubConnectionState.Connected) {
+        void activeConnection.invoke("LeaveConversation", joinedConversationId).catch(() => {});
+      }
+
+      for (const unsubscribe of unsubscribers) {
+        unsubscribe();
+      }
+
+      unsubscribeConnectionState();
+
       if (activeConnection) {
-        void activeConnection.stop();
+        void releaseConversationConnection(baseUrl, accessToken);
       }
     };
-  }, [accessToken, baseUrl, conversationId, enabled, isTestMode, onAssigned, onMessageCreated, onReadStateChanged, onTypingStarted, onTypingStopped, onUnreadChanged]);
+  }, [accessToken, baseUrl, enabled, isTestMode]);
 
   useEffect(() => {
     const connection = connectionRef.current;
