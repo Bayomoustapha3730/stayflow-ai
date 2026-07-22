@@ -23,6 +23,9 @@ export function createChatApi(http: HttpClient) {
     },
     endChatConversation(conversationId: string, guestId: string) {
       return http.post<ChatStatusResponse>(`/chat/${conversationId}/end`, { guestId });
+    },
+    markConversationRead(conversationId: string, guestId: string) {
+      return http.post<boolean>(`/chat/conversations/${conversationId}/read`, { guestId });
     }
   };
 }

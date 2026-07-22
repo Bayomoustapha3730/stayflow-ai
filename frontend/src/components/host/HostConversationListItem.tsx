@@ -13,6 +13,7 @@ export function HostConversationListItem({ item, isSelected, onSelect }: HostCon
   const guestEmail = item.guest?.email?.trim() || "Email unavailable";
   const propertyName = item.property?.name?.trim() || "Property unavailable";
   const reservationNumber = item.reservation?.confirmationNumber?.trim() || "No reservation number";
+  const assignedHost = item.assignedUser?.fullName?.trim();
 
   return (
     <button
@@ -38,6 +39,8 @@ export function HostConversationListItem({ item, isSelected, onSelect }: HostCon
       <div className="sf-host-row-tags">
         {item.requiresHostAttention ? <span className="sf-host-pill sf-host-pill-attention">Needs attention</span> : null}
         {item.humanTakeoverEnabled ? <span className="sf-host-pill sf-host-pill-human">Human takeover</span> : null}
+        {assignedHost ? <span className="sf-host-pill">Assigned: {assignedHost}</span> : null}
+        {item.unreadMessageCount > 0 ? <span className="sf-host-pill sf-host-pill-unread">{item.unreadMessageCount} unread</span> : null}
         {item.subject ? <span className="sf-host-pill">{item.subject}</span> : null}
       </div>
 

@@ -10,6 +10,7 @@ interface ChatMessageListProps {
   isSending: boolean;
   isLoadingHistory: boolean;
   showAssistantTyping: boolean;
+  realtimeState: "offline" | "connecting" | "online" | "reconnecting";
 }
 
 export function ChatMessageList({
@@ -17,7 +18,8 @@ export function ChatMessageList({
   welcomeMessage,
   isSending,
   isLoadingHistory,
-  showAssistantTyping
+  showAssistantTyping,
+  realtimeState
 }: ChatMessageListProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -28,6 +30,11 @@ export function ChatMessageList({
   return (
     <main className="sf-chat-messages" aria-live="polite">
       {isLoadingHistory ? <div className="sf-chat-loading">Loading conversation...</div> : null}
+      {realtimeState !== "online" ? (
+        <div className="sf-chat-loading" aria-live="polite">
+          {realtimeState === "reconnecting" ? "Reconnecting..." : realtimeState === "connecting" ? "Connecting..." : "Offline"}
+        </div>
+      ) : null}
       {messages.length === 0 ? <EmptyConversationState welcomeMessage={welcomeMessage} /> : null}
       {messages.map((message) => (
         <ChatMessageBubble key={message.id} message={message} />

@@ -3,6 +3,7 @@ import type { ConversationMessage } from "../../models/hostConversations";
 
 interface HostConversationMessageProps {
   message: ConversationMessage;
+  onRetry?: (messageId: string) => void;
 }
 
 function messageLabel(message: ConversationMessage): string {
@@ -43,7 +44,7 @@ function messageClassName(message: ConversationMessage): string {
   }
 }
 
-export function HostConversationMessage({ message }: HostConversationMessageProps) {
+export function HostConversationMessage({ message, onRetry }: HostConversationMessageProps) {
   const label = messageLabel(message);
   const timestamp = Number.isNaN(Date.parse(message.sentAt))
     ? "Unknown time"
@@ -58,10 +59,22 @@ export function HostConversationMessage({ message }: HostConversationMessageProp
     <li className={messageClassName(message)}>
       <header className="sf-host-message-header">
         <span className="sf-host-message-sender">{label}</span>
+        {message.authorDisplayName ? <span>{message.authorDisplayName}</span> : null}
         {message.isInternal || message.messageType === ConversationMessageType.InternalNote ? (
           <span className="sf-host-message-staff-tag">Staff only</span>
         ) : null}
         <time dateTime={message.sentAt}>{timestamp}</time>
+        {message.deliveryStatus === "sending" ? <span>Sending...</span> : null}
+        {message.deliveryStatus === "failed" ? (
+          <>
+            <span className="sf-host-message-failed">Failed</span>
+            {onRetry ? (
+              <button type="button" className="sf-host-message-retry" onClick={() => onRetry(message.id)}>
+                Retry
+              </button>
+            ) : null}
+          </>
+        ) : null}
       </header>
       <p>{message.content}</p>
     </li>

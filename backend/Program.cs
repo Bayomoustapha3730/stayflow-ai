@@ -1,4 +1,5 @@
 using StayFlow.Api.Extensions;
+using StayFlow.Api.Hubs;
 using StayFlow.Api.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -76,6 +77,7 @@ app.UseAuthorization();
 app.UseMiddleware<PermissionAuthorizationMiddleware>();
 
 app.MapControllers();
+app.MapHub<ConversationHub>("/hubs/conversations");
 app.MapHealthChecks("/health");
 
 app.Run();

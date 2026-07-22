@@ -1,4 +1,4 @@
-import { KeyboardEvent, useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 
 const maxNoteLength = 2000;
 
@@ -7,15 +7,21 @@ interface HostInternalNoteComposerProps {
   disabled: boolean;
   actionError: string | null;
   onSubmit: (content: string) => Promise<boolean>;
+  onStartTyping?: () => void;
+  onStopTyping?: () => void;
 }
 
 export function HostInternalNoteComposer({
   isAddingNote,
   disabled,
   actionError,
-  onSubmit
+  onSubmit,
+  onStartTyping,
+  onStopTyping
 }: HostInternalNoteComposerProps) {
   const [content, setContent] = useState("");
+  const stopTypingTimerRef = useRef<number | null>(null);
+  const isTypingRef = useRef(false);
 
   const trimmed = content.trim();
   const isDisabled = disabled || isAddingNote || trimmed.length === 0 || trimmed.length > maxNoteLength;
@@ -28,8 +34,48 @@ export function HostInternalNoteComposer({
     const added = await onSubmit(trimmed);
     if (added) {
       setContent("");
+      if (isTypingRef.current) {
+        isTypingRef.current = false;
+        onStopTyping?.();
+      }
     }
   }
+
+  function emitTypingState(nextContent: string) {
+    if (!onStartTyping || !onStopTyping) {
+      return;
+    }
+
+    const hasContent = nextContent.trim().length > 0;
+
+    if (hasContent && !isTypingRef.current) {
+      isTypingRef.current = true;
+      onStartTyping();
+    }
+
+    if (stopTypingTimerRef.current) {
+      window.clearTimeout(stopTypingTimerRef.current);
+    }
+
+    stopTypingTimerRef.current = window.setTimeout(() => {
+      if (isTypingRef.current) {
+        isTypingRef.current = false;
+        onStopTyping();
+      }
+    }, 1200);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (stopTypingTimerRef.current) {
+        window.clearTimeout(stopTypingTimerRef.current);
+      }
+
+      if (isTypingRef.current) {
+        onStopTyping?.();
+      }
+    };
+  }, [onStopTyping]);
 
   async function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -47,8 +93,17 @@ export function HostInternalNoteComposer({
       <textarea
         id="sf-host-note-input"
         value={content}
-        onChange={(event) => setContent(event.target.value)}
+        onChange={(event) => {
+          setContent(event.target.value);
+          emitTypingState(event.target.value);
+        }}
         onKeyDown={handleKeyDown}
+        onBlur={() => {
+          if (isTypingRef.current) {
+            isTypingRef.current = false;
+            onStopTyping?.();
+          }
+        }}
         rows={3}
         maxLength={maxNoteLength + 1}
         disabled={disabled}

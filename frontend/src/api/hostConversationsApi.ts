@@ -82,6 +82,18 @@ export function createHostConversationsApi(http: HttpClient) {
       return http.post<ConversationDetailResponse>(`/conversations/${conversationId}/return-to-ai`);
     },
 
+    assignToMe(conversationId: string) {
+      return http.post<ConversationDetailResponse>(`/conversations/${conversationId}/assign-me`);
+    },
+
+    unassign(conversationId: string) {
+      return http.post<ConversationDetailResponse>(`/conversations/${conversationId}/unassign`);
+    },
+
+    markRead(conversationId: string) {
+      return http.post<boolean>(`/conversations/${conversationId}/read`);
+    },
+
     resolveConversation(conversationId: string) {
       return http.post<ConversationDetailResponse>(`/conversations/${conversationId}/resolve`);
     },

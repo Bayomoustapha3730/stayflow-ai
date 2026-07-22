@@ -43,6 +43,37 @@
   margin: 6px 0 0;
 }
 
+.sf-host-header-meta {
+  color: var(--sf-host-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0 0;
+}
+
+.sf-host-connection {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+}
+
+.sf-host-connection-online {
+  background: #e7f6ed;
+  color: #1f5c43;
+}
+
+.sf-host-connection-reconnecting,
+.sf-host-connection-connecting {
+  background: #fff3e8;
+  color: #7d3f08;
+}
+
+.sf-host-connection-offline {
+  background: #f2f3f5;
+  color: #526170;
+}
+
 .sf-host-header-actions {
   display: flex;
   gap: 10px;
@@ -214,6 +245,11 @@
 .sf-host-pill-human {
   background: rgba(216, 134, 59, 0.16);
   color: #70400f;
+}
+
+.sf-host-pill-unread {
+  background: rgba(15, 61, 62, 0.12);
+  color: #0f3d3e;
 }
 
 .sf-host-status {
@@ -430,6 +466,37 @@
   color: #0a3132;
   font-weight: 700;
   padding: 2px 8px;
+}
+
+.sf-host-message-failed {
+  color: #8c2e28;
+  font-weight: 700;
+}
+
+.sf-host-message-retry {
+  border: 1px solid rgba(15, 61, 62, 0.35);
+  border-radius: 999px;
+  font-size: 12px;
+  min-height: 24px;
+  padding: 0 8px;
+}
+
+.sf-host-unread-divider {
+  border-top: 1px dashed rgba(15, 61, 62, 0.35);
+  color: var(--sf-host-muted);
+  font-size: 12px;
+  margin: 8px 0;
+  padding-top: 6px;
+}
+
+.sf-host-typing-indicator {
+  color: var(--sf-host-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.sf-host-scroll-latest {
+  align-self: flex-end;
 }
 
 .sf-host-message-guest {

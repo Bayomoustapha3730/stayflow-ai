@@ -1,12 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { createAuthApi, createChatApi, HttpClient, ApiError } from "../api";
+import { useConversationRealtime } from "./useConversationRealtime";
 import type {
   ChatConversation,
   ChatMessage,
   ChatStatusResponse,
   SendChatMessageRequest
 } from "../models/chat";
-import { ConversationStatus, GuestChannel, requiresHostAttention } from "../models/enums";
+import { ConversationSenderType, ConversationStatus, GuestChannel, requiresHostAttention } from "../models/enums";
 import { buildLocalMessage, mergeMessages } from "../utils/messages";
 
 const tokenStorageKey = "stayflow.demo.accessToken";
@@ -46,6 +47,10 @@ export interface UseChatResult {
   endConversation: () => Promise<void>;
   startNewConversation: () => void;
   clearError: () => void;
+  isHostTyping: boolean;
+  realtimeState: "offline" | "connecting" | "online" | "reconnecting";
+  startTyping: () => Promise<void>;
+  stopTyping: () => Promise<void>;
 }
 
 export function useChat(options: UseChatOptions): UseChatResult {
@@ -62,6 +67,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
   const [isEnding, setIsEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [isHostTyping, setIsHostTyping] = useState(false);
 
   const http = useMemo(
     () =>
@@ -74,6 +80,16 @@ export function useChat(options: UseChatOptions): UseChatResult {
 
   const chatApi = useMemo(() => createChatApi(http), [http]);
   const authApi = useMemo(() => createAuthApi(http), [http]);
+
+  const markReadIfVisible = useCallback(() => {
+    if (!conversationId || !options.guestId || !isOpen || document.visibilityState === "hidden") {
+      return;
+    }
+
+    void chatApi.markConversationRead(conversationId, options.guestId).catch(() => {
+      // Polling/realtime will reconcile eventually.
+    });
+  }, [chatApi, conversationId, isOpen, options.guestId]);
 
   const clearSession = useCallback(() => {
     sessionStorage.removeItem(tokenStorageKey);
@@ -132,6 +148,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
     sessionStorage.setItem(openStorageKey, "true");
     setIsOpen(true);
     setUnreadCount(0);
+    markReadIfVisible();
   }, []);
 
   const close = useCallback(() => {
@@ -143,12 +160,13 @@ export function useChat(options: UseChatOptions): UseChatResult {
     setIsOpen((current) => {
       if (!current) {
         setUnreadCount(0);
+        markReadIfVisible();
       }
 
       sessionStorage.setItem(openStorageKey, String(!current));
       return !current;
     });
-  }, []);
+  }, [markReadIfVisible]);
 
   const loadHistory = useCallback(async () => {
     if (!conversationId) {
@@ -165,12 +183,13 @@ export function useChat(options: UseChatOptions): UseChatResult {
 
       const history = await chatApi.getChatHistory(conversationId, 1, 50);
       setMessages((current) => mergeMessages(current, history.messages.items));
+      markReadIfVisible();
     } catch (failure) {
       handleError(failure);
     } finally {
       setIsLoadingHistory(false);
     }
-  }, [chatApi, conversationId, handleError, updateConversationState]);
+  }, [chatApi, conversationId, handleError, markReadIfVisible, updateConversationState]);
 
   const sendMessage = useCallback(
     async (message: string): Promise<boolean> => {
@@ -219,6 +238,8 @@ export function useChat(options: UseChatOptions): UseChatResult {
           setUnreadCount((current) => current + 1);
         }
 
+        markReadIfVisible();
+
         return true;
       } catch (failure) {
         setMessages((current) =>
@@ -243,6 +264,38 @@ export function useChat(options: UseChatOptions): UseChatResult {
       options.reservationId
     ]
   );
+
+  const realtime = useConversationRealtime({
+    accessToken,
+    conversationId,
+    enabled: Boolean(accessToken),
+    onMessageCreated: (event) => {
+      if (event.conversationId !== conversationId || event.message.isInternal) {
+        return;
+      }
+
+      const incoming = event.message as ChatMessage;
+      setMessages((current) => mergeMessages(current, [incoming]));
+
+      if (incoming.senderType === ConversationSenderType.Host) {
+        if (!isOpen || document.visibilityState === "hidden") {
+          setUnreadCount((current) => current + 1);
+        } else {
+          markReadIfVisible();
+        }
+      }
+    },
+    onTypingStarted: (event) => {
+      if (event.conversationId === conversationId && event.context === "host") {
+        setIsHostTyping(true);
+      }
+    },
+    onTypingStopped: (event) => {
+      if (event.conversationId === conversationId && event.context === "host") {
+        setIsHostTyping(false);
+      }
+    }
+  });
 
   const escalate = useCallback(
     async (reason?: string) => {
@@ -293,6 +346,14 @@ export function useChat(options: UseChatOptions): UseChatResult {
     setError(null);
   }, []);
 
+  const startTyping = useCallback(async () => {
+    await realtime.startTyping("guest");
+  }, [realtime]);
+
+  const stopTyping = useCallback(async () => {
+    await realtime.stopTyping("guest");
+  }, [realtime]);
+
   return {
     isOpen,
     isAuthenticated: Boolean(accessToken),
@@ -317,6 +378,10 @@ export function useChat(options: UseChatOptions): UseChatResult {
     escalate,
     endConversation,
     startNewConversation,
-    clearError: () => setError(null)
+    clearError: () => setError(null),
+    isHostTyping,
+    realtimeState: realtime.connectionState,
+    startTyping,
+    stopTyping
   };
 }

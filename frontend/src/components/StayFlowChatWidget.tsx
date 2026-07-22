@@ -25,7 +25,6 @@ export function StayFlowChatWidget({
   theme
 }: StayFlowChatWidgetProps) {
   const resolvedTheme = useMemo(() => ({ ...defaultChatTheme, ...theme }), [theme]);
-  console.log("Widget prop apiBaseUrl =", apiBaseUrl);
   const chat = useChat({ apiBaseUrl, guestId, reservationId, propertyId, channelIdentity });
 
   const style = {

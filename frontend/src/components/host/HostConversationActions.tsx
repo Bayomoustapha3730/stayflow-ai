@@ -7,7 +7,10 @@ interface HostConversationActionsProps {
   isChangingMode: boolean;
   isResolving: boolean;
   isClosing: boolean;
+  isAssigning: boolean;
   onTakeOver: () => Promise<boolean>;
+  onAssignToMe: () => Promise<boolean>;
+  onUnassign: () => Promise<boolean>;
   onReturnToAI: () => Promise<boolean>;
   onResolve: () => Promise<boolean>;
   onClose: () => Promise<boolean>;
@@ -41,7 +44,10 @@ export function HostConversationActions({
   isChangingMode,
   isResolving,
   isClosing,
+  isAssigning,
   onTakeOver,
+  onAssignToMe,
+  onUnassign,
   onReturnToAI,
   onResolve,
   onClose
@@ -67,6 +73,16 @@ export function HostConversationActions({
         {canTakeOver ? (
           <button type="button" onClick={() => void onTakeOver()} disabled={isChangingMode} aria-label="Take over conversation">
             {isChangingMode ? "Updating..." : "Take Over"}
+          </button>
+        ) : null}
+
+        <button type="button" onClick={() => void onAssignToMe()} disabled={isAssigning || isChangingMode} aria-label="Assign conversation to me">
+          {isAssigning ? "Assigning..." : "Assign to me"}
+        </button>
+
+        {conversation.assignedUser ? (
+          <button type="button" onClick={() => void onUnassign()} disabled={isAssigning || isChangingMode} aria-label="Unassign conversation">
+            {isAssigning ? "Updating..." : "Unassign"}
           </button>
         ) : null}
 

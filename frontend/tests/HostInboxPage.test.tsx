@@ -78,7 +78,9 @@ function conversationRow(id = "c-1"): ConversationSummary {
     latestVisibleMessagePreview: "Can I check in early?",
     latestVisibleMessageSenderType: ConversationSenderType.Guest,
     latestVisibleMessageTimestamp: "2026-07-22T10:00:00Z",
-    totalVisibleMessageCount: 4
+    totalVisibleMessageCount: 4,
+    unreadMessageCount: 2,
+    lastReadAt: null
   };
 }
 
@@ -120,7 +122,8 @@ function listResponse(items = [conversationRow()], page = 1, totalPages = 1) {
     totalCount: items.length,
     page,
     pageSize: 10,
-    totalPages
+    totalPages,
+    totalUnreadCount: items.reduce((count, item) => count + item.unreadMessageCount, 0)
   };
 }
 

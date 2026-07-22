@@ -88,13 +88,27 @@ export function HostConversationDetail({
         isChangingMode={detail.isChangingMode}
         isResolving={detail.isResolving}
         isClosing={detail.isClosing}
+        isAssigning={detail.isChangingMode}
         onTakeOver={detail.enableHumanTakeover}
+        onAssignToMe={detail.assignToMe}
+        onUnassign={detail.unassign}
         onReturnToAI={detail.returnToAI}
         onResolve={detail.resolveConversation}
         onClose={detail.closeConversation}
       />
 
-      <HostConversationTimeline messages={detail.messages} isRefreshing={detail.isRefreshing} />
+      <HostConversationTimeline
+        messages={detail.messages}
+        isRefreshing={detail.isRefreshing}
+        unreadMessageCount={conversation.unreadMessageCount}
+        isGuestTyping={detail.isGuestTyping}
+        isAnotherStaffTyping={detail.isAnotherStaffTyping}
+        isInternalNoteTyping={detail.isInternalNoteTyping}
+        connectionState={detail.realtimeState}
+        onRetryFailedMessage={(messageId) => {
+          void detail.retryFailedMessage(messageId);
+        }}
+      />
 
       <HostConversationComposer
         isSending={detail.isSendingReply}
@@ -102,6 +116,12 @@ export function HostConversationDetail({
         disabledReason={replyDisabledReason}
         actionError={detail.actionError}
         onSend={detail.sendHostMessage}
+        onStartTyping={() => {
+          void detail.startTyping("host");
+        }}
+        onStopTyping={() => {
+          void detail.stopTyping("host");
+        }}
       />
 
       <HostInternalNoteComposer
@@ -109,6 +129,12 @@ export function HostConversationDetail({
         disabled={conversationClosed || detail.isClosing}
         actionError={detail.actionError}
         onSubmit={detail.addInternalNote}
+        onStartTyping={() => {
+          void detail.startTyping("internal-note");
+        }}
+        onStopTyping={() => {
+          void detail.stopTyping("internal-note");
+        }}
       />
     </aside>
   );

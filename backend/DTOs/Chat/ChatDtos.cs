@@ -34,6 +34,11 @@ public sealed record EndChatRequest
     public Guid GuestId { get; init; }
 }
 
+public sealed record MarkChatConversationReadRequest
+{
+    public Guid GuestId { get; init; }
+}
+
 public sealed class ChatMessageResponse
 {
     public Guid ConversationId { get; init; }

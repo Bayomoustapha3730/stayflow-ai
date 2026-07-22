@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createHostConversationsApi } from "../api/hostConversationsApi";
 import { ApiError, HttpClient } from "../api/httpClient";
+import { useConversationRealtime } from "./useConversationRealtime";
 import type { ConversationListQuery, ConversationListResponse } from "../models/hostConversations";
 import type { ConversationStatus } from "../models/enums";
 
@@ -15,6 +16,8 @@ export interface UseHostConversationsResult {
   error: string | null;
   sessionExpired: boolean;
   selectedConversationId: string | null;
+  totalUnreadCount: number;
+  realtimeState: "offline" | "connecting" | "online" | "reconnecting";
   search: string;
   status?: ConversationStatus;
   requiresHostAttention?: boolean;
@@ -133,6 +136,21 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
     setRefreshKey((current) => current + 1);
   }, []);
 
+  const realtime = useConversationRealtime({
+    accessToken,
+    conversationId: null,
+    enabled: Boolean(accessToken),
+    onUnreadChanged: () => {
+      void refresh();
+    },
+    onAssigned: () => {
+      void refresh();
+    },
+    onReadStateChanged: () => {
+      void refresh();
+    }
+  });
+
   const setSafePage = useCallback((value: number) => {
     setPage(Math.max(1, value));
   }, []);
@@ -148,6 +166,8 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
     error,
     sessionExpired,
     selectedConversationId,
+    totalUnreadCount: response?.totalUnreadCount ?? 0,
+    realtimeState: realtime.connectionState,
     search,
     status,
     requiresHostAttention,
