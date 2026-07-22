@@ -375,6 +375,53 @@ public sealed class ConversationServiceTests
         Assert.Equal("Conversation was not found.", response.Message);
     }
 
+    [Fact]
+    public async Task EnableHumanTakeoverAsync_AssignsCurrentUser()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.Open);
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.EnableHumanTakeoverAsync(conversation.Id, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        Assert.Equal(fixture.User.Id, conversation.AssignedUserId);
+        Assert.True(response.Data!.HumanTakeoverEnabled);
+    }
+
+    [Fact]
+    public async Task ReturnToAIModeAsync_KeepsAssignedUserForAuditHistory()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.HumanManaged, humanTakeover: true);
+        conversation.AssignedUserId = fixture.User.Id;
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.ReturnToAIModeAsync(conversation.Id, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.False(response.Data!.HumanTakeoverEnabled);
+        Assert.Equal(fixture.User.Id, conversation.AssignedUserId);
+    }
+
+    [Fact]
+    public async Task MarkConversationReadForCurrentUserAsync_PersistsReadState()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        await fixture.Service.AddGuestMessageAsync(conversation.Id, new AddGuestMessageRequest { Content = "Unread" }, CancellationToken.None);
+
+        var response = await fixture.Service.MarkConversationReadForCurrentUserAsync(conversation.Id, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var readState = Assert.Single(fixture.Repository.ReadStates);
+        Assert.Equal(conversation.Id, readState.ConversationId);
+        Assert.Equal(ConversationParticipantKind.HostUser, readState.ParticipantKind);
+        Assert.Equal(fixture.User.Id, readState.ParticipantId);
+    }
+
     private sealed class Fixture
     {
         public Fixture(int maxMessageCharacters = 2000)
@@ -386,10 +433,13 @@ public sealed class ConversationServiceTests
             Repository.Guests.Add(Guest);
             Repository.Properties.Add(Property);
             Repository.Reservations.Add(Reservation);
+            User = new User { Id = Guid.NewGuid(), CompanyId = CompanyId, FullName = "Host User", Email = "host@stayflow.local", PhoneNumber = "+254700000001", Role = "Host", PasswordHash = "hash", IsActive = true };
+            Repository.Users.Add(User);
             Service = new ConversationService(
                 Repository,
-                new FakeCurrentTenantContext(CompanyId),
+                new FakeCurrentTenantContext(CompanyId, User.Id),
                 new ConversationStatusTransitionPolicy(),
+                new NoOpConversationRealtimePublisher(),
                 Options.Create(new ConversationOptions { MaxMessageCharacters = maxMessageCharacters, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
         }
 
@@ -397,14 +447,15 @@ public sealed class ConversationServiceTests
         public Guest Guest { get; }
         public Property Property { get; }
         public Reservation Reservation { get; }
+        public User User { get; }
         public FakeConversationRepository Repository { get; }
         public ConversationService Service { get; }
     }
 
-    private sealed class FakeCurrentTenantContext(Guid companyId) : ICurrentTenantContext
+    private sealed class FakeCurrentTenantContext(Guid companyId, Guid userId) : ICurrentTenantContext
     {
         public Guid? CompanyId { get; } = companyId;
-        public Guid? UserId { get; } = Guid.NewGuid();
+        public Guid? UserId { get; } = userId;
         public string? CorrelationId { get; } = "conversation-test";
         public bool IsAuthenticated { get; } = true;
     }
@@ -418,6 +469,7 @@ public sealed class ConversationServiceTests
         public List<Reservation> Reservations { get; } = [];
         public List<User> Users { get; } = [];
         public List<AuditLog> AuditLogs { get; } = [];
+        public List<ConversationParticipantReadState> ReadStates { get; } = [];
 
         public Task<PagedResult<ConversationSummaryResponse>> ListConversationsAsync(Guid requestedCompanyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
         {
@@ -504,6 +556,65 @@ public sealed class ConversationServiceTests
             });
         }
 
+        public Task<ConversationMessage?> GetLatestVisibleMessageAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
+        {
+            var message = Messages
+                .Where(item => item.CompanyId == requestedCompanyId && item.ConversationId == conversationId && !item.IsInternal && !item.IsDeleted)
+                .OrderByDescending(item => item.SentAt)
+                .ThenByDescending(item => item.CreatedAt)
+                .FirstOrDefault();
+
+            return Task.FromResult(message);
+        }
+
+        public Task<int> GetTotalUnreadCountForHostAsync(Guid requestedCompanyId, Guid hostUserId, CancellationToken cancellationToken)
+        {
+            var unread = Messages.Count(message =>
+                message.CompanyId == requestedCompanyId
+                && message.SenderType == ConversationSenderType.Guest
+                && !message.IsInternal
+                && !message.IsDeleted
+                && (ReadStates.FirstOrDefault(state => state.CompanyId == requestedCompanyId
+                    && state.ConversationId == message.ConversationId
+                    && state.ParticipantKind == ConversationParticipantKind.HostUser
+                    && state.ParticipantId == hostUserId)?.LastReadAt is not { } readAt || message.SentAt > readAt));
+
+            return Task.FromResult(unread);
+        }
+
+        public Task<Dictionary<Guid, int>> GetUnreadMessageCountsForHostAsync(Guid requestedCompanyId, Guid hostUserId, IReadOnlyCollection<Guid> conversationIds, CancellationToken cancellationToken)
+        {
+            var ids = conversationIds.ToHashSet();
+            var result = Messages
+                .Where(message => message.CompanyId == requestedCompanyId
+                    && ids.Contains(message.ConversationId)
+                    && message.SenderType == ConversationSenderType.Guest
+                    && !message.IsInternal
+                    && !message.IsDeleted)
+                .GroupBy(message => message.ConversationId)
+                .ToDictionary(
+                    group => group.Key,
+                    group =>
+                    {
+                        var readAt = ReadStates.FirstOrDefault(state => state.CompanyId == requestedCompanyId
+                            && state.ConversationId == group.Key
+                            && state.ParticipantKind == ConversationParticipantKind.HostUser
+                            && state.ParticipantId == hostUserId)?.LastReadAt;
+                        return group.Count(message => !readAt.HasValue || message.SentAt > readAt.Value);
+                    });
+
+            return Task.FromResult(result);
+        }
+
+        public Task<int> GetUnreadHostMessageCountForGuestAsync(Guid requestedCompanyId, Guid guestId, Guid conversationId, CancellationToken cancellationToken)
+            => Task.FromResult(0);
+
+        public Task<ConversationParticipantReadState?> GetReadStateAsync(Guid requestedCompanyId, Guid conversationId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken)
+            => Task.FromResult(ReadStates.FirstOrDefault(state => state.CompanyId == requestedCompanyId && state.ConversationId == conversationId && state.ParticipantKind == participantKind && state.ParticipantId == participantId));
+
+        public Task<IReadOnlyCollection<ConversationParticipantReadState>> GetReadStatesForParticipantAsync(Guid requestedCompanyId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyCollection<ConversationParticipantReadState>>(ReadStates.Where(state => state.CompanyId == requestedCompanyId && state.ParticipantKind == participantKind && state.ParticipantId == participantId).ToList());
+
         public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid requestedCompanyId, string externalMessageId, CancellationToken cancellationToken)
         {
             return Task.FromResult(Messages.FirstOrDefault(message => message.CompanyId == requestedCompanyId && message.ExternalMessageId == externalMessageId));
@@ -538,6 +649,12 @@ public sealed class ConversationServiceTests
         public Task AddMessageAsync(ConversationMessage message, CancellationToken cancellationToken)
         {
             Messages.Add(message);
+            return Task.CompletedTask;
+        }
+
+        public Task AddReadStateAsync(ConversationParticipantReadState state, CancellationToken cancellationToken)
+        {
+            ReadStates.Add(state);
             return Task.CompletedTask;
         }
 
@@ -688,5 +805,15 @@ public sealed class ConversationServiceTests
                 || conversation.Status == ConversationStatus.Escalated
                 || conversation.Status == ConversationStatus.HumanManaged;
         }
+    }
+
+    private sealed class NoOpConversationRealtimePublisher : IConversationRealtimePublisher
+    {
+        public Task PublishMessageCreatedAsync(Guid companyId, Guid conversationId, object payload, bool internalOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishTypingStartedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishTypingStoppedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

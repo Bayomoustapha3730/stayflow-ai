@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createHostConversationsApi } from "../api/hostConversationsApi";
 import { ApiError, HttpClient } from "../api/httpClient";
+import { useConversationRealtime } from "./useConversationRealtime";
+import { ConversationMessageType, ConversationSenderType } from "../models/enums";
 import type { ConversationDetail, ConversationMessage } from "../models/hostConversations";
 
 const pollIntervalMs = 10000;
+const maxMessageLength = 2000;
 
 interface UseHostConversationDetailOptions {
   conversationId: string | null;
@@ -24,9 +27,18 @@ export interface UseHostConversationDetailResult {
   isClosing: boolean;
   error: string | null;
   actionError: string | null;
+  realtimeState: "offline" | "connecting" | "online" | "reconnecting";
+  isGuestTyping: boolean;
+  isAnotherStaffTyping: boolean;
+  isInternalNoteTyping: boolean;
   refresh: () => Promise<void>;
   sendHostMessage: (content: string) => Promise<boolean>;
   addInternalNote: (content: string) => Promise<boolean>;
+  retryFailedMessage: (messageId: string) => Promise<boolean>;
+  assignToMe: () => Promise<boolean>;
+  unassign: () => Promise<boolean>;
+  startTyping: (context: "host" | "internal-note") => Promise<void>;
+  stopTyping: (context: "host" | "internal-note") => Promise<void>;
   enableHumanTakeover: () => Promise<boolean>;
   returnToAI: () => Promise<boolean>;
   resolveConversation: () => Promise<boolean>;
@@ -64,8 +76,12 @@ export function useHostConversationDetail({
   const [isClosing, setIsClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isGuestTyping, setIsGuestTyping] = useState(false);
+  const [isAnotherStaffTyping, setIsAnotherStaffTyping] = useState(false);
+  const [isInternalNoteTyping, setIsInternalNoteTyping] = useState(false);
 
   const requestVersion = useRef(0);
+  const lastReadMarkAt = useRef(0);
 
   const http = useMemo(
     () =>
@@ -77,6 +93,20 @@ export function useHostConversationDetail({
   );
 
   const api = useMemo(() => createHostConversationsApi(http), [http]);
+
+  const currentUserId = useMemo(() => {
+    if (!accessToken) {
+      return null;
+    }
+
+    try {
+      const [, payload] = accessToken.split(".");
+      const parsed = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+      return typeof parsed.sub === "string" ? parsed.sub : null;
+    } catch {
+      return null;
+    }
+  }, [accessToken]);
 
   const loadDetailAndHistory = useCallback(
     async (reason: "initial" | "refresh") => {
@@ -116,6 +146,9 @@ export function useHostConversationDetail({
         const sorted = sortMessagesChronologically(history.messages.items);
         setConversation(detail);
         setMessages(sorted);
+        if (document.visibilityState === "visible") {
+          void api.markRead(conversationId).catch(() => {});
+        }
         return true;
       } catch (failure) {
         if (version !== requestVersion.current) {
@@ -185,6 +218,26 @@ export function useHostConversationDetail({
     await loadDetailAndHistory("refresh");
   }, [loadDetailAndHistory]);
 
+  const markReadIfVisible = useCallback(() => {
+    if (!conversationId || !accessToken || document.visibilityState !== "visible") {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastReadMarkAt.current < 1500) {
+      return;
+    }
+
+    lastReadMarkAt.current = now;
+    void api.markRead(conversationId)
+      .then(() => {
+        onConversationChanged?.();
+      })
+      .catch(() => {
+        // Polling + realtime will eventually reconcile read state.
+      });
+  }, [accessToken, api, conversationId, onConversationChanged]);
+
   const runConversationAction = useCallback(
     async (
       runRequest: () => Promise<unknown>,
@@ -235,12 +288,64 @@ export function useHostConversationDetail({
         return false;
       }
 
-      return runConversationAction(
-        () => api.addHostMessage(conversationId as string, trimmed),
-        setIsSendingReply
-      );
+      if (trimmed.length > maxMessageLength) {
+        setActionError(`Content must be ${maxMessageLength} characters or fewer.`);
+        return false;
+      }
+
+      const optimisticId = `optimistic-host-${crypto.randomUUID()}`;
+      const optimisticMessage: ConversationMessage = {
+        id: optimisticId,
+        conversationId: conversationId as string,
+        senderType: ConversationSenderType.Host,
+        messageType: ConversationMessageType.Text,
+        content: trimmed,
+        isInternal: false,
+        sentAt: new Date().toISOString(),
+        deliveryStatus: "sending",
+        optimisticId
+      };
+
+      setActionError(null);
+      setMessages((current) => sortMessagesChronologically([...current, optimisticMessage]));
+      setIsSendingReply(true);
+
+      try {
+        const response = await api.addHostMessage(conversationId as string, trimmed);
+        setMessages((current) =>
+          sortMessagesChronologically(
+            current
+              .filter((message) => message.id !== response.id)
+              .map((message) => (message.id === optimisticId ? response : message))
+          )
+        );
+        onConversationChanged?.();
+        markReadIfVisible();
+        return true;
+      } catch (failure) {
+        if (failure instanceof ApiError && failure.status === 401) {
+          onUnauthorized();
+          return false;
+        }
+
+        const message = failure instanceof Error ? failure.message : "The action could not be completed.";
+        setActionError(message);
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === optimisticId
+              ? {
+                  ...item,
+                  deliveryStatus: "failed"
+                }
+              : item
+          )
+        );
+        return false;
+      } finally {
+        setIsSendingReply(false);
+      }
     },
-    [api, conversationId, isSendingReply, runConversationAction]
+    [accessToken, api, conversationId, isSendingReply, markReadIfVisible, onConversationChanged, onUnauthorized]
   );
 
   const addInternalNote = useCallback(
@@ -255,13 +360,97 @@ export function useHostConversationDetail({
         return false;
       }
 
-      return runConversationAction(
-        () => api.addInternalNote(conversationId as string, trimmed),
-        setIsAddingNote
-      );
+      if (trimmed.length > maxMessageLength) {
+        setActionError(`Content must be ${maxMessageLength} characters or fewer.`);
+        return false;
+      }
+
+      const optimisticId = `optimistic-note-${crypto.randomUUID()}`;
+      const optimisticMessage: ConversationMessage = {
+        id: optimisticId,
+        conversationId: conversationId as string,
+        senderType: ConversationSenderType.System,
+        messageType: ConversationMessageType.InternalNote,
+        content: trimmed,
+        isInternal: true,
+        sentAt: new Date().toISOString(),
+        authorDisplayName: conversation?.assignedUser?.fullName ?? null,
+        deliveryStatus: "sending",
+        optimisticId
+      };
+
+      setActionError(null);
+      setMessages((current) => sortMessagesChronologically([...current, optimisticMessage]));
+      setIsAddingNote(true);
+
+      try {
+        const response = await api.addInternalNote(conversationId as string, trimmed);
+        setMessages((current) =>
+          sortMessagesChronologically(
+            current
+              .filter((message) => message.id !== response.id)
+              .map((message) => (message.id === optimisticId ? response : message))
+          )
+        );
+        onConversationChanged?.();
+        return true;
+      } catch (failure) {
+        if (failure instanceof ApiError && failure.status === 401) {
+          onUnauthorized();
+          return false;
+        }
+
+        const message = failure instanceof Error ? failure.message : "The action could not be completed.";
+        setActionError(message);
+        setMessages((current) =>
+          current.map((item) =>
+            item.id === optimisticId
+              ? {
+                  ...item,
+                  deliveryStatus: "failed"
+                }
+              : item
+          )
+        );
+        return false;
+      } finally {
+        setIsAddingNote(false);
+      }
     },
-    [api, conversationId, isAddingNote, runConversationAction]
+    [api, conversation?.assignedUser?.fullName, conversationId, isAddingNote, onConversationChanged, onUnauthorized]
   );
+
+  const retryFailedMessage = useCallback(
+    async (messageId: string) => {
+      const failed = messages.find((message) => message.id === messageId && message.deliveryStatus === "failed");
+      if (!failed) {
+        return false;
+      }
+
+      if (failed.isInternal || failed.messageType === ConversationMessageType.InternalNote) {
+        return addInternalNote(failed.content);
+      }
+
+      return sendHostMessage(failed.content);
+    },
+    [addInternalNote, messages, sendHostMessage]
+  );
+
+  const assignToMe = useCallback(async () => {
+    if (isChangingMode) {
+      return false;
+    }
+
+    return runConversationAction(() => api.assignToMe(conversationId as string), setIsChangingMode);
+  }, [api, conversationId, isChangingMode, runConversationAction]);
+
+  const unassign = useCallback(async () => {
+    if (isChangingMode) {
+      return false;
+    }
+
+    return runConversationAction(() => api.unassign(conversationId as string), setIsChangingMode);
+  }, [api, conversationId, isChangingMode, runConversationAction]);
 
   const enableHumanTakeover = useCallback(async () => {
     if (isChangingMode) {
@@ -304,6 +493,111 @@ export function useHostConversationDetail({
     );
   }, [api, conversationId, isClosing, runConversationAction]);
 
+  const realtime = useConversationRealtime({
+    accessToken,
+    conversationId,
+    enabled: Boolean(accessToken),
+    onMessageCreated: (event) => {
+      if (event.conversationId !== conversationId) {
+        return;
+      }
+
+      setMessages((current) => {
+        if (current.some((message) => message.id === event.message.id)) {
+          return current;
+        }
+
+        const optimisticMatch = current.find((message) =>
+          message.deliveryStatus === "sending"
+          && message.content === event.message.content
+          && message.senderType === event.message.senderType
+        );
+
+        if (optimisticMatch) {
+          return sortMessagesChronologically(
+            current.map((message) => (message.id === optimisticMatch.id ? event.message : message))
+          );
+        }
+
+        return sortMessagesChronologically([...current, event.message]);
+      });
+
+      markReadIfVisible();
+      onConversationChanged?.();
+    },
+    onTypingStarted: (event) => {
+      if (event.conversationId !== conversationId) {
+        return;
+      }
+
+      if (event.context === "guest") {
+        setIsGuestTyping(true);
+      }
+
+      if (event.context === "host" && event.actorUserId && event.actorUserId !== currentUserId) {
+        setIsAnotherStaffTyping(true);
+      }
+
+      if (event.context === "internal-note" && event.actorUserId && event.actorUserId !== currentUserId) {
+        setIsInternalNoteTyping(true);
+      }
+    },
+    onTypingStopped: (event) => {
+      if (event.conversationId !== conversationId) {
+        return;
+      }
+
+      if (event.context === "guest") {
+        setIsGuestTyping(false);
+      }
+
+      if (event.context === "host") {
+        setIsAnotherStaffTyping(false);
+      }
+
+      if (event.context === "internal-note") {
+        setIsInternalNoteTyping(false);
+      }
+    },
+    onUnreadChanged: () => {
+      onConversationChanged?.();
+      markReadIfVisible();
+    },
+    onAssigned: () => {
+      void refresh();
+      onConversationChanged?.();
+    },
+    onReadStateChanged: () => {
+      onConversationChanged?.();
+    }
+  });
+
+  useEffect(() => {
+    if (!conversationId) {
+      return;
+    }
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        markReadIfVisible();
+      }
+    };
+
+    window.addEventListener("focus", onVisibilityChange);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", onVisibilityChange);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [conversationId, markReadIfVisible]);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      markReadIfVisible();
+    }
+  }, [markReadIfVisible, messages.length]);
+
   return {
     conversation,
     messages,
@@ -316,9 +610,18 @@ export function useHostConversationDetail({
     isClosing,
     error,
     actionError,
+    realtimeState: realtime.connectionState,
+    isGuestTyping,
+    isAnotherStaffTyping,
+    isInternalNoteTyping,
     refresh,
     sendHostMessage,
     addInternalNote,
+    retryFailedMessage,
+    assignToMe,
+    unassign,
+    startTyping: realtime.startTyping,
+    stopTyping: realtime.stopTyping,
     enableHumanTakeover,
     returnToAI,
     resolveConversation,

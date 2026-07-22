@@ -132,6 +132,30 @@ public sealed class ConversationsController(IConversationService conversationSer
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
+    [HttpPost("{conversationId:guid}/assign-me")]
+    [RequiresPermission("conversations.manage")]
+    public async Task<ActionResult<ApiResponse<ConversationDetailResponse>>> AssignToMe(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var response = await conversationService.AssignConversationToCurrentUserAsync(conversationId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("{conversationId:guid}/unassign")]
+    [RequiresPermission("conversations.manage")]
+    public async Task<ActionResult<ApiResponse<ConversationDetailResponse>>> Unassign(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var response = await conversationService.UnassignConversationAsync(conversationId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("{conversationId:guid}/read")]
+    [RequiresPermission("conversations.read")]
+    public async Task<ActionResult<ApiResponse<bool>>> MarkRead(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var response = await conversationService.MarkConversationReadForCurrentUserAsync(conversationId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
     private ActionResult<ApiResponse<T>> ToFailureResult<T>(ApiResponse<T> response)
     {
         return response.Errors.Count > 0 ? BadRequest(response) : NotFound(response);

@@ -14,7 +14,7 @@ namespace StayFlow.Api.Controllers;
 [Route("chat")]
 [Produces("application/json")]
 [Authorize]
-public sealed class ChatController(IChatService chatService) : ControllerBase
+public sealed class ChatController(IChatService chatService, IConversationService conversationService) : ControllerBase
 {
     [HttpPost("message")]
     [RequiresPermission("chat.send")]
@@ -72,6 +72,19 @@ public sealed class ChatController(IChatService chatService) : ControllerBase
         CancellationToken cancellationToken)
     {
         var response = await chatService.EndGuestConversationAsync(conversationId, request, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("conversations/{conversationId:guid}/read")]
+    [RequiresPermission("chat.read")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<bool>>> MarkRead(
+        Guid conversationId,
+        MarkChatConversationReadRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await conversationService.MarkConversationReadForGuestAsync(conversationId, request.GuestId, cancellationToken);
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 

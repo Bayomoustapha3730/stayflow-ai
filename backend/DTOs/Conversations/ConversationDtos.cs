@@ -33,6 +33,11 @@ public sealed class AddInternalNoteRequest
     public string Content { get; init; } = string.Empty;
 }
 
+public sealed class AssignConversationRequest
+{
+    public Guid? UserId { get; init; }
+}
+
 public sealed class EscalateConversationRequest
 {
     public string? Reason { get; init; }
@@ -69,6 +74,7 @@ public sealed class ConversationListResponse
     public int Page { get; init; }
     public int PageSize { get; init; }
     public int TotalPages { get; init; }
+    public int TotalUnreadCount { get; init; }
 }
 
 public class ConversationSummaryResponse
@@ -96,6 +102,8 @@ public class ConversationSummaryResponse
     public ConversationSenderType? LatestVisibleMessageSenderType { get; init; }
     public DateTimeOffset? LatestVisibleMessageTimestamp { get; init; }
     public int TotalVisibleMessageCount { get; init; }
+    public int UnreadMessageCount { get; init; }
+    public DateTimeOffset? LastReadAt { get; init; }
 }
 
 public sealed class ConversationDetailResponse : ConversationSummaryResponse

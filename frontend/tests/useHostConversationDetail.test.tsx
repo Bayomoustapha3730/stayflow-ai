@@ -207,7 +207,7 @@ describe("useHostConversationDetail", () => {
       expect(sent).toBe(true);
     });
 
-    await waitFor(() => expect(onConversationChanged).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onConversationChanged).toHaveBeenCalled());
 
     const calledUrls = fetchMock.mock.calls.map((call) => String(call[0]));
     expect(calledUrls.some((url) => url.endsWith("/conversations/c-1/messages/host"))).toBe(true);

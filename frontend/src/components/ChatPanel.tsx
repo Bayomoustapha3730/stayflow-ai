@@ -74,13 +74,24 @@ export function ChatPanel({ chat, theme, demoEmail }: ChatPanelProps) {
             welcomeMessage={theme.welcomeMessage}
             isSending={chat.isSending}
             isLoadingHistory={chat.isLoadingHistory}
-            showAssistantTyping={!chat.requiresHostAttention && !chat.humanTakeoverEnabled}
+            showAssistantTyping={chat.isHostTyping || (!chat.requiresHostAttention && !chat.humanTakeoverEnabled && chat.isSending)}
+            realtimeState={chat.realtimeState}
           />
           <EscalationPrompt
             disabled={!chat.conversationId || chat.isEscalating || chat.conversationStatus === ConversationStatus.Closed}
             onEscalate={() => void chat.escalate("Guest requested host support from the web widget.")}
           />
-          <ChatComposer disabled={composerDisabled} isSending={chat.isSending} onSend={chat.sendMessage} />
+          <ChatComposer
+            disabled={composerDisabled}
+            isSending={chat.isSending}
+            onSend={chat.sendMessage}
+            onStartTyping={() => {
+              void chat.startTyping();
+            }}
+            onStopTyping={() => {
+              void chat.stopTyping();
+            }}
+          />
           {chat.conversationStatus === ConversationStatus.Closed ? (
             <button type="button" className="sf-chat-start-new" onClick={chat.startNewConversation}>
               Start new conversation

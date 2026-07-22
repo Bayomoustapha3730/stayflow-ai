@@ -16,6 +16,7 @@ export interface ConversationListResponse {
   page: number;
   pageSize: number;
   totalPages: number;
+  totalUnreadCount: number;
 }
 
 export interface ConversationSummary {
@@ -42,6 +43,8 @@ export interface ConversationSummary {
   latestVisibleMessageSenderType?: ConversationSenderType | null;
   latestVisibleMessageTimestamp?: string | null;
   totalVisibleMessageCount: number;
+  unreadMessageCount: number;
+  lastReadAt?: string | null;
 }
 
 export interface ConversationDetail extends ConversationSummary {
@@ -58,6 +61,9 @@ export interface ConversationMessage {
   content: string;
   isInternal: boolean;
   sentAt: string;
+  authorDisplayName?: string | null;
+  deliveryStatus?: "sending" | "failed";
+  optimisticId?: string;
 }
 
 export type ConversationMessageResponse = ConversationMessage;

@@ -12,6 +12,7 @@ public sealed class ConversationService(
     IConversationRepository conversationRepository,
     ICurrentTenantContext currentTenantContext,
     IConversationStatusTransitionPolicy transitionPolicy,
+    IConversationRealtimePublisher realtimePublisher,
     IOptions<ConversationOptions> options) : IConversationService
 {
     public async Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(ConversationListQueryParameters query, CancellationToken cancellationToken)
@@ -38,13 +39,36 @@ public sealed class ConversationService(
         };
 
         var result = await conversationRepository.ListConversationsAsync(companyId, normalizedQuery, cancellationToken);
+        var hostUserId = currentTenantContext.UserId;
+        var unreadByConversation = hostUserId is { } currentHostUserId && currentHostUserId != Guid.Empty
+            ? await conversationRepository.GetUnreadMessageCountsForHostAsync(
+                companyId,
+                currentHostUserId,
+                result.Items.Select(item => item.ConversationId).ToList(),
+                cancellationToken)
+            : new Dictionary<Guid, int>();
+        var readStatesByConversation = hostUserId is { } hostReadStateUserId && hostReadStateUserId != Guid.Empty
+            ? (await conversationRepository.GetReadStatesForParticipantAsync(companyId, ConversationParticipantKind.HostUser, hostReadStateUserId, cancellationToken))
+                .ToDictionary(state => state.ConversationId, state => state)
+            : new Dictionary<Guid, ConversationParticipantReadState>();
+
+        var enrichedItems = result.Items.Select(item => EnrichSummaryWithReadData(
+            item,
+            unreadByConversation.TryGetValue(item.ConversationId, out var unread) ? unread : 0,
+            readStatesByConversation.TryGetValue(item.ConversationId, out var readState) ? readState.LastReadAt : null)).ToList();
+
+        var totalUnreadCount = hostUserId is { } unreadHostUserId && unreadHostUserId != Guid.Empty
+            ? await conversationRepository.GetTotalUnreadCountForHostAsync(companyId, unreadHostUserId, cancellationToken)
+            : 0;
+
         return ApiResponse<ConversationListResponse>.Ok(new ConversationListResponse
         {
-            Items = result.Items,
+            Items = enrichedItems,
             TotalCount = result.TotalCount,
             Page = result.PageNumber,
             PageSize = result.PageSize,
-            TotalPages = result.TotalPages
+            TotalPages = result.TotalPages,
+            TotalUnreadCount = totalUnreadCount
         });
     }
 
@@ -182,12 +206,24 @@ public sealed class ConversationService(
 
     public Task<ApiResponse<ConversationDetailResponse>> EnableHumanTakeoverAsync(Guid conversationId, CancellationToken cancellationToken)
     {
-        return TransitionAsync(conversationId, ConversationStatus.HumanManaged, "HumanTakeoverEnabled", conversation => conversation.HumanTakeoverEnabled = true, cancellationToken);
+        return TransitionAsync(conversationId, ConversationStatus.HumanManaged, "HumanTakeoverEnabled", conversation =>
+        {
+            conversation.HumanTakeoverEnabled = true;
+            // Keep an explicit assignment when host takes ownership for accountability.
+            if (currentTenantContext.UserId is { } userId && userId != Guid.Empty)
+            {
+                conversation.AssignedUserId = userId;
+            }
+        }, cancellationToken);
     }
 
     public Task<ApiResponse<ConversationDetailResponse>> ReturnToAIModeAsync(Guid conversationId, CancellationToken cancellationToken)
     {
-        return TransitionAsync(conversationId, ConversationStatus.Open, "ReturnedToAI", conversation => conversation.HumanTakeoverEnabled = false, cancellationToken);
+        return TransitionAsync(conversationId, ConversationStatus.Open, "ReturnedToAI", conversation =>
+        {
+            // Keep assignment for audit/history even after returning to AI mode.
+            conversation.HumanTakeoverEnabled = false;
+        }, cancellationToken);
     }
 
     public Task<ApiResponse<ConversationDetailResponse>> ResolveConversationAsync(Guid conversationId, CancellationToken cancellationToken)
@@ -202,6 +238,101 @@ public sealed class ConversationService(
             conversation.ClosedAt = DateTimeOffset.UtcNow;
             conversation.HumanTakeoverEnabled = false;
         }, cancellationToken);
+    }
+
+    public async Task<ApiResponse<ConversationDetailResponse>> AssignConversationToCurrentUserAsync(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var conversation = await GetConversationForTenantAsync(conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<ConversationDetailResponse>.Fail("Conversation was not found.");
+        }
+
+        if (currentTenantContext.UserId is not { } userId || userId == Guid.Empty)
+        {
+            return ApiResponse<ConversationDetailResponse>.Fail("Authenticated user context is required.");
+        }
+
+        var user = await conversationRepository.GetUserAsync(conversation.CompanyId, userId, cancellationToken);
+        if (user is null)
+        {
+            return ApiResponse<ConversationDetailResponse>.Fail("Assigned user was not found.");
+        }
+
+        conversation.AssignedUserId = userId;
+        conversation.HumanTakeoverEnabled = true;
+        conversation.Status = ConversationStatus.HumanManaged;
+        conversation.LastActivityAt = DateTimeOffset.UtcNow;
+
+        await AuditAsync(conversation.CompanyId, conversation.Id, "ConversationAssigned", conversation.Status, null, cancellationToken);
+        await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        var refreshedConversation = await conversationRepository.GetByIdForCompanyAsync(conversation.CompanyId, conversation.Id, cancellationToken) ?? conversation;
+        var payload = new
+        {
+            conversationId = conversation.Id,
+            assignedUser = new { id = user.Id, fullName = user.FullName },
+            timestamp = DateTimeOffset.UtcNow
+        };
+        await realtimePublisher.PublishConversationAssignedAsync(conversation.CompanyId, conversation.Id, payload, cancellationToken);
+
+        return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(refreshedConversation), "Conversation assigned successfully.");
+    }
+
+    public async Task<ApiResponse<ConversationDetailResponse>> UnassignConversationAsync(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var conversation = await GetConversationForTenantAsync(conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<ConversationDetailResponse>.Fail("Conversation was not found.");
+        }
+
+        conversation.AssignedUserId = null;
+        conversation.LastActivityAt = DateTimeOffset.UtcNow;
+
+        await AuditAsync(conversation.CompanyId, conversation.Id, "ConversationUnassigned", conversation.Status, null, cancellationToken);
+        await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        await realtimePublisher.PublishConversationAssignedAsync(conversation.CompanyId, conversation.Id, new
+        {
+            conversationId = conversation.Id,
+            assignedUser = (object?)null,
+            timestamp = DateTimeOffset.UtcNow
+        }, cancellationToken);
+
+        return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(conversation), "Conversation unassigned successfully.");
+    }
+
+    public async Task<ApiResponse<bool>> MarkConversationReadForCurrentUserAsync(Guid conversationId, CancellationToken cancellationToken)
+    {
+        if (currentTenantContext.UserId is not { } userId || userId == Guid.Empty)
+        {
+            return ApiResponse<bool>.Fail("Authenticated user context is required.");
+        }
+
+        var result = await MarkReadStateAsync(conversationId, ConversationParticipantKind.HostUser, userId, cancellationToken);
+        return result;
+    }
+
+    public async Task<ApiResponse<bool>> MarkConversationReadForGuestAsync(Guid conversationId, Guid guestId, CancellationToken cancellationToken)
+    {
+        if (guestId == Guid.Empty)
+        {
+            return ApiResponse<bool>.Fail("GuestId is required.");
+        }
+
+        var conversation = await GetConversationForTenantAsync(conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<bool>.Fail("Conversation was not found.");
+        }
+
+        if (conversation.GuestId != guestId)
+        {
+            return ApiResponse<bool>.Fail("Conversation guest identity conflicts with the supplied guest identity.");
+        }
+
+        return await MarkReadStateAsync(conversationId, ConversationParticipantKind.Guest, guestId, cancellationToken);
     }
 
     private async Task<ApiResponse<ConversationMessageResponse>> AddMessageAsync(
@@ -267,6 +398,22 @@ public sealed class ConversationService(
         await conversationRepository.AddMessageAsync(message, cancellationToken);
         await AuditAsync(companyId, conversation.Id, auditAction, conversation.Status, senderType, cancellationToken);
         await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        await realtimePublisher.PublishMessageCreatedAsync(companyId, conversation.Id, new
+        {
+            conversationId = conversation.Id,
+            message = MapMessage(message),
+            isInternal,
+            timestamp = DateTimeOffset.UtcNow
+        }, isInternal, cancellationToken);
+
+        await realtimePublisher.PublishConversationUnreadCountChangedAsync(companyId, new
+        {
+            conversationId = conversation.Id,
+            senderType = senderType.ToString(),
+            timestamp = DateTimeOffset.UtcNow
+        }, cancellationToken);
+
         return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Conversation message stored successfully.");
     }
 
@@ -288,7 +435,88 @@ public sealed class ConversationService(
         mutate(conversation);
         await AuditAsync(conversation.CompanyId, conversation.Id, auditAction, conversation.Status, null, cancellationToken);
         await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        if (auditAction is "HumanTakeoverEnabled" or "ReturnedToAI")
+        {
+            var assignedUser = conversation.AssignedUserId.HasValue
+                ? await conversationRepository.GetUserAsync(conversation.CompanyId, conversation.AssignedUserId.Value, cancellationToken)
+                : null;
+            await realtimePublisher.PublishConversationAssignedAsync(conversation.CompanyId, conversation.Id, new
+            {
+                conversationId = conversation.Id,
+                assignedUser = assignedUser is null
+                    ? null
+                    : new { id = assignedUser.Id, fullName = assignedUser.FullName },
+                humanTakeoverEnabled = conversation.HumanTakeoverEnabled,
+                status = conversation.Status.ToString(),
+                timestamp = DateTimeOffset.UtcNow
+            }, cancellationToken);
+        }
+
         return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(conversation), "Conversation updated successfully.");
+    }
+
+    private async Task<ApiResponse<bool>> MarkReadStateAsync(
+        Guid conversationId,
+        ConversationParticipantKind participantKind,
+        Guid participantId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<bool>.Fail(tenantError, [tenantError]);
+        }
+
+        var conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<bool>.Fail("Conversation was not found.");
+        }
+
+        var latestVisibleMessage = await conversationRepository.GetLatestVisibleMessageAsync(companyId, conversationId, cancellationToken);
+
+        var readAt = latestVisibleMessage?.SentAt ?? DateTimeOffset.UtcNow;
+        var currentState = await conversationRepository.GetReadStateAsync(companyId, conversationId, participantKind, participantId, cancellationToken);
+        if (currentState is null)
+        {
+            await conversationRepository.AddReadStateAsync(new ConversationParticipantReadState
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                ConversationId = conversationId,
+                ParticipantKind = participantKind,
+                ParticipantId = participantId,
+                LastReadMessageId = latestVisibleMessage?.Id,
+                LastReadAt = readAt
+            }, cancellationToken);
+        }
+        else
+        {
+            currentState.LastReadAt = readAt;
+            currentState.LastReadMessageId = latestVisibleMessage?.Id;
+        }
+
+        await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        await realtimePublisher.PublishConversationReadStateChangedAsync(companyId, conversationId, new
+        {
+            conversationId,
+            participantKind = participantKind.ToString(),
+            participantId,
+            lastReadAt = readAt,
+            lastReadMessageId = latestVisibleMessage?.Id,
+            timestamp = DateTimeOffset.UtcNow
+        }, cancellationToken);
+
+        await realtimePublisher.PublishConversationUnreadCountChangedAsync(companyId, new
+        {
+            conversationId,
+            participantKind = participantKind.ToString(),
+            participantId,
+            timestamp = DateTimeOffset.UtcNow
+        }, cancellationToken);
+
+        return ApiResponse<bool>.Ok(true, "Conversation marked as read.");
     }
 
     private async Task<ApiResponse<AssociationValidationResult>> ValidateConversationAssociationsAsync(Guid companyId, CreateConversationRequest request, CancellationToken cancellationToken)
@@ -515,6 +743,38 @@ public sealed class ConversationService(
             || conversation.Status == ConversationStatus.AwaitingHost
             || conversation.Status == ConversationStatus.Escalated
             || conversation.Status == ConversationStatus.HumanManaged;
+    }
+
+    private static ConversationSummaryResponse EnrichSummaryWithReadData(ConversationSummaryResponse item, int unreadCount, DateTimeOffset? lastReadAt)
+    {
+        return new ConversationSummaryResponse
+        {
+            Id = item.Id,
+            ConversationId = item.ConversationId,
+            GuestId = item.GuestId,
+            ReservationId = item.ReservationId,
+            PropertyId = item.PropertyId,
+            Channel = item.Channel,
+            ChannelIdentity = item.ChannelIdentity,
+            Status = item.Status,
+            Subject = item.Subject,
+            HumanTakeoverEnabled = item.HumanTakeoverEnabled,
+            RequiresHostAttention = item.RequiresHostAttention,
+            EscalationReason = item.EscalationReason,
+            StartedAt = item.StartedAt,
+            LastActivityAt = item.LastActivityAt,
+            ClosedAt = item.ClosedAt,
+            Guest = item.Guest,
+            Reservation = item.Reservation,
+            Property = item.Property,
+            AssignedUser = item.AssignedUser,
+            LatestVisibleMessagePreview = item.LatestVisibleMessagePreview,
+            LatestVisibleMessageSenderType = item.LatestVisibleMessageSenderType,
+            LatestVisibleMessageTimestamp = item.LatestVisibleMessageTimestamp,
+            TotalVisibleMessageCount = item.TotalVisibleMessageCount,
+            UnreadMessageCount = unreadCount,
+            LastReadAt = lastReadAt
+        };
     }
 
     private sealed record AssociationValidationResult(Guid? ReservationPropertyId);

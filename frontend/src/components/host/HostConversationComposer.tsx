@@ -1,4 +1,4 @@
-import { KeyboardEvent, useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 
 const maxMessageLength = 2000;
 
@@ -8,6 +8,8 @@ interface HostConversationComposerProps {
   disabledReason?: string;
   actionError: string | null;
   onSend: (content: string) => Promise<boolean>;
+  onStartTyping?: () => void;
+  onStopTyping?: () => void;
 }
 
 export function HostConversationComposer({
@@ -15,9 +17,13 @@ export function HostConversationComposer({
   disabled,
   disabledReason,
   actionError,
-  onSend
+  onSend,
+  onStartTyping,
+  onStopTyping
 }: HostConversationComposerProps) {
   const [content, setContent] = useState("");
+  const stopTypingTimerRef = useRef<number | null>(null);
+  const isTypingRef = useRef(false);
 
   const trimmed = content.trim();
   const isSendDisabled = disabled || isSending || trimmed.length === 0 || trimmed.length > maxMessageLength;
@@ -30,8 +36,48 @@ export function HostConversationComposer({
     const sent = await onSend(trimmed);
     if (sent) {
       setContent("");
+      if (isTypingRef.current) {
+        isTypingRef.current = false;
+        onStopTyping?.();
+      }
     }
   }
+
+  function emitTypingState(nextContent: string) {
+    if (!onStartTyping || !onStopTyping) {
+      return;
+    }
+
+    const hasContent = nextContent.trim().length > 0;
+
+    if (hasContent && !isTypingRef.current) {
+      isTypingRef.current = true;
+      onStartTyping();
+    }
+
+    if (stopTypingTimerRef.current) {
+      window.clearTimeout(stopTypingTimerRef.current);
+    }
+
+    stopTypingTimerRef.current = window.setTimeout(() => {
+      if (isTypingRef.current) {
+        isTypingRef.current = false;
+        onStopTyping();
+      }
+    }, 1200);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (stopTypingTimerRef.current) {
+        window.clearTimeout(stopTypingTimerRef.current);
+      }
+
+      if (isTypingRef.current) {
+        onStopTyping?.();
+      }
+    };
+  }, [onStopTyping]);
 
   async function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -49,8 +95,17 @@ export function HostConversationComposer({
       <textarea
         id="sf-host-reply-input"
         value={content}
-        onChange={(event) => setContent(event.target.value)}
+        onChange={(event) => {
+          setContent(event.target.value);
+          emitTypingState(event.target.value);
+        }}
         onKeyDown={handleKeyDown}
+        onBlur={() => {
+          if (isTypingRef.current) {
+            isTypingRef.current = false;
+            onStopTyping?.();
+          }
+        }}
         rows={4}
         maxLength={maxMessageLength + 1}
         disabled={disabled}

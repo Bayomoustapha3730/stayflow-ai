@@ -8,7 +8,24 @@ import {
 } from "../components/host";
 import { useHostAuth } from "../hooks/useHostAuth";
 import { useHostConversations } from "../hooks/useHostConversations";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ConversationSenderType } from "../models/enums";
 import "../styles/host-inbox.css";
+
+const notificationsPreferenceKey = "stayflow.host.notifications.enabled";
+
+function truncatePreview(value: string | null | undefined): string {
+  if (!value) {
+    return "New guest message";
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length <= 110) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, 107)}...`;
+}
 
 export function HostInboxPage() {
   const auth = useHostAuth();
@@ -16,6 +33,76 @@ export function HostInboxPage() {
     accessToken: auth.accessToken,
     onUnauthorized: auth.logout
   });
+  const [notificationPreferenceEnabled, setNotificationPreferenceEnabled] = useState(
+    () => localStorage.getItem(notificationsPreferenceKey) === "true"
+  );
+  const previousMessageTimestampsRef = useRef<Record<string, string | null>>({});
+
+  const notificationsSupported = useMemo(() => typeof Notification !== "undefined", []);
+  const notificationsEnabled = notificationsSupported
+    && notificationPreferenceEnabled
+    && Notification.permission === "granted";
+
+  useEffect(() => {
+    const current = conversations.response?.items ?? [];
+    if (!notificationsEnabled) {
+      previousMessageTimestampsRef.current = Object.fromEntries(
+        current.map((item) => [item.conversationId, item.latestVisibleMessageTimestamp ?? null])
+      );
+      return;
+    }
+
+    for (const item of current) {
+      const previousTimestamp = previousMessageTimestampsRef.current[item.conversationId] ?? null;
+      const latestTimestamp = item.latestVisibleMessageTimestamp ?? null;
+      const hasNewMessage = Boolean(latestTimestamp && latestTimestamp !== previousTimestamp);
+      const isGuestMessage = item.latestVisibleMessageSenderType === ConversationSenderType.Guest;
+      const isSelectedAndVisible =
+        item.conversationId === conversations.selectedConversationId
+        && document.visibilityState === "visible";
+
+      if (
+        hasNewMessage
+        && isGuestMessage
+        && !isSelectedAndVisible
+      ) {
+        const notification = new Notification(
+          `${item.guest?.fullName?.trim() || "Guest"} - ${item.property?.name?.trim() || "Property"}`,
+          {
+            body: truncatePreview(item.latestVisibleMessagePreview),
+            tag: `conversation-${item.conversationId}`
+          }
+        );
+
+        notification.onclick = () => {
+          window.focus();
+          conversations.selectConversation(item.conversationId);
+          notification.close();
+        };
+      }
+    }
+
+    previousMessageTimestampsRef.current = Object.fromEntries(
+      current.map((item) => [item.conversationId, item.latestVisibleMessageTimestamp ?? null])
+    );
+  }, [conversations.response?.items, conversations.selectedConversationId, conversations.selectConversation, notificationsEnabled]);
+
+  async function enableNotifications() {
+    if (!notificationsSupported) {
+      return;
+    }
+
+    localStorage.setItem(notificationsPreferenceKey, "true");
+    setNotificationPreferenceEnabled(true);
+
+    if (Notification.permission === "default") {
+      try {
+        await Notification.requestPermission();
+      } catch {
+        // Browser-level permission errors are intentionally ignored.
+      }
+    }
+  }
 
   if (!auth.isAuthenticated) {
     return (
@@ -38,8 +125,15 @@ export function HostInboxPage() {
     <div className="sf-host-page">
       <HostInboxHeader
         isRefreshing={conversations.isLoading}
+        realtimeState={conversations.realtimeState}
+        totalUnreadCount={conversations.totalUnreadCount}
+        notificationsEnabled={notificationsEnabled}
+        notificationsSupported={notificationsSupported}
         onRefresh={() => {
           void conversations.refresh();
+        }}
+        onEnableNotifications={() => {
+          void enableNotifications();
         }}
         onSignOut={() => {
           auth.logout();

@@ -5,6 +5,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddHttpContextAccessor();
+        services.AddSignalR();
         services.AddOptions<Services.ReservationContextOptions>()
             .Bind(configuration.GetSection(Services.ReservationContextOptions.SectionName))
             .Validate(options => options.PreArrivalWindowDays >= 0 && options.PreArrivalWindowDays <= 365, "Reservation context pre-arrival window must be between 0 and 365 days.")
@@ -53,6 +54,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IConversationStatusTransitionPolicy, Services.ConversationStatusTransitionPolicy>();
         services.AddScoped<Services.IConversationService, Services.ConversationService>();
         services.AddScoped<Services.IConversationAIExchangeService, Services.ConversationAIExchangeService>();
+        services.AddScoped<Services.IConversationRealtimePublisher, Services.ConversationRealtimePublisher>();
         services.AddScoped<Services.IChatService, Services.ChatService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();

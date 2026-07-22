@@ -168,6 +168,89 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<int> GetTotalUnreadCountForHostAsync(Guid companyId, Guid hostUserId, CancellationToken cancellationToken)
+    {
+        var readStates = dbContext.ConversationParticipantReadStates
+            .Where(state => state.CompanyId == companyId
+                && state.ParticipantKind == ConversationParticipantKind.HostUser
+                && state.ParticipantId == hostUserId);
+
+        var query = from message in dbContext.ConversationMessages
+                    join conversation in dbContext.Conversations on message.ConversationId equals conversation.Id
+                    join readState in readStates on message.ConversationId equals readState.ConversationId into readStateGroup
+                    from state in readStateGroup.DefaultIfEmpty()
+                    where message.CompanyId == companyId
+                          && conversation.CompanyId == companyId
+                          && !message.IsInternal
+                          && !message.IsDeleted
+                          && !conversation.IsDeleted
+                          && message.SenderType == ConversationSenderType.Guest
+                          && (state == null || message.SentAt > state.LastReadAt)
+                    select message.Id;
+
+        return await query.CountAsync(cancellationToken);
+    }
+
+    public async Task<Dictionary<Guid, int>> GetUnreadMessageCountsForHostAsync(
+        Guid companyId,
+        Guid hostUserId,
+        IReadOnlyCollection<Guid> conversationIds,
+        CancellationToken cancellationToken)
+    {
+        if (conversationIds.Count == 0)
+        {
+            return new Dictionary<Guid, int>();
+        }
+
+        var conversationIdSet = conversationIds.ToHashSet();
+        var readStates = dbContext.ConversationParticipantReadStates
+            .Where(state => state.CompanyId == companyId
+                && state.ParticipantKind == ConversationParticipantKind.HostUser
+                && state.ParticipantId == hostUserId);
+
+        var unreadQuery = from message in dbContext.ConversationMessages
+                          join readState in readStates on message.ConversationId equals readState.ConversationId into readStateGroup
+                          from state in readStateGroup.DefaultIfEmpty()
+                          where message.CompanyId == companyId
+                                && conversationIdSet.Contains(message.ConversationId)
+                                && !message.IsInternal
+                                && !message.IsDeleted
+                                && message.SenderType == ConversationSenderType.Guest
+                                && (state == null || message.SentAt > state.LastReadAt)
+                          group message by message.ConversationId into conversationGroup
+                          select new
+                          {
+                              ConversationId = conversationGroup.Key,
+                              Count = conversationGroup.Count()
+                          };
+
+        return await unreadQuery.ToDictionaryAsync(item => item.ConversationId, item => item.Count, cancellationToken);
+    }
+
+    public async Task<int> GetUnreadHostMessageCountForGuestAsync(Guid companyId, Guid guestId, Guid conversationId, CancellationToken cancellationToken)
+    {
+        var readState = await dbContext.ConversationParticipantReadStates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(state => state.CompanyId == companyId
+                && state.ConversationId == conversationId
+                && state.ParticipantKind == ConversationParticipantKind.Guest
+                && state.ParticipantId == guestId, cancellationToken);
+
+        var unreadQuery = dbContext.ConversationMessages
+            .Where(message => message.CompanyId == companyId
+                && message.ConversationId == conversationId
+                && !message.IsInternal
+                && !message.IsDeleted
+                && message.SenderType == ConversationSenderType.Host);
+
+        if (readState is not null)
+        {
+            unreadQuery = unreadQuery.Where(message => message.SentAt > readState.LastReadAt);
+        }
+
+        return await unreadQuery.CountAsync(cancellationToken);
+    }
+
     public async Task<PagedResult<ConversationMessage>> GetMessagesAsync(Guid companyId, Guid conversationId, ConversationHistoryQueryParameters query, CancellationToken cancellationToken)
     {
         var pageNumber = query.NormalizedPageNumber;
@@ -198,11 +281,52 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
         };
     }
 
+    public Task<ConversationMessage?> GetLatestVisibleMessageAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken)
+    {
+        return dbContext.ConversationMessages
+            .AsNoTracking()
+            .Where(message => message.CompanyId == companyId
+                && message.ConversationId == conversationId
+                && !message.IsDeleted
+                && !message.IsInternal)
+            .OrderByDescending(message => message.SentAt)
+            .ThenByDescending(message => message.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid companyId, string externalMessageId, CancellationToken cancellationToken)
     {
         return dbContext.ConversationMessages
             .AsNoTracking()
             .FirstOrDefaultAsync(message => message.CompanyId == companyId && message.ExternalMessageId == externalMessageId, cancellationToken);
+    }
+
+    public Task<ConversationParticipantReadState?> GetReadStateAsync(
+        Guid companyId,
+        Guid conversationId,
+        ConversationParticipantKind participantKind,
+        Guid participantId,
+        CancellationToken cancellationToken)
+    {
+        return dbContext.ConversationParticipantReadStates.FirstOrDefaultAsync(state =>
+            state.CompanyId == companyId
+            && state.ConversationId == conversationId
+            && state.ParticipantKind == participantKind
+            && state.ParticipantId == participantId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyCollection<ConversationParticipantReadState>> GetReadStatesForParticipantAsync(
+        Guid companyId,
+        ConversationParticipantKind participantKind,
+        Guid participantId,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.ConversationParticipantReadStates
+            .AsNoTracking()
+            .Where(state => state.CompanyId == companyId
+                && state.ParticipantKind == participantKind
+                && state.ParticipantId == participantId)
+            .ToListAsync(cancellationToken);
     }
 
     public Task<Guest?> GetGuestAsync(Guid companyId, Guid guestId, CancellationToken cancellationToken)
@@ -233,6 +357,11 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
     public async Task AddMessageAsync(ConversationMessage message, CancellationToken cancellationToken)
     {
         await dbContext.ConversationMessages.AddAsync(message, cancellationToken);
+    }
+
+    public async Task AddReadStateAsync(ConversationParticipantReadState state, CancellationToken cancellationToken)
+    {
+        await dbContext.ConversationParticipantReadStates.AddAsync(state, cancellationToken);
     }
 
     public async Task AddAuditLogAsync(AuditLog auditLog, CancellationToken cancellationToken)
