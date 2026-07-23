@@ -11,6 +11,12 @@ public interface ICopilotService
 
     Task<ApiResponse<ConversationCopilotSuggestionsResponse>> GetSuggestedRepliesAsync(
         Guid conversationId,
+        string? tone,
+        CancellationToken cancellationToken);
+
+    Task<ApiResponse<CopilotSuggestReplyResponse>> GenerateHostReplyAsync(
+        Guid conversationId,
+        CopilotSuggestReplyRequest request,
         CancellationToken cancellationToken);
 
     Task<ApiResponse<CopilotSuggestReplyResponse>> SuggestHostReplyAsync(

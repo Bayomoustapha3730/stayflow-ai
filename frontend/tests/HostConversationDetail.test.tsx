@@ -228,12 +228,12 @@ describe("HostConversationDetail", () => {
       />
     );
 
-    await waitFor(() => expect(screen.getByRole("textbox", { name: /^host reply$/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("textbox", { name: /^reply to guest$/i })).toBeInTheDocument());
 
-    const sendButton = screen.getByRole("button", { name: /send host reply/i });
+    const sendButton = screen.getByRole("button", { name: /send reply/i });
     expect(sendButton).toBeDisabled();
 
-    const replyInput = screen.getByRole("textbox", { name: /^host reply$/i });
+    const replyInput = screen.getByRole("textbox", { name: /^reply to guest$/i });
     await userEvent.type(replyInput, "Reply with details");
     fireEvent.keyDown(replyInput, { key: "Enter", code: "Enter", ctrlKey: true });
 
@@ -254,7 +254,7 @@ describe("HostConversationDetail", () => {
       />
     );
 
-    await waitFor(() => expect(screen.getByRole("textbox", { name: /^host reply$/i })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("textbox", { name: /^reply to guest$/i })).toBeDisabled());
     expect(screen.getByRole("textbox", { name: /note content/i })).toBeDisabled();
   });
 

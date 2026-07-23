@@ -12,6 +12,7 @@ public sealed class ConversationCopilotSummaryResponse
 public sealed class ConversationCopilotSuggestionsResponse
 {
     public Guid ConversationId { get; init; }
+    public string Tone { get; init; } = "professional";
     public IReadOnlyCollection<string> SuggestedReplies { get; init; } = [];
     public int ContextMessageCount { get; init; }
     public DateTimeOffset GeneratedAt { get; init; }
@@ -20,6 +21,7 @@ public sealed class ConversationCopilotSuggestionsResponse
 public sealed class CopilotSuggestReplyRequest
 {
     public string? Guidance { get; init; }
+    public string? Tone { get; init; }
     public bool IncludeInternalNotes { get; init; }
     public int MaxContextMessages { get; init; } = 12;
 }

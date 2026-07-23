@@ -20,8 +20,8 @@ export function createHostCopilotApi(http: HttpClient) {
       );
     },
 
-    suggestReply(conversationId: string, request: CopilotSuggestReplyRequest) {
-      return http.post<CopilotSuggestReplyResponse>(`/copilot/conversations/${conversationId}/suggest-reply`, request);
+    generateReply(conversationId: string, request: CopilotSuggestReplyRequest) {
+      return http.post<CopilotSuggestReplyResponse>(`/copilot/conversations/${conversationId}/generate-reply`, request);
     }
   };
 }

@@ -36,10 +36,10 @@ builder.Services.AddCors(options =>
                            StringComparison.OrdinalIgnoreCase);
             })
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
-
 builder.Services.AddApplicationDatabase(builder.Configuration);
 builder.Services.AddApplicationServices(builder.Configuration);
 builder.Services.AddApplicationAuthentication(builder.Configuration);

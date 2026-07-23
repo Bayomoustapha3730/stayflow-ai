@@ -62,12 +62,126 @@ public sealed class CopilotServiceTests
             isInternal: false,
             sentAt: DateTimeOffset.UtcNow));
 
-        var response = await fixture.Service.GetSuggestedRepliesAsync(conversation.Id, CancellationToken.None);
+        var response = await fixture.Service.GetSuggestedRepliesAsync(conversation.Id, "friendly", CancellationToken.None);
 
         Assert.True(response.Success);
         Assert.Equal(3, response.Data!.SuggestedReplies.Count);
         Assert.Contains(response.Data.SuggestedReplies, item => item.Contains("Wi-Fi", StringComparison.OrdinalIgnoreCase) || item.Contains("internet", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(1, response.Data.ContextMessageCount);
+        Assert.Equal("friendly", response.Data.Tone);
+    }
+
+    [Fact]
+    public async Task GetSuggestedRepliesAsync_UnsupportedToneFallsBackToProfessional()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.GetSuggestedRepliesAsync(conversation.Id, "unsupported", CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal("professional", response.Data!.Tone);
+        Assert.Equal(3, response.Data.SuggestedReplies.Count);
+        Assert.Equal(response.Data.SuggestedReplies.Count, response.Data.SuggestedReplies.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public async Task GenerateHostReplyAsync_DoesNotPersistMessagesOrAutoSend()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        fixture.Repository.Messages.Add(fixture.Repository.NewMessage(
+            conversation,
+            "Can I check in early?",
+            ConversationSenderType.Guest,
+            isInternal: false,
+            sentAt: DateTimeOffset.UtcNow));
+
+        var beforeCount = fixture.Repository.Messages.Count;
+
+        var response = await fixture.Service.GenerateHostReplyAsync(conversation.Id, new CopilotSuggestReplyRequest
+        {
+            Tone = "professional",
+            Guidance = "Confirm available check-in windows",
+            IncludeInternalNotes = false,
+            MaxContextMessages = 12
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.False(string.IsNullOrWhiteSpace(response.Data!.SuggestedReply));
+        Assert.Equal(beforeCount, fixture.Repository.Messages.Count);
+    }
+
+    [Fact]
+    public async Task GenerateHostReplyAsync_BlankProviderOutputFallsBack()
+    {
+        var fixture = new Fixture(new BlankResponseAiProvider());
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        fixture.Repository.Messages.Add(fixture.Repository.NewMessage(
+            conversation,
+            "Can I check out late?",
+            ConversationSenderType.Guest,
+            isInternal: false,
+            sentAt: DateTimeOffset.UtcNow));
+
+        var response = await fixture.Service.GenerateHostReplyAsync(conversation.Id, new CopilotSuggestReplyRequest
+        {
+            Tone = "casual",
+            Guidance = "Keep it short",
+            IncludeInternalNotes = false,
+            MaxContextMessages = 12
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.True(response.Data!.IsFallback);
+        Assert.False(string.IsNullOrWhiteSpace(response.Data.SuggestedReply));
+    }
+
+    [Fact]
+    public async Task GenerateHostReplyAsync_InaccessibleConversationHandledSafely()
+    {
+        var fixture = new Fixture();
+        var response = await fixture.Service.GenerateHostReplyAsync(Guid.NewGuid(), new CopilotSuggestReplyRequest(), CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Conversation was not found.", response.Message);
+    }
+
+    [Fact]
+    public async Task GenerateHostReplyAsync_ClosedConversationReturnsValidationFailure()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        conversation.Status = ConversationStatus.Closed;
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.GenerateHostReplyAsync(conversation.Id, new CopilotSuggestReplyRequest(), CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Conversation is closed and cannot be drafted.", response.Message);
+        Assert.Contains("Conversation is closed.", response.Errors);
+    }
+
+    [Fact]
+    public async Task GenerateHostReplyAsync_EnforcesOutputLengthLimit()
+    {
+        var fixture = new Fixture(new LongResponseAiProvider());
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        fixture.Repository.Messages.Add(fixture.Repository.NewMessage(
+            conversation,
+            "Please share details",
+            ConversationSenderType.Guest,
+            isInternal: false,
+            sentAt: DateTimeOffset.UtcNow));
+
+        var response = await fixture.Service.GenerateHostReplyAsync(conversation.Id, new CopilotSuggestReplyRequest(), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.True(response.Data!.SuggestedReply.Length <= 700);
     }
 
     [Fact]
@@ -97,9 +211,18 @@ public sealed class CopilotServiceTests
         Assert.Equal("conversations.reply", attribute.Permission);
     }
 
+    [Fact]
+    public void GenerateReply_RequiresConversationsReplyPermission()
+    {
+        var method = typeof(CopilotController).GetMethod(nameof(CopilotController.GenerateReply));
+        var attribute = Assert.Single(method!.GetCustomAttributes(typeof(RequiresPermissionAttribute), inherit: false).Cast<RequiresPermissionAttribute>());
+
+        Assert.Equal("conversations.reply", attribute.Permission);
+    }
+
     private sealed class Fixture
     {
-        public Fixture()
+        public Fixture(IAIProvider? aiProvider = null)
         {
             Repository = new FakeConversationRepository(CompanyId);
             Guest = new Guest
@@ -130,7 +253,7 @@ public sealed class CopilotServiceTests
             Service = new CopilotService(
                 Repository,
                 new FakeCurrentTenantContext(CompanyId),
-                new FakeAiProvider());
+                aiProvider ?? new FakeAiProvider());
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();
@@ -154,6 +277,32 @@ public sealed class CopilotServiceTests
         {
             return Task.FromResult(AIProviderResult.Success(
                 "Thanks for your message. I will share the details shortly.",
+                "TestProvider",
+                "test-model",
+                "req-test",
+                5));
+        }
+    }
+
+    private sealed class BlankResponseAiProvider : IAIProvider
+    {
+        public Task<AIProviderResult> GenerateAsync(AIProviderRequest request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(AIProviderResult.Success(
+                "   ",
+                "TestProvider",
+                "test-model",
+                "req-test",
+                5));
+        }
+    }
+
+    private sealed class LongResponseAiProvider : IAIProvider
+    {
+        public Task<AIProviderResult> GenerateAsync(AIProviderRequest request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(AIProviderResult.Success(
+                new string('A', 1200),
                 "TestProvider",
                 "test-model",
                 "req-test",

@@ -16,6 +16,13 @@ public sealed class CopilotService(
 {
     private const int MinContextMessages = 4;
     private const int MaxContextMessages = 50;
+    private static readonly HashSet<string> SupportedTones =
+    [
+        "professional",
+        "friendly",
+        "luxury",
+        "casual"
+    ];
 
     public async Task<ApiResponse<ConversationCopilotSummaryResponse>> GetSummaryAsync(
         Guid conversationId,
@@ -48,6 +55,7 @@ public sealed class CopilotService(
 
     public async Task<ApiResponse<ConversationCopilotSuggestionsResponse>> GetSuggestedRepliesAsync(
         Guid conversationId,
+        string? tone,
         CancellationToken cancellationToken)
     {
         if (!TryGetCompanyId(out var companyId, out var tenantError))
@@ -63,14 +71,24 @@ public sealed class CopilotService(
 
         var visibleMessages = await GetVisibleMessagesAsync(companyId, conversationId, cancellationToken);
         var latestGuestMessage = visibleMessages.LastOrDefault(message => message.SenderType == ConversationSenderType.Guest);
+        var normalizedTone = NormalizeTone(tone);
 
         return ApiResponse<ConversationCopilotSuggestionsResponse>.Ok(new ConversationCopilotSuggestionsResponse
         {
             ConversationId = conversationId,
-            SuggestedReplies = BuildDeterministicSuggestedReplies(latestGuestMessage?.Content),
+            Tone = normalizedTone,
+            SuggestedReplies = BuildDeterministicSuggestedReplies(latestGuestMessage?.Content, normalizedTone),
             ContextMessageCount = visibleMessages.Count,
             GeneratedAt = DateTimeOffset.UtcNow
         });
+    }
+
+    public Task<ApiResponse<CopilotSuggestReplyResponse>> GenerateHostReplyAsync(
+        Guid conversationId,
+        CopilotSuggestReplyRequest request,
+        CancellationToken cancellationToken)
+    {
+        return SuggestHostReplyAsync(conversationId, request, cancellationToken);
     }
 
     public async Task<ApiResponse<CopilotSuggestReplyResponse>> SuggestHostReplyAsync(
@@ -106,10 +124,11 @@ public sealed class CopilotService(
             .Where(message => !message.IsDeleted)
             .TakeLast(contextMessageCount)
             .ToList();
+        var normalizedTone = NormalizeTone(request.Tone);
         var latestGuestMessage = contextMessages.LastOrDefault(message => message.SenderType == ConversationSenderType.Guest);
-        var fallbackDraft = BuildFallbackDraft(conversation, latestGuestMessage, request.Guidance);
+        var fallbackDraft = BuildFallbackDraft(conversation, latestGuestMessage, request.Guidance, normalizedTone);
 
-        var promptMessages = BuildPromptMessages(conversation, contextMessages, request.Guidance);
+        var promptMessages = BuildPromptMessages(conversation, contextMessages, request.Guidance, normalizedTone);
         if (promptMessages.Count == 0)
         {
             return ApiResponse<CopilotSuggestReplyResponse>.Ok(new CopilotSuggestReplyResponse
@@ -190,7 +209,8 @@ public sealed class CopilotService(
     private static List<AIPromptMessage> BuildPromptMessages(
         Conversation conversation,
         IReadOnlyCollection<ConversationMessage> contextMessages,
-        string? guidance)
+        string? guidance,
+        string tone)
     {
         if (contextMessages.Count == 0)
         {
@@ -202,6 +222,7 @@ public sealed class CopilotService(
         builder.AppendLine("Write one concise host reply to the guest's latest concern.");
         builder.AppendLine("Rules:");
         builder.AppendLine("- Keep the tone warm, clear, and professional.");
+        builder.AppendLine($"- Requested tone: {tone}.");
         builder.AppendLine("- Do not invent policy, pricing, or property facts.");
         builder.AppendLine("- If more information is needed, ask one direct follow-up question.");
         builder.AppendLine("- Output only the suggested reply text.");
@@ -255,7 +276,11 @@ public sealed class CopilotService(
         };
     }
 
-    private static string BuildFallbackDraft(Conversation conversation, ConversationMessage? latestGuestMessage, string? guidance)
+    private static string BuildFallbackDraft(
+        Conversation conversation,
+        ConversationMessage? latestGuestMessage,
+        string? guidance,
+        string tone)
     {
         var firstName = string.IsNullOrWhiteSpace(conversation.Guest.FirstName)
             ? "there"
@@ -267,7 +292,15 @@ public sealed class CopilotService(
             ? string.Empty
             : $" {Truncate(guidance.Trim(), 140)}";
 
-        return $"Hi {firstName}, thanks for reaching out about {reference}. I am checking this now and will share a clear update shortly.{optionalGuidance}";
+        var toneLead = tone switch
+        {
+            "friendly" => "Hi",
+            "luxury" => "Hello",
+            "casual" => "Hey",
+            _ => "Hi"
+        };
+
+        return $"{toneLead} {firstName}, thanks for reaching out about {reference}. I am checking this now and will share a clear update shortly.{optionalGuidance}";
     }
 
     private static string NormalizeProviderResponse(string response)
@@ -338,16 +371,23 @@ public sealed class CopilotService(
         return $"{guestName} conversation at {propertyName} is currently {conversation.Status}. Visible messages: {visibleMessages.Count}. Latest guest message: {latestSnippet}.";
     }
 
-    private static IReadOnlyCollection<string> BuildDeterministicSuggestedReplies(string? latestGuestMessage)
+    private static IReadOnlyCollection<string> BuildDeterministicSuggestedReplies(string? latestGuestMessage, string tone)
     {
         var normalized = (latestGuestMessage ?? string.Empty).Trim().ToLowerInvariant();
+        var opening = tone switch
+        {
+            "friendly" => "Happy to help",
+            "luxury" => "Delighted to assist",
+            "casual" => "Got it",
+            _ => "Thanks for your message"
+        };
 
         if (normalized.Contains("check-in") || normalized.Contains("check in"))
         {
             return
             [
-                "Thanks for checking in. I can confirm your check-in details and send the exact arrival steps shortly.",
-                "Happy to help with check-in. Could you confirm your expected arrival time so I can prepare the best guidance?",
+                $"{opening}. I can confirm your check-in details and send the exact arrival steps shortly.",
+                "Could you confirm your expected arrival time so I can prepare the best guidance?",
                 "I have received your check-in question and will share the updated instructions in a moment."
             ];
         }
@@ -356,7 +396,7 @@ public sealed class CopilotService(
         {
             return
             [
-                "Thanks for your message. I will confirm the check-out process and timing for your reservation.",
+                $"{opening}. I will confirm the check-out process and timing for your reservation.",
                 "I can help with check-out details. Are you asking about the time, luggage options, or both?",
                 "Understood, I am reviewing your check-out request and will respond with clear next steps shortly."
             ];
@@ -366,7 +406,7 @@ public sealed class CopilotService(
         {
             return
             [
-                "Thanks for reaching out. I will send the Wi-Fi details linked to your stay right away.",
+                $"{opening}. I will send the Wi-Fi details linked to your stay right away.",
                 "I can help with internet access. Are you seeing a connection error or do you need the network credentials?",
                 "I have your Wi-Fi request and will provide the connection steps in a moment."
             ];
@@ -376,7 +416,7 @@ public sealed class CopilotService(
         {
             return
             [
-                "Thanks for your message. I will confirm the parking instructions and availability for your stay.",
+                $"{opening}. I will confirm the parking instructions and availability for your stay.",
                 "I can help with parking details. Could you share your estimated arrival time?",
                 "Understood, I am checking the parking guidance and will update you shortly."
             ];
@@ -386,7 +426,7 @@ public sealed class CopilotService(
         {
             return
             [
-                "Thanks for asking. I will check availability for your request and confirm what is possible.",
+                $"{opening}. I will check availability for your request and confirm what is possible.",
                 "I can assist with this request. Could you confirm the exact time you need so I can verify options?",
                 "Understood, I am reviewing your request now and will reply with the best available option shortly."
             ];
@@ -394,9 +434,22 @@ public sealed class CopilotService(
 
         return
         [
-            "Thanks for reaching out. I have received your message and will provide a clear update shortly.",
+            $"{opening}. I have received your message and will provide a clear update shortly.",
             "Happy to help. Could you share one more detail so I can give you the most accurate response?",
             "I understand your request and I am checking the best next step for you now."
         ];
+    }
+
+    private static string NormalizeTone(string? tone)
+    {
+        if (string.IsNullOrWhiteSpace(tone))
+        {
+            return "professional";
+        }
+
+        var normalized = tone.Trim().ToLowerInvariant();
+        return SupportedTones.Contains(normalized)
+            ? normalized
+            : "professional";
     }
 }

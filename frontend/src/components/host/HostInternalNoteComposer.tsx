@@ -5,6 +5,7 @@ const maxNoteLength = 2000;
 interface HostInternalNoteComposerProps {
   isAddingNote: boolean;
   disabled: boolean;
+  disabledReason?: string;
   actionError: string | null;
   onSubmit: (content: string) => Promise<boolean>;
   onStartTyping?: () => void;
@@ -14,6 +15,7 @@ interface HostInternalNoteComposerProps {
 export function HostInternalNoteComposer({
   isAddingNote,
   disabled,
+  disabledReason,
   actionError,
   onSubmit,
   onStartTyping,
@@ -87,7 +89,8 @@ export function HostInternalNoteComposer({
   return (
     <section className="sf-host-detail-section sf-host-note-composer" aria-label="Internal notes">
       <h3>Internal note</h3>
-      <p className="sf-host-muted-note">Internal note - staff only</p>
+      <p className="sf-host-muted-note">Staff only — not visible to the guest</p>
+      {disabledReason ? <p className="sf-host-muted-note">{disabledReason}</p> : null}
 
       <label htmlFor="sf-host-note-input">Note content</label>
       <textarea
@@ -112,12 +115,18 @@ export function HostInternalNoteComposer({
 
       <div className="sf-host-composer-footer">
         <span aria-live="polite">{trimmed.length}/{maxNoteLength}</span>
-        <button type="button" onClick={() => void submit()} disabled={isDisabled} aria-label="Add internal note">
-          {isAddingNote ? "Adding..." : "Add Note"}
+        <button
+          type="button"
+          className="sf-host-button-note"
+          onClick={() => void submit()}
+          disabled={isDisabled}
+          aria-label="Add Note"
+        >
+          {isAddingNote ? "Adding Note..." : "Add Note"}
         </button>
       </div>
 
-      {actionError ? <p className="sf-host-inline-error">{actionError}</p> : null}
+      {actionError ? <p className="sf-host-inline-error" role="alert">{actionError}</p> : null}
     </section>
   );
 }

@@ -13,6 +13,30 @@ namespace StayFlow.Api.Controllers;
 [Authorize]
 public sealed class CopilotController(ICopilotService copilotService) : ControllerBase
 {
+    [HttpPost("{conversationId:guid}/generate-reply")]
+    [RequiresPermission("conversations.reply")]
+    [ProducesResponseType(
+        typeof(ApiResponse<CopilotSuggestReplyResponse>),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        typeof(ApiResponse<CopilotSuggestReplyResponse>),
+        StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(
+        typeof(ApiResponse<CopilotSuggestReplyResponse>),
+        StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<CopilotSuggestReplyResponse>>> GenerateReply(
+        Guid conversationId,
+        [FromBody] CopilotSuggestReplyRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await copilotService.GenerateHostReplyAsync(
+            conversationId,
+            request,
+            cancellationToken);
+
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
     [HttpPost("{conversationId:guid}/suggest-reply")]
     [RequiresPermission("conversations.reply")]
     [ProducesResponseType(
@@ -29,7 +53,7 @@ public sealed class CopilotController(ICopilotService copilotService) : Controll
         [FromBody] CopilotSuggestReplyRequest request,
         CancellationToken cancellationToken)
     {
-        var response = await copilotService.SuggestHostReplyAsync(
+        var response = await copilotService.GenerateHostReplyAsync(
             conversationId,
             request,
             cancellationToken);
@@ -66,10 +90,12 @@ public sealed class CopilotController(ICopilotService copilotService) : Controll
         StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ApiResponse<ConversationCopilotSuggestionsResponse>>> GetSuggestedReplies(
         Guid conversationId,
+        [FromQuery] string? tone,
         CancellationToken cancellationToken)
     {
         var response = await copilotService.GetSuggestedRepliesAsync(
             conversationId,
+            tone,
             cancellationToken);
 
         return response.Success ? Ok(response) : ToFailureResult(response);

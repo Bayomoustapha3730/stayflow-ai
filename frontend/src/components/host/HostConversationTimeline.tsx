@@ -9,7 +9,7 @@ interface HostConversationTimelineProps {
   isGuestTyping?: boolean;
   isAnotherStaffTyping?: boolean;
   isInternalNoteTyping?: boolean;
-  connectionState?: "offline" | "connecting" | "online" | "reconnecting";
+  connectionStatus?: "live" | "reconnecting" | "degraded" | "offline";
   onRetryFailedMessage?: (messageId: string) => void;
 }
 
@@ -22,13 +22,20 @@ export function HostConversationTimeline({
   isGuestTyping = false,
   isAnotherStaffTyping = false,
   isInternalNoteTyping = false,
-  connectionState = "offline",
+  connectionStatus = "offline",
   onRetryFailedMessage
 }: HostConversationTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPinnedToBottom, setIsPinnedToBottom] = useState(true);
 
   const unreadDividerIndex = unreadMessageCount > 0 ? Math.max(messages.length - unreadMessageCount, 0) : -1;
+  const statusBadgeLabel = connectionStatus === "live"
+    ? (isRefreshing ? "Refreshing..." : "Live")
+    : connectionStatus === "reconnecting"
+      ? "Reconnecting"
+      : connectionStatus === "degraded"
+        ? "Connected - updates may be delayed"
+        : "Offline";
 
   useEffect(() => {
     const container = containerRef.current;
@@ -58,15 +65,7 @@ export function HostConversationTimeline({
       <header className="sf-host-detail-section-header">
         <h3>Timeline</h3>
         <p aria-live="polite">
-          {connectionState === "online"
-            ? isRefreshing
-              ? "Refreshing..."
-              : "Live"
-            : connectionState === "reconnecting"
-              ? "Reconnecting..."
-              : connectionState === "connecting"
-                ? "Connecting..."
-                : "Offline"}
+          <span className={`sf-host-connection sf-host-connection-${connectionStatus}`}>{statusBadgeLabel}</span>
         </p>
       </header>
 

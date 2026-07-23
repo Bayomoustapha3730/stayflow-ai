@@ -1,10 +1,14 @@
 export interface CopilotSuggestReplyRequest {
   guidance?: string;
+  tone?: CopilotTone;
   includeInternalNotes?: boolean;
   maxContextMessages?: number;
 }
 
 export type CopilotTone = "professional" | "friendly" | "luxury" | "casual";
+
+export const COPILOT_MAX_INSTRUCTION_LENGTH = 600;
+export const COPILOT_MAX_GENERATED_REPLY_LENGTH = 700;
 
 export type CopilotUrgency = "low" | "medium" | "high";
 
@@ -21,6 +25,7 @@ export interface ConversationCopilotSummaryResponse {
 
 export interface ConversationCopilotSuggestionsResponse {
   conversationId: string;
+  tone?: CopilotTone;
   suggestedReplies: string[];
   contextMessageCount: number;
   generatedAt: string;

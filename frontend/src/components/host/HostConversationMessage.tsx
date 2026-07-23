@@ -19,10 +19,22 @@ function messageLabel(message: ConversationMessage): string {
     case ConversationSenderType.Host:
       return "Host";
     case ConversationSenderType.System:
-      return "System";
+      return "System Event";
     default:
       return "Unknown";
   }
+}
+
+function senderInitial(label: string): string {
+  if (label === "Internal Note") {
+    return "IN";
+  }
+
+  if (label === "System Event") {
+    return "SE";
+  }
+
+  return label.slice(0, 1).toUpperCase();
 }
 
 function messageClassName(message: ConversationMessage): string {
@@ -46,6 +58,7 @@ function messageClassName(message: ConversationMessage): string {
 
 export function HostConversationMessage({ message, onRetry }: HostConversationMessageProps) {
   const label = messageLabel(message);
+  const initial = senderInitial(label);
   const timestamp = Number.isNaN(Date.parse(message.sentAt))
     ? "Unknown time"
     : new Intl.DateTimeFormat(undefined, {
@@ -58,6 +71,7 @@ export function HostConversationMessage({ message, onRetry }: HostConversationMe
   return (
     <li className={messageClassName(message)}>
       <header className="sf-host-message-header">
+        <span className="sf-host-message-initial" aria-hidden="true">{initial}</span>
         <span className="sf-host-message-sender">{label}</span>
         {message.authorDisplayName ? <span>{message.authorDisplayName}</span> : null}
         {message.isInternal || message.messageType === ConversationMessageType.InternalNote ? (

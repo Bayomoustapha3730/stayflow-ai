@@ -15,6 +15,7 @@ export interface UseHostConversationsResult {
   isLoading: boolean;
   error: string | null;
   sessionExpired: boolean;
+  isHttpAvailable: boolean;
   selectedConversationId: string | null;
   totalUnreadCount: number;
   realtimeState: "offline" | "connecting" | "online" | "reconnecting";
@@ -38,6 +39,7 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [isHttpAvailable, setIsHttpAvailable] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
@@ -112,6 +114,7 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
       setResponse(null);
       setError(null);
       setSessionExpired(false);
+      setIsHttpAvailable(false);
       return;
     }
 
@@ -135,6 +138,7 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
       }
 
       setResponse(nextResponse);
+      setIsHttpAvailable(true);
       setSelectedConversationId((current) => {
         const hasSelectedConversation = nextResponse.items.some(
           (conversation) => conversation.conversationId === current
@@ -155,6 +159,7 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
 
       const message = failure instanceof Error ? failure.message : "Unable to load conversations.";
       setError(message);
+      setIsHttpAvailable(false);
     } finally {
       if (version === requestVersion.current) {
         setIsLoading(false);
@@ -408,6 +413,7 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
     isLoading,
     error,
     sessionExpired,
+    isHttpAvailable,
     selectedConversationId,
     totalUnreadCount: response?.totalUnreadCount ?? 0,
     realtimeState: realtime.connectionState,

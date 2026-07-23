@@ -120,12 +120,20 @@ export function HostInboxPage() {
   const response = conversations.response;
   const items = response?.items ?? [];
   const selectedConversationId = conversations.selectedConversationId;
+  const connectionStatus: "live" | "reconnecting" | "degraded" | "offline" =
+    conversations.realtimeState === "online"
+      ? "live"
+      : conversations.realtimeState === "reconnecting"
+        ? "reconnecting"
+        : conversations.isHttpAvailable
+          ? "degraded"
+          : "offline";
 
   return (
     <div className="sf-host-page">
       <HostInboxHeader
         isRefreshing={conversations.isLoading}
-        realtimeState={conversations.realtimeState}
+        connectionStatus={connectionStatus}
         totalUnreadCount={conversations.totalUnreadCount}
         notificationsEnabled={notificationsEnabled}
         notificationsSupported={notificationsSupported}

@@ -1,6 +1,6 @@
 interface HostInboxHeaderProps {
   isRefreshing: boolean;
-  realtimeState: "offline" | "connecting" | "online" | "reconnecting";
+  connectionStatus: "live" | "reconnecting" | "degraded" | "offline";
   totalUnreadCount: number;
   notificationsEnabled: boolean;
   notificationsSupported: boolean;
@@ -11,7 +11,7 @@ interface HostInboxHeaderProps {
 
 export function HostInboxHeader({
   isRefreshing,
-  realtimeState,
+  connectionStatus,
   totalUnreadCount,
   notificationsEnabled,
   notificationsSupported,
@@ -20,12 +20,12 @@ export function HostInboxHeader({
   onSignOut
 }: HostInboxHeaderProps) {
   const realtimeLabel =
-    realtimeState === "online"
+    connectionStatus === "live"
       ? "Live"
-      : realtimeState === "reconnecting"
+      : connectionStatus === "reconnecting"
         ? "Reconnecting"
-        : realtimeState === "connecting"
-          ? "Connecting"
+        : connectionStatus === "degraded"
+          ? "Connected - updates may be delayed"
           : "Offline";
 
   return (
@@ -34,7 +34,7 @@ export function HostInboxHeader({
         <div className="sf-host-kicker">StayFlow Host Console</div>
         <h1>Conversation Inbox</h1>
         <p className="sf-host-header-meta" aria-live="polite">
-          <span className={`sf-host-connection sf-host-connection-${realtimeState}`}>{realtimeLabel}</span>
+          <span className={`sf-host-connection sf-host-connection-${connectionStatus}`}>{realtimeLabel}</span>
           <span>{totalUnreadCount} unread total</span>
         </p>
       </div>

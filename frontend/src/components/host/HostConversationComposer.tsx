@@ -9,6 +9,8 @@ interface HostConversationComposerProps {
   actionError: string | null;
   externalDraft?: string | null;
   externalDraftVersion?: number;
+  requestFocusVersion?: number;
+  onDraftChange?: (draft: string) => void;
   onSend: (content: string) => Promise<boolean>;
   onStartTyping?: () => void;
   onStopTyping?: () => void;
@@ -21,11 +23,14 @@ export function HostConversationComposer({
   actionError,
   externalDraft,
   externalDraftVersion,
+  requestFocusVersion,
+  onDraftChange,
   onSend,
   onStartTyping,
   onStopTyping
 }: HostConversationComposerProps) {
   const [content, setContent] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const stopTypingTimerRef = useRef<number | null>(null);
   const isTypingRef = useRef(false);
 
@@ -40,6 +45,7 @@ export function HostConversationComposer({
     const sent = await onSend(trimmed);
     if (sent) {
       setContent("");
+      onDraftChange?.("");
       if (isTypingRef.current) {
         isTypingRef.current = false;
         onStopTyping?.();
@@ -89,7 +95,16 @@ export function HostConversationComposer({
     }
 
     setContent(externalDraft);
-  }, [externalDraft, externalDraftVersion]);
+    onDraftChange?.(externalDraft);
+  }, [externalDraft, externalDraftVersion, onDraftChange]);
+
+  useEffect(() => {
+    if (!requestFocusVersion) {
+      return;
+    }
+
+    textareaRef.current?.focus();
+  }, [requestFocusVersion]);
 
   async function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -103,12 +118,14 @@ export function HostConversationComposer({
       <h3>Reply to guest</h3>
       {disabledReason ? <p className="sf-host-muted-note">{disabledReason}</p> : null}
 
-      <label htmlFor="sf-host-reply-input">Host reply</label>
+      <label htmlFor="sf-host-reply-input">Reply to guest</label>
       <textarea
         id="sf-host-reply-input"
+        ref={textareaRef}
         value={content}
         onChange={(event) => {
           setContent(event.target.value);
+          onDraftChange?.(event.target.value);
           emitTypingState(event.target.value);
         }}
         onKeyDown={handleKeyDown}
@@ -126,12 +143,18 @@ export function HostConversationComposer({
 
       <div className="sf-host-composer-footer">
         <span aria-live="polite">{trimmed.length}/{maxMessageLength}</span>
-        <button type="button" onClick={() => void submit()} disabled={isSendDisabled} aria-label="Send host reply">
+        <button
+          type="button"
+          className="sf-host-button-primary"
+          onClick={() => void submit()}
+          disabled={isSendDisabled}
+          aria-label="Send Reply"
+        >
           {isSending ? "Sending..." : "Send Reply"}
         </button>
       </div>
 
-      {actionError ? <p className="sf-host-inline-error">{actionError}</p> : null}
+      {actionError ? <p className="sf-host-inline-error" role="alert">{actionError}</p> : null}
     </section>
   );
 }

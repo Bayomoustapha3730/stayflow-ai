@@ -159,6 +159,11 @@ function createHostFetchMock(
     failSummary?: boolean;
     failSuggestions?: boolean;
     emptySuggestions?: boolean;
+    failGenerate?: boolean;
+    generateStatus?: 400 | 401 | 403 | 404;
+    generateErrorMessage?: string;
+    delayGenerateMs?: number;
+    failGenerateNetwork?: boolean;
   }
 ) {
   return vi.fn().mockImplementation((url: string, options?: RequestInit) => {
@@ -239,6 +244,42 @@ function createHostFetchMock(
 
     if (url.includes("/copilot/conversations/c-2/suggested-replies")) {
       return Promise.resolve(apiSuccess(copilotSuggestionsResponse("c-2")));
+    }
+
+    if (url.includes("/copilot/conversations/c-1/generate-reply")) {
+      if (config?.failGenerateNetwork) {
+        return Promise.reject(new Error("network down"));
+      }
+
+      if (config?.generateStatus) {
+        return Promise.resolve(apiFailure(config.generateErrorMessage ?? "Generate failed", config.generateStatus));
+      }
+
+      if (config?.failGenerate) {
+        return Promise.resolve(apiFailure("Generation unavailable", 500));
+      }
+
+      const payload = apiSuccess({
+        conversationId: "c-1",
+        suggestedReply: "Absolutely. I will confirm early check-in options and update you shortly.",
+        rationale: "Generated from context",
+        contextMessageCount: 4,
+        isFallback: false,
+        providerMetadata: {
+          providerName: "Development",
+          modelName: "stayflow-development-deterministic",
+          requestId: "req-1"
+        },
+        generatedAt: "2026-07-22T10:06:00Z"
+      });
+
+      if (config?.delayGenerateMs && config.delayGenerateMs > 0) {
+        return new Promise((resolve) => {
+          setTimeout(() => resolve(payload), config.delayGenerateMs);
+        });
+      }
+
+      return Promise.resolve(payload);
     }
 
     if (url.includes("/conversations/c-1/messages")) {
@@ -425,7 +466,7 @@ describe("HostInboxPage via App route", () => {
     render(<App />);
     await signIn();
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: /host copilot/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: /ai copilot/i })).toBeInTheDocument());
     await waitFor(() => expect(screen.getByLabelText(/summary loading skeleton/i)).toBeInTheDocument());
 
     await waitFor(() => expect(screen.getByRole("heading", { name: /conversation summary/i })).toBeInTheDocument());
@@ -441,7 +482,7 @@ describe("HostInboxPage via App route", () => {
     render(<App />);
     const user = await signIn();
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: /host copilot/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: /ai copilot/i })).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText(/guest services are temporarily unavailable/i)).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /^retry$/i }));
 
@@ -461,6 +502,33 @@ describe("HostInboxPage via App route", () => {
     await waitFor(() => {
       const insertButtons = screen.getAllByRole("button", { name: /insert/i });
       expect(insertButtons.length).toBe(3);
+    });
+  });
+
+  it("copilot suggestions empty state is shown", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock([conversationRow()], { emptySuggestions: true }));
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => expect(screen.getByText(/no suggestions available/i)).toBeInTheDocument());
+  });
+
+  it("copilot suggestions failure shows retry", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock([conversationRow()], { failSuggestions: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(screen.getByText(/guest services are temporarily unavailable/i)).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /^retry$/i }));
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/copilot/conversations/c-1/suggested-replies"));
+      expect(calls.length).toBeGreaterThan(1);
     });
   });
 
@@ -493,10 +561,208 @@ describe("HostInboxPage via App route", () => {
     await waitFor(() => expect(screen.getAllByRole("button", { name: /insert/i }).length).toBeGreaterThan(0));
     await user.click(screen.getAllByRole("button", { name: /insert/i })[0]);
 
-    const replyInput = screen.getByLabelText(/host reply/i, { selector: "textarea" }) as HTMLTextAreaElement;
+    const replyInput = screen.getByLabelText(/reply to guest/i, { selector: "textarea" }) as HTMLTextAreaElement;
     expect(replyInput.value).toContain("Thanks for reaching out");
 
     const sendCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/messages/host"));
     expect(sendCalls.length).toBe(0);
+  });
+
+  it("suggestion insert asks before replacing non-empty unsent draft", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const user = await signIn();
+
+    const replyInput = await screen.findByLabelText(/reply to guest/i, { selector: "textarea" });
+    await user.type(replyInput, "My custom draft");
+
+    await user.click((await screen.findAllByRole("button", { name: /insert suggested reply/i }))[0]);
+    expect(screen.getByText(/replace the current reply draft/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect((replyInput as HTMLTextAreaElement).value).toContain("My custom draft");
+
+    await user.click((await screen.findAllByRole("button", { name: /insert suggested reply/i }))[0]);
+    await user.click(screen.getByRole("button", { name: /^replace$/i }));
+    expect((replyInput as HTMLTextAreaElement).value).toContain("Thanks for reaching out");
+
+    const sendCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/messages/host"));
+    expect(sendCalls.length).toBe(0);
+  });
+
+  it("copy suggested reply uses clipboard without sending", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText }
+    });
+
+    render(<App />);
+    const user = await signIn();
+
+    await user.click((await screen.findAllByRole("button", { name: /copy suggested reply/i }))[0]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/copied|copy failed/i)).toBeInTheDocument();
+    });
+
+    const sendCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/messages/host"));
+    expect(sendCalls.length).toBe(0);
+  });
+
+  it("generate reply request does not auto-send host message", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const user = await signIn();
+
+    await user.type(await screen.findByLabelText(/what should the reply emphasize/i), "Confirm check-in window");
+    await user.click(await screen.findByRole("button", { name: /generate reply/i }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /generated reply/i })).toBeInTheDocument());
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/copilot/conversations/c-1/generate-reply"));
+      expect(calls.length).toBeGreaterThan(0);
+    });
+
+    const sendCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/messages/host"));
+    expect(sendCalls.length).toBe(0);
+  });
+
+  it("generated reply shows loading state before success", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock([conversationRow()], { delayGenerateMs: 250 }));
+
+    render(<App />);
+    const user = await signIn();
+
+    await user.click(await screen.findByRole("button", { name: /generate reply/i }));
+    expect(screen.getAllByText(/generating reply/i).length).toBeGreaterThan(0);
+
+    await waitFor(() => expect(screen.getByLabelText(/generated reply/i)).toBeInTheDocument());
+  });
+
+  it("rewrite current draft sends generation request and keeps selection", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const user = await signIn();
+
+    const replyInput = await screen.findByLabelText(/reply to guest/i, { selector: "textarea" });
+    await user.type(replyInput, "Please rewrite this draft");
+    await user.click(screen.getByRole("button", { name: /rewrite current draft/i }));
+
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/copilot/conversations/c-1/generate-reply"));
+      expect(calls.length).toBeGreaterThan(0);
+    });
+
+    const generateCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/copilot/conversations/c-1/generate-reply"));
+    expect(generateCalls.length).toBeGreaterThan(0);
+  });
+
+  it("generation failure preserves existing host draft", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock([conversationRow()], { failGenerate: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const user = await signIn();
+
+    const replyInput = await screen.findByLabelText(/reply to guest/i, { selector: "textarea" });
+    await user.type(replyInput, "Keep this draft");
+
+    await user.click(await screen.findByRole("button", { name: /generate reply/i }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/unable to generate a reply/i));
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+
+    expect((replyInput as HTMLTextAreaElement).value).toContain("Keep this draft");
+
+    const sendCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/messages/host"));
+    expect(sendCalls.length).toBe(0);
+  });
+
+  it("maps generate 400 to validation message", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock([conversationRow()], {
+      generateStatus: 400,
+      generateErrorMessage: "Conversation is closed and cannot be drafted."
+    }));
+
+    render(<App />);
+    const user = await signIn();
+
+    await user.click(await screen.findByRole("button", { name: /generate reply/i }));
+    await waitFor(() => expect(screen.getByText(/conversation is closed and cannot be drafted/i)).toBeInTheDocument());
+  });
+
+  it("maps generate 403 to permission message", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock([conversationRow()], { generateStatus: 403 }));
+
+    render(<App />);
+    const user = await signIn();
+
+    await user.click(await screen.findByRole("button", { name: /generate reply/i }));
+    await waitFor(() => expect(screen.getByText(/do not have permission to generate replies/i)).toBeInTheDocument());
+  });
+
+  it("maps generate 404 to conversation unavailable", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock([conversationRow()], { generateStatus: 404 }));
+
+    render(<App />);
+    const user = await signIn();
+
+    await user.click(await screen.findByRole("button", { name: /generate reply/i }));
+    await waitFor(() => expect(screen.getByText(/^conversation unavailable\.?$/i)).toBeInTheDocument());
+  });
+
+  it("maps generate network failures to reachability message", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock([conversationRow()], { failGenerateNetwork: true }));
+
+    render(<App />);
+    const user = await signIn();
+
+    await user.click(await screen.findByRole("button", { name: /generate reply/i }));
+    await waitFor(() => expect(screen.getByText(/unable to reach stayflow/i)).toBeInTheDocument());
+  });
+
+  it("generate 401 signs user out through unauthorized flow", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock([conversationRow()], { generateStatus: 401 }));
+
+    render(<App />);
+    const user = await signIn();
+
+    await user.click(await screen.findByRole("button", { name: /generate reply/i }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: /host sign in/i })).toBeInTheDocument());
+  });
+
+  it("no copilot requests are made when no conversation is selected", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const items: ConversationSummary[] = [];
+    const fetchMock = createHostFetchMock(items);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => expect(screen.getByText(/no conversations/i)).toBeInTheDocument());
+
+    const copilotCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/copilot/conversations/"));
+    expect(copilotCalls.length).toBe(0);
   });
 });
