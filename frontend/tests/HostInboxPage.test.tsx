@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../src/App";
@@ -8,6 +8,12 @@ import {
   ConversationStatus,
   GuestChannel
 } from "../src/models/enums";
+import type {
+  ConversationCopilotSuggestionsResponse,
+  ConversationCopilotSummaryResponse,
+  CopilotConfidence,
+  CopilotSuggestReplyResponse
+} from "../src/models/copilot";
 import type { ConversationSummary } from "../src/models/hostConversations";
 
 function apiSuccess<T>(data: T) {
@@ -127,7 +133,7 @@ function listResponse(items = [conversationRow()], page = 1, totalPages = 1) {
   };
 }
 
-function copilotSummaryResponse(conversationId = "c-1") {
+function copilotSummaryResponse(conversationId = "c-1"): ConversationCopilotSummaryResponse {
   return {
     conversationId,
     summary: "Guest is requesting early check-in details and timing confirmation.",
@@ -136,11 +142,28 @@ function copilotSummaryResponse(conversationId = "c-1") {
     urgency: "medium",
     latestGuestMessage: "Can I check in early?",
     visibleMessageCount: 4,
+    confidence: {
+      score: 88,
+      level: "High",
+      reasons: ["All required context sections are available and coherent."],
+      missingContext: []
+    },
+    sources: [
+      {
+        sourceType: "Property",
+        title: "Westlands Apartment",
+        category: "Amenities",
+        relevanceReason: "Property details are linked to this conversation.",
+        lastUpdated: "2026-07-21T12:00:00Z"
+      }
+    ],
+    warnings: [],
+    contextTruncated: false,
     generatedAt: "2026-07-22T10:05:00Z"
   };
 }
 
-function copilotSuggestionsResponse(conversationId = "c-1") {
+function copilotSuggestionsResponse(conversationId = "c-1"): ConversationCopilotSuggestionsResponse {
   return {
     conversationId,
     suggestedReplies: [
@@ -149,7 +172,85 @@ function copilotSuggestionsResponse(conversationId = "c-1") {
       "I received your request and I am checking the best check-in option for you now."
     ],
     contextMessageCount: 4,
+    confidence: {
+      score: 68,
+      level: "Medium",
+      reasons: ["Context was truncated to stay within safety limits."],
+      missingContext: ["ContextTruncated"]
+    },
+    sources: [
+      {
+        sourceType: "Property",
+        title: "Demo Nairobi Apartment",
+        category: "Property",
+        relevanceReason: "Property details are linked to this conversation.",
+        lastUpdated: "2026-07-20T10:00:00Z"
+      },
+      {
+        sourceType: "Reservation",
+        title: "Reservation DEMO-CONF-001",
+        category: "Reservation",
+        relevanceReason: "Reservation details are linked to this conversation.",
+        lastUpdated: "2026-07-20T10:00:00Z"
+      },
+      {
+        sourceType: "PropertyKnowledge",
+        title: "House Rules",
+        category: "HouseRules",
+        relevanceReason: "Approved property knowledge relevant for guest responses.",
+        lastUpdated: "2026-07-20T10:00:00Z"
+      },
+      {
+        sourceType: "PropertyKnowledge",
+        title: "Wi-Fi Information",
+        category: "WiFi",
+        relevanceReason: "Approved property knowledge relevant for guest responses.",
+        lastUpdated: "2026-07-20T10:00:00Z"
+      },
+      {
+        sourceType: "PropertyKnowledge",
+        title: "Parking",
+        category: "Parking",
+        relevanceReason: "Approved property knowledge relevant for guest responses.",
+        lastUpdated: "2026-07-20T10:00:00Z"
+      }
+    ],
+    warnings: ["ContextTruncated"],
+    contextTruncated: true,
     generatedAt: "2026-07-22T10:05:30Z"
+  };
+}
+
+function copilotGeneratedReplyResponse(conversationId = "c-1"): CopilotSuggestReplyResponse {
+  return {
+    conversationId,
+    suggestedReply: "Thanks for your request. I can confirm early check-in options after I verify your arrival window.",
+    rationale: "Generated from recent conversation context and optional host guidance.",
+    contextMessageCount: 4,
+    isFallback: false,
+    providerMetadata: {
+      providerName: "Development",
+      modelName: "local-deterministic",
+      requestId: "req-123"
+    },
+    confidence: {
+      score: 92,
+      level: "High",
+      reasons: ["All required context sections are available and coherent."],
+      missingContext: []
+    },
+    sources: [
+      {
+        sourceType: "Conversation",
+        title: "Conversation",
+        category: null,
+        relevanceReason: "Conversation metadata and visible message history.",
+        lastUpdated: "2026-07-20T10:00:00Z"
+      }
+    ],
+    warnings: [],
+    contextTruncated: false,
+    generatedAt: "2026-07-22T10:06:00Z"
   };
 }
 
@@ -159,6 +260,7 @@ function createHostFetchMock(
     failSummary?: boolean;
     failSuggestions?: boolean;
     emptySuggestions?: boolean;
+    failGenerate?: boolean;
   }
 ) {
   return vi.fn().mockImplementation((url: string, options?: RequestInit) => {
@@ -241,6 +343,18 @@ function createHostFetchMock(
       return Promise.resolve(apiSuccess(copilotSuggestionsResponse("c-2")));
     }
 
+    if (url.includes("/copilot/conversations/c-1/suggest-reply")) {
+      if (config?.failGenerate) {
+        return Promise.resolve(apiFailure("Generation unavailable", 500));
+      }
+
+      return Promise.resolve(apiSuccess(copilotGeneratedReplyResponse("c-1")));
+    }
+
+    if (url.includes("/copilot/conversations/c-2/suggest-reply")) {
+      return Promise.resolve(apiSuccess(copilotGeneratedReplyResponse("c-2")));
+    }
+
     if (url.includes("/conversations/c-1/messages")) {
       return Promise.resolve(apiSuccess(messageHistory("c-1")));
     }
@@ -270,11 +384,27 @@ async function signIn(user = userEvent.setup()) {
   return user;
 }
 
+function findDisclosureSummary(label: RegExp): HTMLElement {
+  const summaries = Array.from(document.querySelectorAll(".sf-host-copilot-disclosure > summary"));
+  const match = summaries.find((item) => label.test(item.textContent ?? ""));
+  if (!match) {
+    throw new Error(`Could not find disclosure summary matching ${label}`);
+  }
+
+  return match as HTMLElement;
+}
+
 describe("HostInboxPage via App route", () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.stubEnv("VITE_STAYFLOW_API_URL", "http://test.local");
     vi.stubEnv("VITE_DEMO_EMAIL", "host@example.com");
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined)
+      },
+      configurable: true
+    });
   });
 
   afterEach(() => {
@@ -428,9 +558,11 @@ describe("HostInboxPage via App route", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: /host copilot/i })).toBeInTheDocument());
     await waitFor(() => expect(screen.getByLabelText(/summary loading skeleton/i)).toBeInTheDocument());
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: /conversation summary/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/conversation summary/i)).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText(/guest is requesting early check-in details/i)).toBeInTheDocument());
     expect(screen.getByText(/check-in assistance/i)).toBeInTheDocument();
+    expect(screen.getByText(/high confidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/88%/i)).toBeInTheDocument();
   });
 
   it("copilot summary failure shows retry action", async () => {
@@ -462,6 +594,156 @@ describe("HostInboxPage via App route", () => {
       const insertButtons = screen.getAllByRole("button", { name: /insert/i });
       expect(insertButtons.length).toBe(3);
     });
+
+    expect(screen.getByText(/medium confidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/some older context was omitted/i)).toBeInTheDocument();
+  });
+
+  it("copilot warnings and confidence reasons render accessibly", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock());
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(findDisclosureSummary(/conversation summary/i)).toBeInTheDocument());
+
+    await user.click(findDisclosureSummary(/conversation summary/i));
+    await user.click(findDisclosureSummary(/conversation summary/i));
+
+    await waitFor(() => expect(screen.getAllByText(/why this confidence/i).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByLabelText(/context warnings/i)).toBeInTheDocument());
+  });
+
+  it("copilot renders low confidence when provided", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const baseFetch = createHostFetchMock();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string, options?: RequestInit) => {
+        if (url.includes("/copilot/conversations/c-1/summary")) {
+          const response = copilotSummaryResponse("c-1");
+          const lowConfidence: CopilotConfidence = {
+            score: 35,
+            level: "Low",
+            reasons: ["No approved property knowledge is available."],
+            missingContext: ["NoApprovedKnowledge"]
+          };
+          response.confidence = lowConfidence;
+
+          return Promise.resolve(apiSuccess(response));
+        }
+
+        return baseFetch(url, options);
+      })
+    );
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => expect(screen.getByText(/low confidence/i)).toBeInTheDocument());
+  });
+
+  it("copilot source overflow can be expanded", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock());
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(findDisclosureSummary(/sources \(\d+\)/i)).toBeInTheDocument());
+    await user.click(findDisclosureSummary(/sources \(\d+\)/i));
+    await waitFor(() => expect(screen.getByRole("button", { name: /show all sources/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /show all sources/i }));
+    await waitFor(() => {
+      const matches = screen.getAllByText(/^parking$/i);
+      expect(matches.length).toBeGreaterThan(0);
+    });
+    await user.click(screen.getByRole("button", { name: /show fewer sources/i }));
+  });
+
+  it("copilot sections have expected default disclosure state", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock());
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => expect(findDisclosureSummary(/conversation summary/i)).toBeInTheDocument());
+    expect(findDisclosureSummary(/conversation summary/i).closest("details")?.open).toBe(true);
+    expect(findDisclosureSummary(/sources \(\d+\)/i).closest("details")?.open).toBe(false);
+    expect(findDisclosureSummary(/suggested replies \(\d+\)/i).closest("details")?.open).toBe(true);
+    expect(findDisclosureSummary(/^generate reply$/i).closest("details")?.open).toBe(true);
+    expect(findDisclosureSummary(/^generated reply$/i).closest("details")?.open).toBe(false);
+  });
+
+  it("generated reply expands after successful generation and supports insert/copy", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    const fetchMock = createHostFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /generate host reply draft/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /generate host reply draft/i }));
+
+    await waitFor(() => expect(screen.getByRole("textbox", { name: /generated reply/i })).toBeInTheDocument());
+    expect(findDisclosureSummary(/^generated reply$/i).closest("details")?.open).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: /insert generated reply into host composer/i }));
+    const replyInput = screen.getByLabelText(/host reply/i, { selector: "textarea" }) as HTMLTextAreaElement;
+    expect(replyInput.value).toContain("Thanks for your request");
+
+    await user.click(screen.getByRole("button", { name: /^copy generated reply$/i }));
+    await waitFor(() => expect(screen.getByText(/^copied$/i)).toBeInTheDocument());
+
+    const sendCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/messages/host"));
+    expect(sendCalls.length).toBe(0);
+  });
+
+  it("generated reply state resets when switching conversations", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock());
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /generate host reply draft/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /generate host reply draft/i }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: /generated reply/i })).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: /next/i }));
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: /generated reply/i })).not.toBeInTheDocument());
+  });
+
+  it("copilot disclosures toggle with keyboard", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock());
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(findDisclosureSummary(/sources \(\d+\)/i)).toBeInTheDocument());
+    const sourcesSummary = findDisclosureSummary(/sources \(\d+\)/i);
+    sourcesSummary.focus();
+    fireEvent.keyDown(sourcesSummary, { key: "Enter", code: "Enter" });
+    fireEvent.click(sourcesSummary);
+    expect(sourcesSummary.closest("details")?.open).toBe(true);
+  });
+
+  it("generated reply errors remain visible with section indicator", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock([conversationRow()], { failGenerate: true }));
+
+    render(<App />);
+    const user = await signIn();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /generate host reply draft/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /generate host reply draft/i }));
+
+    await waitFor(() => expect(screen.getByText(/guest services are temporarily unavailable/i)).toBeInTheDocument());
+    expect(screen.getAllByText(/^error$/i).length).toBeGreaterThan(0);
   });
 
   it("changing tone refreshes suggested replies request", async () => {
@@ -498,5 +780,34 @@ describe("HostInboxPage via App route", () => {
 
     const sendCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/messages/host"));
     expect(sendCalls.length).toBe(0);
+  });
+
+  it("uses separate scroll bodies for inbox cards and copilot content", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock());
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => expect(screen.getByLabelText(/conversation inbox list/i)).toBeInTheDocument());
+
+    const inboxList = screen.getByLabelText(/conversation inbox list/i);
+    const listColumn = inboxList.closest(".sf-host-list-column");
+    const pagination = listColumn?.querySelector(".sf-host-pagination");
+
+    expect(listColumn).not.toBeNull();
+    expect(pagination).not.toBeNull();
+    expect(inboxList.closest(".sf-host-pagination")).toBeNull();
+
+    const copilotScroll = screen.getByLabelText(/ai copilot content/i);
+    const copilotHeading = screen.getByRole("heading", { name: /host copilot/i });
+    const copilotPanel = copilotScroll.closest(".sf-host-copilot-panel");
+    const copilotPanelTop = copilotPanel?.querySelector(".sf-host-copilot-panel-top");
+
+    expect(copilotScroll.classList.contains("sf-host-copilot-scroll")).toBe(true);
+    expect(copilotPanel).not.toBeNull();
+    expect(copilotPanelTop).not.toBeNull();
+    expect(copilotScroll.contains(copilotPanelTop as Node)).toBe(false);
+    expect(copilotScroll.contains(copilotHeading)).toBe(false);
   });
 });

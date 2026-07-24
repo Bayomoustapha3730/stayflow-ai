@@ -6,7 +6,9 @@ import {
   HostInboxSummary,
   HostLoginPanel
 } from "../components/host";
+import { CopilotPanel } from "../components/copilot";
 import { useHostAuth } from "../hooks/useHostAuth";
+import { useConversationCopilot } from "../hooks/useConversationCopilot";
 import { useHostConversations } from "../hooks/useHostConversations";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ConversationSenderType } from "../models/enums";
@@ -36,7 +38,15 @@ export function HostInboxPage() {
   const [notificationPreferenceEnabled, setNotificationPreferenceEnabled] = useState(
     () => localStorage.getItem(notificationsPreferenceKey) === "true"
   );
+  const [copilotDraft, setCopilotDraft] = useState<string | null>(null);
+  const [copilotDraftVersion, setCopilotDraftVersion] = useState(0);
   const previousMessageTimestampsRef = useRef<Record<string, string | null>>({});
+  const selectedConversationId = conversations.selectedConversationId;
+  const copilot = useConversationCopilot({
+    conversationId: selectedConversationId,
+    accessToken: auth.accessToken,
+    onUnauthorized: auth.logout
+  });
 
   const notificationsSupported = useMemo(() => typeof Notification !== "undefined", []);
   const notificationsEnabled = notificationsSupported
@@ -119,48 +129,49 @@ export function HostInboxPage() {
 
   const response = conversations.response;
   const items = response?.items ?? [];
-  const selectedConversationId = conversations.selectedConversationId;
 
   return (
     <div className="sf-host-page">
-      <HostInboxHeader
-        isRefreshing={conversations.isLoading}
-        realtimeState={conversations.realtimeState}
-        totalUnreadCount={conversations.totalUnreadCount}
-        notificationsEnabled={notificationsEnabled}
-        notificationsSupported={notificationsSupported}
-        onRefresh={() => {
-          void conversations.refresh();
-        }}
-        onEnableNotifications={() => {
-          void enableNotifications();
-        }}
-        onSignOut={() => {
-          auth.logout();
-        }}
-      />
+      <div className="sf-host-page-top">
+        <HostInboxHeader
+          isRefreshing={conversations.isLoading}
+          realtimeState={conversations.realtimeState}
+          totalUnreadCount={conversations.totalUnreadCount}
+          notificationsEnabled={notificationsEnabled}
+          notificationsSupported={notificationsSupported}
+          onRefresh={() => {
+            void conversations.refresh();
+          }}
+          onEnableNotifications={() => {
+            void enableNotifications();
+          }}
+          onSignOut={() => {
+            auth.logout();
+          }}
+        />
 
-      {conversations.sessionExpired ? (
-        <div className="sf-host-session-expired" role="alert">
-          Your host session expired. Please sign in again.
-        </div>
-      ) : null}
+        {conversations.sessionExpired ? (
+          <div className="sf-host-session-expired" role="alert">
+            Your host session expired. Please sign in again.
+          </div>
+        ) : null}
 
-      <HostInboxSummary totalCount={response?.totalCount ?? 0} page={response?.page ?? 1} items={items} />
+        <HostInboxSummary totalCount={response?.totalCount ?? 0} page={response?.page ?? 1} items={items} />
 
-      <HostConversationFilters
-        search={conversations.search}
-        status={conversations.status}
-        requiresHostAttention={conversations.requiresHostAttention}
-        pageSize={conversations.pageSize}
-        onSearchChange={conversations.setSearch}
-        onStatusChange={conversations.setStatus}
-        onRequiresHostAttentionChange={conversations.setRequiresHostAttention}
-        onPageSizeChange={conversations.setPageSize}
-      />
+        <HostConversationFilters
+          search={conversations.search}
+          status={conversations.status}
+          requiresHostAttention={conversations.requiresHostAttention}
+          pageSize={conversations.pageSize}
+          onSearchChange={conversations.setSearch}
+          onStatusChange={conversations.setStatus}
+          onRequiresHostAttentionChange={conversations.setRequiresHostAttention}
+          onPageSizeChange={conversations.setPageSize}
+        />
+      </div>
 
       <div className="sf-host-main-grid">
-        <section className="sf-host-list-column">
+        <section className="sf-host-list-column" aria-label="Conversation inbox">
           <HostConversationList
             isLoading={conversations.isLoading}
             error={conversations.error}
@@ -195,14 +206,36 @@ export function HostInboxPage() {
           </footer>
         </section>
 
-        <HostConversationDetail
-          conversationId={selectedConversationId}
-          accessToken={auth.accessToken}
-          onUnauthorized={auth.logout}
-          onConversationChanged={() => {
-            void conversations.refresh();
-          }}
-        />
+        <section className="sf-host-conversation-column" aria-label="Conversation workspace">
+          <HostConversationDetail
+            conversationId={selectedConversationId}
+            accessToken={auth.accessToken}
+            onUnauthorized={auth.logout}
+            externalDraft={copilotDraft}
+            externalDraftVersion={copilotDraftVersion}
+            onConversationChanged={() => {
+              void conversations.refresh();
+            }}
+          />
+        </section>
+
+        <section className="sf-host-copilot-column" aria-label="AI Copilot">
+          {selectedConversationId ? (
+            <CopilotPanel
+              conversationId={selectedConversationId}
+              copilot={copilot}
+              onUseDraft={(draft) => {
+                setCopilotDraft(draft);
+                setCopilotDraftVersion((current) => current + 1);
+              }}
+            />
+          ) : (
+            <aside className="sf-host-selection-panel" aria-live="polite">
+              <h3>Copilot</h3>
+              <p>Select a conversation to view suggestions and grounded context.</p>
+            </aside>
+          )}
+        </section>
       </div>
     </div>
   );

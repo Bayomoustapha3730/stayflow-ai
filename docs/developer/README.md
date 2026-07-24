@@ -14,6 +14,7 @@ This handbook defines the engineering practices used to build and maintain StayF
 - [Entity Framework Guidelines](EntityFrameworkGuidelines.md)
 - [Logging Standards](LoggingStandards.md)
 - [Error Handling](ErrorHandling.md)
+- [Conversation Context Engine](ConversationContextEngine.md)
 
 ## Engineering Principles
 

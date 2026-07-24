@@ -272,4 +272,42 @@ describe("HostConversationDetail", () => {
 
     await waitFor(() => expect(onUnauthorized).toHaveBeenCalled());
   });
+
+  it("keeps timeline in its own scroll section and composers outside timeline", async () => {
+    vi.stubGlobal("fetch", createFetchMock());
+
+    const { container } = render(
+      <HostConversationDetail
+        conversationId="c-1"
+        accessToken="host-token"
+        onUnauthorized={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /timeline/i })).toBeInTheDocument());
+
+    const workspace = container.querySelector(".sf-host-detail-workspace");
+    const timelineSection = container.querySelector(".sf-host-conversation-timeline-section");
+    const timeline = container.querySelector(".sf-host-timeline");
+    const composerStack = container.querySelector(".sf-host-composer-stack");
+    const replyInput = screen.getByRole("textbox", { name: /^host reply$/i });
+    const noteInput = screen.getByRole("textbox", { name: /note content/i });
+
+    expect(workspace).not.toBeNull();
+    expect(timelineSection).not.toBeNull();
+    expect(timeline).not.toBeNull();
+    expect(composerStack).not.toBeNull();
+
+    expect(workspace?.classList.contains("sf-host-detail-workspace")).toBe(true);
+    expect(timeline?.classList.contains("sf-host-timeline")).toBe(true);
+    expect(composerStack?.classList.contains("sf-host-composer-stack")).toBe(true);
+    expect(timelineSection?.contains(timeline as Node)).toBe(true);
+    expect(workspace?.contains(timelineSection as Node)).toBe(true);
+    expect(workspace?.contains(composerStack as Node)).toBe(true);
+    expect(timelineSection?.contains(composerStack as Node)).toBe(false);
+    expect(timeline?.contains(replyInput)).toBe(false);
+    expect(timeline?.contains(noteInput)).toBe(false);
+    expect(composerStack?.contains(replyInput)).toBe(true);
+    expect(composerStack?.contains(noteInput)).toBe(true);
+  });
 });
