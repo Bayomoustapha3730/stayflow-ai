@@ -201,9 +201,9 @@ public sealed class AIReplyOrchestrator(
 
         warnings.AddRange(safetyAfterFallback.Warnings);
 
-        var sourceTitles = new HashSet<string>(ranking.SelectedItems.Select(item => item.Title), StringComparer.OrdinalIgnoreCase);
+        var sourceIds = new HashSet<string>(ranking.SelectedItems.Select(item => item.SourceId), StringComparer.OrdinalIgnoreCase);
         var sources = context.Sources
-            .Where(source => source.SourceType != ConversationContextSourceType.PropertyKnowledge || sourceTitles.Contains(source.Title))
+            .Where(source => source.SourceType != ConversationContextSourceType.PropertyKnowledge || (source.SourceId is not null && sourceIds.Contains(source.SourceId)))
             .ToList();
 
         completedStages.Add(AIReplyOrchestrationStage.SourcesAssembled);

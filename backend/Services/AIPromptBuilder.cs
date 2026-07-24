@@ -1,3 +1,4 @@
+using StayFlow.Api.Models;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.AIPrompt;
@@ -98,7 +99,7 @@ public sealed class AIPromptBuilder(IOptions<AIPromptOptions> options) : IAIProm
 
         var knowledge = request.SelectedKnowledgeItems
             .Select(item =>
-                $"Title: {item.Title}\nCategory: {item.Category}\nPriority: {item.Priority}\nContent: {item.Content}")
+                $"Title: {item.Title}\nCategory: {item.Category}\nPriority: {item.Priority}\nTags: {(item.Tags.Count == 0 ? "None" : string.Join(", ", item.Tags))}\nSummary: {item.Summary ?? "None"}\nContent: {item.Content}")
             .ToList();
 
         var userPrompt = string.Join(Environment.NewLine,

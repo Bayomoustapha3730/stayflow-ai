@@ -1,3 +1,4 @@
+using StayFlow.Api.Models;
 using StayFlow.Api.Services.AI.Context;
 
 namespace StayFlow.Api.Tests;
@@ -101,9 +102,35 @@ public sealed class ContextConfidenceEvaluatorTests
             "DEMO-CONF-001",
             DateOnly.FromDateTime(DateTime.UtcNow.Date),
             DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(2)),
-            [new ConversationContextVisibleMessage("m1", "Guest", DateTimeOffset.UtcNow, "Can I check in early today?")],
-            [new ConversationContextKnowledgeItem("Check-in", "Standard check-in is after 3 PM", PropertyKnowledgeCategory.CheckIn, DateTimeOffset.UtcNow, 0, true)],
-            [new ConversationContextSource(ConversationContextSourceType.Property, null, "Demo Nairobi Apartment", "Property", DateTimeOffset.UtcNow, "Property details are linked to this conversation.", true)],
+            [
+                new ConversationContextVisibleMessage(
+                "m1",
+                "Guest",
+                DateTimeOffset.UtcNow,
+                "Can I check in early today?")
+            ],
+            [
+                new ConversationContextKnowledgeItem(
+                "knowledge-check-in",
+                "Check-in",
+                "Standard check-in is after 3 PM",
+                PropertyKnowledgeCategory.CheckIn,
+                DateTimeOffset.UtcNow,
+                0,
+                true,
+                ["check-in", "arrival"],
+                "Standard property check-in guidance")
+            ],
+            [
+                new ConversationContextSource(
+                ConversationContextSourceType.Property,
+                null,
+                "Demo Nairobi Apartment",
+                "Property",
+                DateTimeOffset.UtcNow,
+                "Property details are linked to this conversation.",
+                true)
+            ],
             [],
             false,
             DateTimeOffset.UtcNow);
