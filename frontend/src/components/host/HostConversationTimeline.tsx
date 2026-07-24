@@ -54,7 +54,7 @@ export function HostConversationTimeline({
   };
 
   return (
-    <section className="sf-host-detail-section" aria-label="Conversation timeline">
+    <section className="sf-host-detail-section sf-host-conversation-timeline-section" aria-label="Conversation timeline">
       <header className="sf-host-detail-section-header">
         <h3>Timeline</h3>
         <p aria-live="polite">
@@ -70,7 +70,13 @@ export function HostConversationTimeline({
         </p>
       </header>
 
-      <div className="sf-host-timeline" onScroll={handleScroll} ref={containerRef}>
+      <div
+        className="sf-host-timeline"
+        onScroll={handleScroll}
+        ref={containerRef}
+        tabIndex={0}
+        aria-label="Conversation timeline messages"
+      >
         {messages.length === 0 ? (
           <div className="sf-host-timeline-empty" role="status">
             No messages yet.

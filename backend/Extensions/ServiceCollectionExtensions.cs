@@ -27,6 +27,15 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.ReuseOpenConversationMinutes >= 0 && options.ReuseOpenConversationMinutes <= 10080, "Conversation reuse window must be between 0 and 10080 minutes.")
             .Validate(options => options.MaxHistoryMessages >= 1 && options.MaxHistoryMessages <= 500, "Conversation history limit must be between 1 and 500.")
             .ValidateOnStart();
+        services.AddOptions<Services.AI.Context.ConversationContextLimits>()
+            .Bind(configuration.GetSection(Services.AI.Context.ConversationContextLimits.SectionName))
+            .Validate(options => options.MaxVisibleMessages is >= 1 and <= 100, "Conversation context visible message limit must be between 1 and 100.")
+            .Validate(options => options.MaxMessageCharacters is >= 100 and <= 4000, "Conversation context max message characters must be between 100 and 4000.")
+            .Validate(options => options.MaxTotalPromptContextCharacters is >= 1000 and <= 50000, "Conversation context total prompt characters must be between 1000 and 50000.")
+            .Validate(options => options.MaxKnowledgeItems is >= 0 and <= 50, "Conversation context knowledge item limit must be between 0 and 50.")
+            .Validate(options => options.MaxKnowledgeItemCharacters is >= 100 and <= 10000, "Conversation context max knowledge item characters must be between 100 and 10000.")
+            .Validate(options => options.ContextScanPageSize is >= 1 and <= 500, "Conversation context scan page size must be between 1 and 500.")
+            .ValidateOnStart();
         services.AddOptions<Services.AIProviderOptions>()
             .Bind(configuration.GetSection(Services.AIProviderOptions.SectionName))
             .Validate(
@@ -54,6 +63,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IConversationStatusTransitionPolicy, Services.ConversationStatusTransitionPolicy>();
         services.AddScoped<Services.IConversationService, Services.ConversationService>();
         services.AddScoped<Services.IConversationAIExchangeService, Services.ConversationAIExchangeService>();
+        services.AddScoped<Services.AI.Context.IConversationContextBuilder, Services.AI.Context.ConversationContextBuilder>();
+        services.AddSingleton<Services.AI.Context.IContextConfidenceEvaluator, Services.AI.Context.ContextConfidenceEvaluator>();
         services.AddScoped<Services.ICopilotService, Services.CopilotService>();
         services.AddScoped<Services.IConversationRealtimePublisher, Services.ConversationRealtimePublisher>();
         services.AddScoped<Services.IChatService, Services.ChatService>();

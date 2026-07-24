@@ -39,7 +39,7 @@ export function HostConversationList({
   }
 
   return (
-    <div className="sf-host-conversation-list" aria-label="Conversations">
+    <div className="sf-host-conversation-list" aria-label="Conversation inbox list" tabIndex={0}>
       {items.map((item) => (
         <HostConversationListItem
           key={item.conversationId}

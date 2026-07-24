@@ -1,148 +1,188 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
-using StayFlow.Api.Controllers;
-using StayFlow.Api.DTOs.AIProvider;
-using StayFlow.Api.DTOs.Copilot;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
-using StayFlow.Api.Services;
 using StayFlow.Api.Services.AI.Context;
 
 namespace StayFlow.Api.Tests;
 
-public sealed class CopilotServiceTests
+public sealed class ConversationContextBuilderTests
 {
     [Fact]
-    public async Task GetSummaryAsync_ReturnsTenantScopedConversationOnly()
+    public async Task BuildAsync_ReturnsNull_WhenConversationIsInaccessible()
     {
         var fixture = new Fixture();
-        var ownConversation = fixture.Repository.NewConversation();
-        var crossTenantConversation = fixture.Repository.NewConversation(overrideCompanyId: Guid.NewGuid());
-        fixture.Repository.Conversations.AddRange([ownConversation, crossTenantConversation]);
+        var foreignConversation = fixture.Repository.NewConversation(overrideCompanyId: Guid.NewGuid());
+        fixture.Repository.Conversations.Add(foreignConversation);
 
-        var ownResponse = await fixture.Service.GetSummaryAsync(ownConversation.Id, CancellationToken.None);
-        var crossTenantResponse = await fixture.Service.GetSummaryAsync(crossTenantConversation.Id, CancellationToken.None);
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, foreignConversation.Id, CancellationToken.None);
 
-        Assert.True(ownResponse.Success);
-        Assert.False(crossTenantResponse.Success);
-        Assert.Equal("Conversation was not found.", crossTenantResponse.Message);
+        Assert.Null(context);
     }
 
     [Fact]
-    public async Task GetSummaryAsync_ExcludesInternalNotesFromSummaryContext()
+    public async Task BuildAsync_IncludesPropertyAndReservationAndKnowledge()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        conversation.Reservation = fixture.Reservation;
+        conversation.ReservationId = fixture.Reservation.Id;
+        fixture.Repository.Conversations.Add(conversation);
+
+        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Title = "Wi-Fi Information",
+            Content = "Network StayFlow, password 12345678",
+            IsActive = true
+        });
+
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
+
+        Assert.NotNull(context);
+        Assert.Equal(fixture.Property.Id, context!.PropertyId);
+        Assert.Equal(fixture.Reservation.Id, context.ReservationId);
+        Assert.Single(context.ApprovedKnowledgeItems);
+    }
+
+    [Fact]
+    public async Task BuildAsync_OrdersMessagesChronologicallyAndExcludesInternalNotes()
     {
         var fixture = new Fixture();
         var conversation = fixture.Repository.NewConversation();
         fixture.Repository.Conversations.Add(conversation);
+
         fixture.Repository.Messages.AddRange(
         [
-            fixture.Repository.NewMessage(conversation, "Guest asks about parking", ConversationSenderType.Guest, isInternal: false, sentAt: DateTimeOffset.UtcNow.AddMinutes(-2)),
-            fixture.Repository.NewMessage(conversation, "Internal note for staff only", ConversationSenderType.System, ConversationMessageType.InternalNote, isInternal: true, sentAt: DateTimeOffset.UtcNow)
+            fixture.Repository.NewMessage(conversation, "Second", ConversationSenderType.Guest, sentAt: DateTimeOffset.UtcNow.AddMinutes(2)),
+            fixture.Repository.NewMessage(conversation, "Internal", ConversationSenderType.System, ConversationMessageType.InternalNote, isInternal: true, sentAt: DateTimeOffset.UtcNow.AddMinutes(1)),
+            fixture.Repository.NewMessage(conversation, "First", ConversationSenderType.Host, sentAt: DateTimeOffset.UtcNow)
         ]);
 
-        var response = await fixture.Service.GetSummaryAsync(conversation.Id, CancellationToken.None);
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
 
-        Assert.True(response.Success);
-        Assert.Equal(1, response.Data!.VisibleMessageCount);
-        Assert.Equal("Guest asks about parking", response.Data.LatestGuestMessage);
-        Assert.DoesNotContain("Internal note for staff only", response.Data.Summary, StringComparison.OrdinalIgnoreCase);
-        Assert.NotNull(response.Data.Confidence);
-        Assert.NotEmpty(response.Data.Sources);
+        Assert.NotNull(context);
+        Assert.Equal(["First", "Second"], context!.VisibleMessages.Select(message => message.Text));
     }
 
     [Fact]
-    public async Task GetSuggestedRepliesAsync_ReturnsDeterministicMockReplies()
+    public async Task BuildAsync_ExcludesInactiveKnowledge()
     {
         var fixture = new Fixture();
         var conversation = fixture.Repository.NewConversation();
         fixture.Repository.Conversations.Add(conversation);
-        fixture.Repository.Messages.Add(fixture.Repository.NewMessage(
-            conversation,
-            "Hi, can you share the wifi password?",
-            ConversationSenderType.Guest,
-            isInternal: false,
-            sentAt: DateTimeOffset.UtcNow));
 
-        var response = await fixture.Service.GetSuggestedRepliesAsync(conversation.Id, CancellationToken.None);
+        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Title = "House Rules",
+            Content = "No smoking",
+            IsActive = true
+        });
+        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Title = "Draft Note",
+            Content = "Not approved",
+            IsActive = false
+        });
 
-        Assert.True(response.Success);
-        Assert.Equal(3, response.Data!.SuggestedReplies.Count);
-        Assert.Contains(response.Data.SuggestedReplies, item => item.Contains("Wi-Fi", StringComparison.OrdinalIgnoreCase) || item.Contains("internet", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(1, response.Data.ContextMessageCount);
-        Assert.NotNull(response.Data.Confidence);
-        Assert.NotEmpty(response.Data.Sources);
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
+
+        Assert.NotNull(context);
+        Assert.Single(context!.ApprovedKnowledgeItems);
+        Assert.DoesNotContain(context.ApprovedKnowledgeItems, item => item.Title.Contains("Draft", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
-    public async Task SuggestHostReplyAsync_IncludesGroundingMetadataAndDoesNotPersistOutput()
+    public async Task BuildAsync_EnforcesMessageAndKnowledgeLimitsAndMarksTruncation()
+    {
+        var fixture = new Fixture(new ConversationContextLimits
+        {
+            MaxVisibleMessages = 2,
+            MaxMessageCharacters = 10,
+            MaxTotalPromptContextCharacters = 50,
+            MaxKnowledgeItems = 1,
+            MaxKnowledgeItemCharacters = 10,
+            ContextScanPageSize = 100
+        });
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        fixture.Repository.Messages.AddRange(
+        [
+            fixture.Repository.NewMessage(conversation, "Guest first request with long text", ConversationSenderType.Guest, sentAt: DateTimeOffset.UtcNow),
+            fixture.Repository.NewMessage(conversation, "Host response with long text", ConversationSenderType.Host, sentAt: DateTimeOffset.UtcNow.AddMinutes(1)),
+            fixture.Repository.NewMessage(conversation, "Guest follow up with long text", ConversationSenderType.Guest, sentAt: DateTimeOffset.UtcNow.AddMinutes(2))
+        ]);
+
+        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Title = "Wi-Fi",
+            Content = "Very long wifi instructions",
+            IsActive = true
+        });
+        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Title = "Parking",
+            Content = "Very long parking instructions",
+            IsActive = true
+        });
+
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
+
+        Assert.NotNull(context);
+        Assert.True(context!.VisibleMessages.Count <= 2);
+        Assert.True(context.ApprovedKnowledgeItems.Count <= 1);
+        Assert.True(context.Truncated);
+        Assert.Contains(ConversationContextWarning.ContextTruncated, context.Warnings);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NormalizesWhitespace()
     {
         var fixture = new Fixture();
         var conversation = fixture.Repository.NewConversation();
         fixture.Repository.Conversations.Add(conversation);
-        fixture.Repository.Messages.Add(fixture.Repository.NewMessage(
-            conversation,
-            "Can I get parking details?",
-            ConversationSenderType.Guest,
-            isInternal: false,
-            sentAt: DateTimeOffset.UtcNow));
+        fixture.Repository.Messages.Add(fixture.Repository.NewMessage(conversation, "Hello\n\tworld   again", ConversationSenderType.Guest));
 
-        var beforeCount = fixture.Repository.Messages.Count;
-        var response = await fixture.Service.SuggestHostReplyAsync(conversation.Id, new CopilotSuggestReplyRequest(), CancellationToken.None);
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
 
-        Assert.True(response.Success);
-        Assert.NotNull(response.Data);
-        Assert.NotNull(response.Data!.Confidence);
-        Assert.NotEmpty(response.Data.Sources);
-        Assert.True(response.Data.ContextMessageCount >= 1);
-        Assert.Equal(beforeCount, fixture.Repository.Messages.Count);
+        Assert.NotNull(context);
+        Assert.Equal("Hello world again", context!.VisibleMessages.Single().Text);
     }
 
     [Fact]
-    public void GetSummary_RequiresConversationsReadPermission()
+    public async Task BuildAsync_RespectsCancellationToken()
     {
-        var method = typeof(CopilotController).GetMethod(nameof(CopilotController.GetSummary));
-        var attribute = Assert.Single(method!.GetCustomAttributes(typeof(RequiresPermissionAttribute), inherit: false).Cast<RequiresPermissionAttribute>());
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
 
-        Assert.Equal("conversations.read", attribute.Permission);
-    }
+        using var source = new CancellationTokenSource();
+        await source.CancelAsync();
 
-    [Fact]
-    public void GetSuggestedReplies_RequiresConversationsReadPermission()
-    {
-        var method = typeof(CopilotController).GetMethod(nameof(CopilotController.GetSuggestedReplies));
-        var attribute = Assert.Single(method!.GetCustomAttributes(typeof(RequiresPermissionAttribute), inherit: false).Cast<RequiresPermissionAttribute>());
-
-        Assert.Equal("conversations.read", attribute.Permission);
-    }
-
-    [Fact]
-    public void SuggestReply_RequiresConversationsReplyPermission()
-    {
-        var method = typeof(CopilotController).GetMethod(nameof(CopilotController.SuggestReply));
-        var attribute = Assert.Single(method!.GetCustomAttributes(typeof(RequiresPermissionAttribute), inherit: false).Cast<RequiresPermissionAttribute>());
-
-        Assert.Equal("conversations.reply", attribute.Permission);
-    }
-
-    [Fact]
-    public void CopilotResponseContracts_ExposeGroundingMetadata()
-    {
-        Assert.NotNull(typeof(ConversationCopilotSummaryResponse).GetProperty(nameof(ConversationCopilotSummaryResponse.Confidence)));
-        Assert.NotNull(typeof(ConversationCopilotSummaryResponse).GetProperty(nameof(ConversationCopilotSummaryResponse.Sources)));
-        Assert.NotNull(typeof(ConversationCopilotSummaryResponse).GetProperty(nameof(ConversationCopilotSummaryResponse.Warnings)));
-        Assert.NotNull(typeof(ConversationCopilotSummaryResponse).GetProperty(nameof(ConversationCopilotSummaryResponse.ContextTruncated)));
-
-        Assert.NotNull(typeof(ConversationCopilotSuggestionsResponse).GetProperty(nameof(ConversationCopilotSuggestionsResponse.Confidence)));
-        Assert.NotNull(typeof(CopilotSuggestReplyResponse).GetProperty(nameof(CopilotSuggestReplyResponse.Confidence)));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, source.Token));
     }
 
     private sealed class Fixture
     {
-        public Fixture()
+        public Fixture(ConversationContextLimits? limits = null)
         {
             Repository = new FakeConversationRepository(CompanyId);
             Guest = new Guest
@@ -151,6 +191,7 @@ public sealed class CopilotServiceTests
                 CompanyId = CompanyId,
                 FirstName = "Demo",
                 LastName = "Guest",
+                Email = "demo.guest@stayflow.local",
                 PreferredLanguage = "en",
                 CountryCode = "KE",
                 IsActive = true
@@ -159,53 +200,41 @@ public sealed class CopilotServiceTests
             {
                 Id = Guid.NewGuid(),
                 CompanyId = CompanyId,
-                Name = "Nairobi Loft",
+                Name = "Demo Nairobi Apartment",
                 City = "Nairobi",
                 CountryCode = "KE",
-                AddressLine1 = "Road",
+                AddressLine1 = "Demo Street",
                 TimeZone = "Africa/Nairobi",
+                IsActive = true
+            };
+            Reservation = new Reservation
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = CompanyId,
+                PropertyId = Property.Id,
+                PrimaryGuestId = Guest.Id,
+                ConfirmationNumber = "DEMO-CONF-001",
+                CheckInDate = DateOnly.FromDateTime(DateTime.UtcNow.Date),
+                CheckOutDate = DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(2)),
+                Status = ReservationStatus.Confirmed,
                 IsActive = true
             };
 
             Repository.Guests.Add(Guest);
             Repository.Properties.Add(Property);
 
-            Service = new CopilotService(
-                new ConversationContextBuilder(
-                    Repository,
-                    Options.Create(new ConversationContextLimits()),
-                    NullLogger<ConversationContextBuilder>.Instance),
-                new ContextConfidenceEvaluator(),
-                new FakeCurrentTenantContext(CompanyId),
-                new FakeAiProvider());
+            Builder = new ConversationContextBuilder(
+                Repository,
+                Options.Create(limits ?? new ConversationContextLimits()),
+                NullLogger<ConversationContextBuilder>.Instance);
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();
         public Guest Guest { get; }
         public Property Property { get; }
+        public Reservation Reservation { get; }
         public FakeConversationRepository Repository { get; }
-        public CopilotService Service { get; }
-    }
-
-    private sealed class FakeCurrentTenantContext(Guid companyId) : ICurrentTenantContext
-    {
-        public Guid? CompanyId { get; } = companyId;
-        public Guid? UserId { get; } = Guid.NewGuid();
-        public string? CorrelationId { get; } = "copilot-test";
-        public bool IsAuthenticated { get; } = true;
-    }
-
-    private sealed class FakeAiProvider : IAIProvider
-    {
-        public Task<AIProviderResult> GenerateAsync(AIProviderRequest request, CancellationToken cancellationToken)
-        {
-            return Task.FromResult(AIProviderResult.Success(
-                "Thanks for your message. I will share the details shortly.",
-                "TestProvider",
-                "test-model",
-                "req-test",
-                5));
-        }
+        public ConversationContextBuilder Builder { get; }
     }
 
     private sealed class FakeConversationRepository(Guid companyId) : IConversationRepository
@@ -228,9 +257,7 @@ public sealed class CopilotServiceTests
             => throw new NotImplementedException();
 
         public Task<Conversation?> GetByIdForCompanyAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
-        {
-            return Task.FromResult(Conversations.FirstOrDefault(conversation => conversation.CompanyId == requestedCompanyId && conversation.Id == conversationId));
-        }
+            => Task.FromResult(Conversations.FirstOrDefault(conversation => conversation.CompanyId == requestedCompanyId && conversation.Id == conversationId));
 
         public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
             => throw new NotImplementedException();
@@ -242,6 +269,7 @@ public sealed class CopilotServiceTests
                 .Where(message => query.IncludeInternal || !message.IsInternal)
                 .OrderBy(message => message.SentAt)
                 .ThenBy(message => message.CreatedAt)
+                .Take(query.PageSize)
                 .ToList();
 
             return Task.FromResult(new PagedResult<ConversationMessage>
