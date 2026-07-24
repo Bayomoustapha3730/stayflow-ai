@@ -955,6 +955,30 @@
   padding: 8px 10px;
 }
 
+.sf-host-copilot-warning-box.orchestration {
+  background: #f5f8ff;
+  border-color: #b9c7f4;
+}
+
+.sf-host-copilot-status-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.sf-host-copilot-status-pill {
+  border: 1px solid #9ab0dd;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+}
+
+.sf-host-copilot-status-pill.review {
+  border-color: #d98f42;
+}
+
 .sf-host-copilot-warning-box h5 {
   margin: 0;
 }

@@ -4,6 +4,7 @@ import { getCopilotWarningLabel } from "../../hooks/useConversationCopilot";
 import type {
   CopilotConfidence,
   CopilotContextWarning,
+  CopilotOrchestrationWarning,
   CopilotSource
 } from "../../models/copilot";
 import { CopilotEmptyState } from "./CopilotEmptyState";
@@ -37,6 +38,7 @@ export function CopilotPanel({ conversationId, copilot, disabled = false, onUseD
 
   const summaryWarnings = useMemo(() => dedupeWarnings(copilot.summary?.warnings ?? []), [copilot.summary?.warnings]);
   const suggestionWarnings = useMemo(() => dedupeWarnings(copilot.suggestionMetadata?.warnings ?? []), [copilot.suggestionMetadata?.warnings]);
+  const orchestrationWarnings = useMemo(() => dedupeOrchestrationWarnings(copilot.orchestrationWarnings), [copilot.orchestrationWarnings]);
 
   const mergedSources = useMemo(() => {
     const summarySources = copilot.summary?.sources ?? [];
@@ -172,7 +174,13 @@ export function CopilotPanel({ conversationId, copilot, disabled = false, onUseD
           hasError={suggestionSectionError}
         >
           <CopilotConfidenceCard confidence={copilot.suggestionMetadata?.confidence} ariaLabel="Suggestions confidence" compact />
+          <CopilotStatusMeta
+            detectedIntent={copilot.detectedIntent}
+            fallbackUsed={copilot.fallbackUsed}
+            requiresHumanReview={copilot.requiresHumanReview}
+          />
           <WarningList warnings={suggestionWarnings} />
+          <OrchestrationWarningList warnings={orchestrationWarnings} />
 
           {copilot.isLoadingSuggestions ? (
             <div className="sf-host-copilot-skeleton" aria-label="suggestions loading skeleton">
@@ -250,6 +258,9 @@ export function CopilotPanel({ conversationId, copilot, disabled = false, onUseD
               <div className="sf-host-copilot-generated-meta" aria-label="Generated reply metadata">
                 {copilot.generatedReply?.providerMetadata?.providerName ? <span>{copilot.generatedReply.providerMetadata.providerName}</span> : null}
                 {copilot.generatedReplyTone ? <span>Tone {copilot.generatedReplyTone}</span> : null}
+                {copilot.detectedIntent ? <span>Intent {formatIntent(copilot.detectedIntent)}</span> : null}
+                {copilot.fallbackUsed ? <span className="sf-host-copilot-status-pill">Safe fallback used</span> : null}
+                {copilot.requiresHumanReview ? <span className="sf-host-copilot-status-pill review">Review required</span> : null}
                 {copilot.generatedReply?.generatedAt ? <span>{formatTimestamp(copilot.generatedReply.generatedAt)}</span> : null}
                 {copilot.generatedReply?.confidence?.level ? <span>{formatConfidenceLine(copilot.generatedReply.confidence)}</span> : null}
               </div>
@@ -265,6 +276,7 @@ export function CopilotPanel({ conversationId, copilot, disabled = false, onUseD
 
               <CopilotConfidenceCard confidence={copilot.generatedReply?.confidence} ariaLabel="Generated reply confidence" compact />
               <WarningList warnings={dedupeWarnings(copilot.generatedReply?.warnings ?? [])} />
+              <OrchestrationWarningList warnings={dedupeOrchestrationWarnings(copilot.generatedReply?.orchestrationWarnings ?? [])} />
 
               <div className="sf-host-copilot-actions sf-host-copilot-generated-actions">
                 <button
@@ -321,6 +333,28 @@ export function CopilotPanel({ conversationId, copilot, disabled = false, onUseD
         </CopilotDisclosure>
       </div>
     </section>
+  );
+}
+
+function CopilotStatusMeta({
+  detectedIntent,
+  fallbackUsed,
+  requiresHumanReview
+}: {
+  detectedIntent: string | null;
+  fallbackUsed: boolean;
+  requiresHumanReview: boolean;
+}) {
+  if (!detectedIntent && !fallbackUsed && !requiresHumanReview) {
+    return null;
+  }
+
+  return (
+    <div className="sf-host-copilot-status-meta" aria-label="Orchestration status">
+      {detectedIntent ? <span>Detected intent: {formatIntent(detectedIntent)}</span> : null}
+      {fallbackUsed ? <span className="sf-host-copilot-status-pill">Safe fallback used</span> : null}
+      {requiresHumanReview ? <span className="sf-host-copilot-status-pill review">Review required</span> : null}
+    </div>
   );
 }
 
@@ -438,6 +472,23 @@ function WarningList({ warnings }: { warnings: CopilotContextWarning[] }) {
   );
 }
 
+function OrchestrationWarningList({ warnings }: { warnings: CopilotOrchestrationWarning[] }) {
+  if (warnings.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="sf-host-copilot-warning-box orchestration" aria-label="Orchestration warnings" role="status">
+      <h5>Review notes</h5>
+      <ul className="sf-host-copilot-warnings">
+        {warnings.map((warning) => (
+          <li key={`${warning.code}-${warning.message}`}>{warning.message}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function dedupeWarnings(warnings: CopilotContextWarning[]): CopilotContextWarning[] {
   const seen = new Set<CopilotContextWarning>();
   const output: CopilotContextWarning[] = [];
@@ -448,6 +499,23 @@ function dedupeWarnings(warnings: CopilotContextWarning[]): CopilotContextWarnin
     }
 
     seen.add(warning);
+    output.push(warning);
+  }
+
+  return output;
+}
+
+function dedupeOrchestrationWarnings(warnings: CopilotOrchestrationWarning[]): CopilotOrchestrationWarning[] {
+  const seen = new Set<string>();
+  const output: CopilotOrchestrationWarning[] = [];
+
+  for (const warning of warnings) {
+    const key = `${warning.code}|${warning.message}`;
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
     output.push(warning);
   }
 
@@ -508,6 +576,15 @@ function formatTimestamp(value?: string | null): string {
     hour: "numeric",
     minute: "2-digit"
   }).format(date);
+}
+
+function formatIntent(intent: string): string {
+  return intent
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/WiFi/g, "Wi-Fi")
+    .replace(/CheckIn/g, "Check-in")
+    .replace(/Checkout/g, "Check-out")
+    .trim();
 }
 
 async function copyToClipboard(text: string): Promise<boolean> {

@@ -9,6 +9,13 @@ public sealed class CopilotSourceDto
     public DateTimeOffset? LastUpdated { get; init; }
 }
 
+public sealed class CopilotOrchestrationWarningDto
+{
+    public string Code { get; init; } = string.Empty;
+    public string Message { get; init; } = string.Empty;
+    public string Severity { get; init; } = "warning";
+}
+
 public sealed class CopilotConfidenceDto
 {
     public int Score { get; init; }
@@ -35,9 +42,14 @@ public sealed class ConversationCopilotSuggestionsResponse
     public Guid ConversationId { get; init; }
     public IReadOnlyCollection<string> SuggestedReplies { get; init; } = [];
     public int ContextMessageCount { get; init; }
+    public string? DetectedIntent { get; init; }
     public CopilotConfidenceDto? Confidence { get; init; }
     public IReadOnlyCollection<CopilotSourceDto> Sources { get; init; } = [];
     public IReadOnlyCollection<string> Warnings { get; init; } = [];
+    public IReadOnlyCollection<CopilotOrchestrationWarningDto> OrchestrationWarnings { get; init; } = [];
+    public string? Provider { get; init; }
+    public bool IsMock { get; init; }
+    public bool FallbackUsed { get; init; }
     public bool ContextTruncated { get; init; }
     public DateTimeOffset GeneratedAt { get; init; }
 }
@@ -45,6 +57,8 @@ public sealed class ConversationCopilotSuggestionsResponse
 public sealed class CopilotSuggestReplyRequest
 {
     public string? Guidance { get; init; }
+    public string? Tone { get; init; }
+    public string? HostDraft { get; init; }
     public bool IncludeInternalNotes { get; init; }
     public int MaxContextMessages { get; init; } = 12;
 }
@@ -60,13 +74,20 @@ public sealed class CopilotSuggestReplyResponse
 {
     public Guid ConversationId { get; init; }
     public string SuggestedReply { get; init; } = string.Empty;
+    public string? Tone { get; init; }
+    public string? DetectedIntent { get; init; }
     public string? Rationale { get; init; }
     public int ContextMessageCount { get; init; }
     public bool IsFallback { get; init; }
+    public bool FallbackUsed { get; init; }
+    public bool RequiresHumanReview { get; init; }
+    public string? Provider { get; init; }
+    public bool IsMock { get; init; }
     public CopilotProviderMetadataResponse? ProviderMetadata { get; init; }
     public CopilotConfidenceDto? Confidence { get; init; }
     public IReadOnlyCollection<CopilotSourceDto> Sources { get; init; } = [];
     public IReadOnlyCollection<string> Warnings { get; init; } = [];
+    public IReadOnlyCollection<CopilotOrchestrationWarningDto> OrchestrationWarnings { get; init; } = [];
     public bool ContextTruncated { get; init; }
     public DateTimeOffset GeneratedAt { get; init; }
 }

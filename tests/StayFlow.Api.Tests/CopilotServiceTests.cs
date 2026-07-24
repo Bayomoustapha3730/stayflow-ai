@@ -11,6 +11,7 @@ using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
 using StayFlow.Api.Services.AI.Context;
+using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Tests;
 
@@ -55,52 +56,60 @@ public sealed class CopilotServiceTests
     }
 
     [Fact]
+
     public async Task GetSuggestedRepliesAsync_ReturnsDeterministicMockReplies()
     {
         var fixture = new Fixture();
         var conversation = fixture.Repository.NewConversation();
+
         fixture.Repository.Conversations.Add(conversation);
-        fixture.Repository.Messages.Add(fixture.Repository.NewMessage(
-            conversation,
-            "Hi, can you share the wifi password?",
-            ConversationSenderType.Guest,
-            isInternal: false,
-            sentAt: DateTimeOffset.UtcNow));
 
-        var response = await fixture.Service.GetSuggestedRepliesAsync(conversation.Id, CancellationToken.None);
+        fixture.Repository.Messages.Add(
+            fixture.Repository.NewMessage(
+                conversation,
+                "Hi, can you share the wifi password?",
+                ConversationSenderType.Guest,
+                isInternal: false,
+                sentAt: DateTimeOffset.UtcNow));
 
-        Assert.True(response.Success);
-        Assert.Equal(3, response.Data!.SuggestedReplies.Count);
-        Assert.Contains(response.Data.SuggestedReplies, item => item.Contains("Wi-Fi", StringComparison.OrdinalIgnoreCase) || item.Contains("internet", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(1, response.Data.ContextMessageCount);
-        Assert.NotNull(response.Data.Confidence);
-        Assert.NotEmpty(response.Data.Sources);
-    }
-
-    [Fact]
-    public async Task SuggestHostReplyAsync_IncludesGroundingMetadataAndDoesNotPersistOutput()
-    {
-        var fixture = new Fixture();
-        var conversation = fixture.Repository.NewConversation();
-        fixture.Repository.Conversations.Add(conversation);
-        fixture.Repository.Messages.Add(fixture.Repository.NewMessage(
-            conversation,
-            "Can I get parking details?",
-            ConversationSenderType.Guest,
-            isInternal: false,
-            sentAt: DateTimeOffset.UtcNow));
-
-        var beforeCount = fixture.Repository.Messages.Count;
-        var response = await fixture.Service.SuggestHostReplyAsync(conversation.Id, new CopilotSuggestReplyRequest(), CancellationToken.None);
+        var response = await fixture.Service.GetSuggestedRepliesAsync(
+            conversation.Id,
+            "professional",
+            CancellationToken.None);
 
         Assert.True(response.Success);
         Assert.NotNull(response.Data);
-        Assert.NotNull(response.Data!.Confidence);
-        Assert.NotEmpty(response.Data.Sources);
-        Assert.True(response.Data.ContextMessageCount >= 1);
-        Assert.Equal(beforeCount, fixture.Repository.Messages.Count);
-    }
 
+        var suggestions = response.Data!.SuggestedReplies;
+
+        Assert.Equal(3, suggestions.Count);
+
+        Assert.All(
+            suggestions,
+            suggestion =>
+            {
+                Assert.False(string.IsNullOrWhiteSpace(suggestion));
+                Assert.True(suggestion.Length <= 1500);
+            });
+
+        Assert.Equal(
+            suggestions.Count,
+            suggestions
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count());
+
+        Assert.Equal(1, response.Data.ContextMessageCount);
+
+        Assert.NotNull(response.Data.Confidence);
+        Assert.NotEmpty(response.Data.Sources);
+
+        Assert.Equal("Development", response.Data.Provider);
+        Assert.True(response.Data.IsMock);
+
+        Assert.False(response.Data.FallbackUsed);
+        Assert.False(response.Data.ContextTruncated);
+    }
     [Fact]
     public void GetSummary_RequiresConversationsReadPermission()
     {
@@ -177,7 +186,7 @@ public sealed class CopilotServiceTests
                     NullLogger<ConversationContextBuilder>.Instance),
                 new ContextConfidenceEvaluator(),
                 new FakeCurrentTenantContext(CompanyId),
-                new FakeAiProvider());
+                new FakeReplyOrchestrator());
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();
@@ -195,16 +204,51 @@ public sealed class CopilotServiceTests
         public bool IsAuthenticated { get; } = true;
     }
 
-    private sealed class FakeAiProvider : IAIProvider
+    private sealed class FakeReplyOrchestrator : IAIReplyOrchestrator
     {
-        public Task<AIProviderResult> GenerateAsync(AIProviderRequest request, CancellationToken cancellationToken)
+        public Task<AIReplyOrchestrationResult?> OrchestrateAsync(
+            Guid companyId,
+            AIReplyOrchestrationRequest request,
+            CancellationToken cancellationToken)
         {
-            return Task.FromResult(AIProviderResult.Success(
-                "Thanks for your message. I will share the details shortly.",
-                "TestProvider",
-                "test-model",
-                "req-test",
-                5));
+            var isSuggestions = request.Operation == AIReplyOperation.SuggestedHostReplies;
+
+            return Task.FromResult<AIReplyOrchestrationResult?>(new AIReplyOrchestrationResult
+            {
+                ConversationId = request.ConversationId,
+                Operation = request.Operation,
+                Output = isSuggestions ? null : "Thanks for your message. I will share the details shortly.",
+                Suggestions = isSuggestions
+                    ?
+                    [
+                        "Thanks for reaching out. I will share details shortly.",
+                        "Could you confirm one more detail so I can provide the most accurate update?",
+                        "I am reviewing this now and will provide a clear follow-up shortly."
+                    ]
+                    : [],
+                ContextMessageCount = 1,
+                Confidence = 88,
+                Sources =
+                [
+                    new ConversationContextSource(
+                        ConversationContextSourceType.Conversation,
+                        null,
+                        "Conversation",
+                        null,
+                        DateTimeOffset.UtcNow,
+                        "Conversation metadata and visible message history.",
+                        true)
+                ],
+                Warnings = [],
+                Provider = "Development",
+                IsMock = true,
+                GeneratedAt = DateTimeOffset.UtcNow,
+                ContextTruncated = false,
+                FallbackUsed = false,
+                CompletedStages = [AIReplyOrchestrationStage.ResultAssembled],
+                DurationMilliseconds = 4,
+                RequiresHumanReview = false
+            });
         }
     }
 

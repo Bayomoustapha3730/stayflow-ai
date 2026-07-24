@@ -46,6 +46,12 @@ public static class ServiceCollectionExtensions
         services.AddOptions<Services.OpenAIOptions>()
             .Bind(configuration.GetSection(Services.OpenAIOptions.SectionName))
             .ValidateOnStart();
+        services.AddOptions<Services.AI.Orchestration.AIReplyOrchestratorOptions>()
+            .Bind(configuration.GetSection(Services.AI.Orchestration.AIReplyOrchestratorOptions.SectionName))
+            .Validate(options => options.ProviderTimeoutSeconds is >= 3 and <= 60, "AI reply orchestrator timeout must be between 3 and 60 seconds.")
+            .Validate(options => options.MaximumSelectedKnowledgeItems is >= 1 and <= 8, "AI reply orchestrator selected knowledge item limit must be between 1 and 8.")
+            .Validate(options => options.MaximumSelectedKnowledgeCharacters is >= 1000 and <= 30000, "AI reply orchestrator selected knowledge character limit must be between 1000 and 30000.")
+            .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.OpenAIOptions>, Services.OpenAIOptionsValidator>();
         services.AddScoped<Services.ICurrentTenantContext, Services.CurrentTenantContext>();
         services.AddScoped<Repositories.ICompanyRepository, Repositories.CompanyRepository>();
@@ -65,6 +71,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IConversationAIExchangeService, Services.ConversationAIExchangeService>();
         services.AddScoped<Services.AI.Context.IConversationContextBuilder, Services.AI.Context.ConversationContextBuilder>();
         services.AddSingleton<Services.AI.Context.IContextConfidenceEvaluator, Services.AI.Context.ContextConfidenceEvaluator>();
+        services.AddSingleton<Services.AI.Intent.IGuestIntentDetector, Services.AI.Intent.GuestIntentDetector>();
+        services.AddSingleton<Services.AI.Retrieval.IPropertyKnowledgeRanker, Services.AI.Retrieval.PropertyKnowledgeRanker>();
+        services.AddSingleton<Services.AI.Validation.IAIReplyOutputValidator, Services.AI.Validation.AIReplyOutputValidator>();
+        services.AddSingleton<Services.AI.Safety.IAIReplySafetyEvaluator, Services.AI.Safety.AIReplySafetyEvaluator>();
+        services.AddSingleton<Services.AI.Orchestration.IAIReplyFallbackProvider, Services.AI.Orchestration.AIReplyFallbackProvider>();
+        services.AddScoped<Services.AI.Orchestration.IAIReplyOrchestrator, Services.AI.Orchestration.AIReplyOrchestrator>();
         services.AddScoped<Services.ICopilotService, Services.CopilotService>();
         services.AddScoped<Services.IConversationRealtimePublisher, Services.ConversationRealtimePublisher>();
         services.AddScoped<Services.IChatService, Services.ChatService>();
