@@ -66,10 +66,12 @@ public sealed class CopilotController(ICopilotService copilotService) : Controll
         StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ApiResponse<ConversationCopilotSuggestionsResponse>>> GetSuggestedReplies(
         Guid conversationId,
+        [FromQuery] string? tone,
         CancellationToken cancellationToken)
     {
         var response = await copilotService.GetSuggestedRepliesAsync(
             conversationId,
+            tone,
             cancellationToken);
 
         return response.Success ? Ok(response) : ToFailureResult(response);

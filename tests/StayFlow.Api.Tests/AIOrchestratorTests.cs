@@ -674,6 +674,19 @@ public sealed class AIOrchestratorTests
                 RenderedMessages = [new AIPromptMessage { Role = "user", Content = request.GuestQuestion }]
             };
         }
+
+        public AIPromptPackage BuildReply(AIReplyPromptBuildRequest request)
+        {
+            WasCalled = true;
+            return new AIPromptPackage
+            {
+                SystemInstructions = "system secret",
+                GuestMessage = request.ConversationContext.VisibleMessages.LastOrDefault()?.Text ?? string.Empty,
+                PreferredLanguage = "en",
+                ResponseConstraints = new AIResponseConstraints { PropertyAccessRestricted = false },
+                RenderedMessages = [new AIPromptMessage { Role = "user", Content = "reply prompt" }]
+            };
+        }
     }
 
     private sealed class FakeProvider : IAIProvider

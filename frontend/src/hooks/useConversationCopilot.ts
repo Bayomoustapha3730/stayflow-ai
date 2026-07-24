@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, HttpClient, createHostCopilotApi } from "../api";
 import type {
+  CopilotOrchestrationWarning,
   CopilotContextWarning,
   ConversationCopilotSuggestionsResponse,
   ConversationCopilotSummaryResponse,
   CopilotSuggestReplyResponse,
   CopilotSuggestReplyRequest,
+  GuestIntent,
   CopilotTone,
   CopilotUrgency
 } from "../models/copilot";
@@ -23,6 +25,10 @@ export interface UseConversationCopilotResult {
   generatedReply: CopilotSuggestReplyResponse | null;
   generatedReplyDraft: string;
   generatedReplyTone: CopilotTone | null;
+  detectedIntent: GuestIntent | null;
+  fallbackUsed: boolean;
+  requiresHumanReview: boolean;
+  orchestrationWarnings: CopilotOrchestrationWarning[];
   tone: CopilotTone;
   isLoadingSummary: boolean;
   isLoadingSuggestions: boolean;
@@ -196,6 +202,8 @@ export function useConversationCopilot({
 
     try {
       const response = await api.suggestReply(conversationId, {
+        tone,
+        hostDraft: generatedReplyDraft,
         includeInternalNotes: false,
         maxContextMessages: 12,
         ...request
@@ -228,7 +236,15 @@ export function useConversationCopilot({
         setIsGeneratingReply(false);
       }
     }
-  }, [accessToken, api, conversationId, onUnauthorized, tone]);
+  }, [accessToken, api, conversationId, generatedReplyDraft, onUnauthorized, tone]);
+
+  const detectedIntent = generatedReply?.detectedIntent ?? suggestionMetadata?.detectedIntent ?? null;
+  const fallbackUsed = Boolean(generatedReply?.fallbackUsed ?? generatedReply?.isFallback ?? suggestionMetadata?.fallbackUsed ?? false);
+  const requiresHumanReview = Boolean(generatedReply?.requiresHumanReview ?? false);
+  const orchestrationWarnings = [
+    ...(suggestionMetadata?.orchestrationWarnings ?? []),
+    ...(generatedReply?.orchestrationWarnings ?? [])
+  ];
 
   const clearGeneratedReply = useCallback(() => {
     setGeneratedReply(null);
@@ -278,6 +294,10 @@ export function useConversationCopilot({
     generatedReply,
     generatedReplyDraft,
     generatedReplyTone,
+    detectedIntent,
+    fallbackUsed,
+    requiresHumanReview,
+    orchestrationWarnings,
     tone,
     isLoadingSummary,
     isLoadingSuggestions,
