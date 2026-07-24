@@ -36,7 +36,8 @@ builder.Services.AddCors(options =>
                            StringComparison.OrdinalIgnoreCase);
             })
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
@@ -77,7 +78,8 @@ app.UseAuthorization();
 app.UseMiddleware<PermissionAuthorizationMiddleware>();
 
 app.MapControllers();
-app.MapHub<ConversationHub>("/hubs/conversations");
+app.MapHub<ConversationHub>("/hubs/conversations")
+.RequireCors("StayFlowFrontendDevelopment");
 app.MapHealthChecks("/health");
 
 app.Run();
