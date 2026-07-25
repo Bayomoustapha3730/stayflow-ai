@@ -106,6 +106,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IWhatsAppWebhookSignatureVerifier, Services.WhatsAppWebhookSignatureVerifier>();
         services.AddHostedService<Services.WhatsAppWebhookBackgroundService>();
         services.AddScoped<Services.IWhatsAppWebhookProcessor, Services.WhatsAppWebhookProcessor>();
+        services.AddScoped<Services.IWhatsAppCredentialResolver, Services.WhatsAppCredentialResolver>();
+        services.AddScoped<Services.IWhatsAppIntegrationHealthService, Services.WhatsAppIntegrationHealthService>();
+        services.AddScoped<Services.IWhatsAppTemplateService, Services.WhatsAppTemplateService>();
+        services.AddScoped<Services.IWhatsAppCustomerServiceWindowEvaluator, Services.WhatsAppCustomerServiceWindowEvaluator>();
+        services.AddSingleton<Services.IWhatsAppTemplateVariableValidator, Services.WhatsAppTemplateVariableValidator>();
         services.AddScoped<Services.IChatService, Services.ChatService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();

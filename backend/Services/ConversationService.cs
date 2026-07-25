@@ -826,8 +826,14 @@ public sealed class ConversationService(
             DeliveredAt = message.DeliveredAt,
             ReadAt = message.ReadAt,
             FailedAt = message.FailedAt,
-            FailureCode = message.FailureCode,
-            FailureReason = message.FailureReason,
+            FailureCode = null,
+            FailureReason = null,
+            SafeFailureSummary = message.FailureReason,
+            IsTemplateMessage = message.IsTemplateMessage,
+            WhatsAppTemplateId = message.WhatsAppTemplateId,
+            TemplateName = message.TemplateName,
+            TemplateLanguageCode = message.TemplateLanguageCode,
+            TemplateRenderedPreview = message.TemplateRenderedPreview,
             SentAt = message.SentAt
         };
     }
@@ -940,7 +946,7 @@ public sealed class ConversationService(
                     || !string.Equals(message.FailureReason, NormalizeIdentity(failureReason), StringComparison.Ordinal);
                 message.FailedAt = occurredAt;
                 message.FailureCode = NormalizeIdentity(failureCode);
-                message.FailureReason = NormalizeIdentity(failureReason);
+                message.FailureReason = NormalizeIdentity(MapSafeFailureSummary(failureCode, failureReason));
                 break;
             default:
                 break;
@@ -960,6 +966,34 @@ public sealed class ConversationService(
             ConversationMessageDeliveryStatus.Failed => 4,
             _ => 0
         };
+    }
+
+    private static string MapSafeFailureSummary(string? failureCode, string? failureReason)
+    {
+        var normalizedCode = NormalizeIdentity(failureCode)?.ToLowerInvariant();
+        var normalizedReason = NormalizeIdentity(failureReason)?.ToLowerInvariant() ?? string.Empty;
+
+        if (normalizedCode is "429" or "rate_limited" || normalizedReason.Contains("rate"))
+        {
+            return "WhatsApp is rate limited. Try again shortly.";
+        }
+
+        if (normalizedCode is "401" or "403" || normalizedReason.Contains("auth"))
+        {
+            return "WhatsApp sending is unavailable. Contact an administrator.";
+        }
+
+        if (normalizedCode is "404" or "invalid_recipient" || normalizedReason.Contains("recipient") || normalizedReason.Contains("destination"))
+        {
+            return "This WhatsApp recipient is unavailable.";
+        }
+
+        if (normalizedCode is "408" or "502" or "503" or "504" || normalizedReason.Contains("timeout") || normalizedReason.Contains("temporar"))
+        {
+            return "WhatsApp is temporarily unavailable. Try again.";
+        }
+
+        return "WhatsApp could not deliver this message.";
     }
 
     private static bool IsHostAttentionConversation(Conversation conversation)

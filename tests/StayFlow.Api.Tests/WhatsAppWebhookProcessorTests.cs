@@ -198,25 +198,158 @@ public sealed class WhatsAppWebhookProcessorTests
     private sealed class FakeWhatsAppRepository : IWhatsAppRepository
     {
         public WhatsAppIntegration? Integration { get; set; }
+        public List<WhatsAppIntegration> Integrations { get; } = [];
+        public List<WhatsAppTemplate> Templates { get; } = [];
         public List<Guest> Guests { get; } = [];
         public List<Reservation> Reservations { get; } = [];
         public List<ConversationMessage> Messages { get; } = [];
         public List<AuditLog> AuditLogs { get; } = [];
 
+        private IEnumerable<WhatsAppIntegration> ScopedIntegrations
+        {
+            get
+            {
+                if (Integration is null)
+                {
+                    return Integrations;
+                }
+
+                return Integrations.Any(item => item.Id == Integration.Id)
+                    ? Integrations
+                    : [.. Integrations, Integration];
+            }
+        }
+
         public Task<WhatsAppIntegration?> GetActiveIntegrationByPhoneNumberIdAsync(string phoneNumberId, CancellationToken cancellationToken)
-            => Task.FromResult(Integration?.PhoneNumberId == phoneNumberId ? Integration : null);
+            => Task.FromResult(ScopedIntegrations.FirstOrDefault(item => item.IsActive && item.PhoneNumberId == phoneNumberId));
 
         public Task<WhatsAppIntegration?> GetActiveIntegrationByCompanyIdAsync(Guid companyId, CancellationToken cancellationToken)
-            => Task.FromResult(Integration?.CompanyId == companyId ? Integration : null);
+            => Task.FromResult(ScopedIntegrations.FirstOrDefault(item => item.IsActive && item.CompanyId == companyId));
+
+        public Task<WhatsAppIntegration?> GetIntegrationForCompanyAsync(Guid companyId, Guid integrationId, CancellationToken cancellationToken)
+            => Task.FromResult(ScopedIntegrations.FirstOrDefault(item => item.CompanyId == companyId && item.Id == integrationId));
+
+        public Task<IReadOnlyCollection<WhatsAppIntegration>> ListIntegrationsForCompanyAsync(Guid companyId, CancellationToken cancellationToken)
+        {
+            IReadOnlyCollection<WhatsAppIntegration> items = ScopedIntegrations
+                .Where(item => item.CompanyId == companyId)
+                .OrderByDescending(item => item.IsActive)
+                .ThenBy(item => item.DisplayName)
+                .ToList();
+
+            return Task.FromResult(items);
+        }
+
+        public Task<PagedResult<WhatsAppTemplate>> ListTemplatesAsync(Guid companyId, Guid integrationId, WhatsAppTemplateListQuery query, CancellationToken cancellationToken)
+        {
+            var templates = Templates
+                .Where(item => item.CompanyId == companyId && item.WhatsAppIntegrationId == integrationId);
+
+            if (!string.IsNullOrWhiteSpace(query.Status))
+            {
+                var status = query.Status.Trim();
+                templates = templates.Where(item => item.Status == status);
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Language))
+            {
+                var language = query.Language.Trim();
+                templates = templates.Where(item => item.LanguageCode == language);
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Category))
+            {
+                var category = query.Category.Trim();
+                templates = templates.Where(item => item.Category == category);
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var search = query.Search.Trim();
+                templates = templates.Where(item =>
+                    item.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || item.BodyText.Contains(search, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (query.Active is { } active)
+            {
+                templates = templates.Where(item => item.IsActive == active);
+            }
+
+            if (query.ApprovedOnly == true)
+            {
+                templates = templates.Where(item => item.Status == "APPROVED");
+            }
+
+            var ordered = templates
+                .OrderBy(item => item.Name)
+                .ThenBy(item => item.LanguageCode)
+                .ToList();
+
+            var page = query.NormalizedPageNumber;
+            var pageSize = query.NormalizedPageSize;
+            var pagedItems = ordered
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+
+            return Task.FromResult(new PagedResult<WhatsAppTemplate>
+            {
+                Items = pagedItems,
+                PageNumber = page,
+                PageSize = pageSize,
+                TotalCount = ordered.Count
+            });
+        }
+
+        public Task<WhatsAppTemplate?> GetTemplateForCompanyAsync(Guid companyId, Guid integrationId, Guid templateId, CancellationToken cancellationToken)
+            => Task.FromResult(Templates.FirstOrDefault(item =>
+                item.CompanyId == companyId
+                && item.WhatsAppIntegrationId == integrationId
+                && item.Id == templateId));
+
+        public Task<WhatsAppTemplate?> GetTemplateByNameAsync(Guid companyId, Guid integrationId, string name, string languageCode, CancellationToken cancellationToken)
+            => Task.FromResult(Templates.FirstOrDefault(item =>
+                item.CompanyId == companyId
+                && item.WhatsAppIntegrationId == integrationId
+                && item.Name == name
+                && item.LanguageCode == languageCode));
+
+        public Task<IReadOnlyCollection<WhatsAppTemplate>> ListTemplatesForIntegrationAsync(Guid companyId, Guid integrationId, CancellationToken cancellationToken)
+        {
+            IReadOnlyCollection<WhatsAppTemplate> items = Templates
+                .Where(item => item.CompanyId == companyId && item.WhatsAppIntegrationId == integrationId)
+                .OrderBy(item => item.Name)
+                .ThenBy(item => item.LanguageCode)
+                .ToList();
+
+            return Task.FromResult(items);
+        }
+
+        public Task<ConversationMessage?> GetLatestInboundGuestWhatsAppMessageAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken)
+            => Task.FromResult(Messages
+                .Where(item => item.CompanyId == companyId
+                    && item.ConversationId == conversationId
+                    && !item.IsDeleted
+                    && item.Provider == ConversationMessageProvider.WhatsAppCloud
+                    && item.SenderType == ConversationSenderType.Guest)
+                .OrderByDescending(item => item.SentAt)
+                .FirstOrDefault());
 
         public Task<IReadOnlyCollection<Guest>> ListActiveGuestsWithPhoneAsync(Guid companyId, CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyCollection<Guest>>(Guests.Where(guest => guest.CompanyId == companyId && guest.IsActive).ToList());
+            => Task.FromResult<IReadOnlyCollection<Guest>>(Guests.Where(guest => guest.CompanyId == companyId && guest.IsActive && !guest.IsDeleted && guest.PhoneNumber != null).ToList());
 
         public Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsForGuestAsync(Guid companyId, Guid guestId, DateOnly currentDate, DateOnly upcomingThroughDate, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyCollection<Reservation>>(Reservations.Where(item => item.CompanyId == companyId && item.PrimaryGuestId == guestId).ToList());
 
         public Task<ConversationMessage?> FindMessageByProviderExternalIdAsync(Guid companyId, ConversationMessageProvider provider, string externalMessageId, CancellationToken cancellationToken)
             => Task.FromResult(Messages.FirstOrDefault(item => item.CompanyId == companyId && item.Provider == provider && item.ExternalMessageId == externalMessageId));
+
+        public Task AddTemplateAsync(WhatsAppTemplate template, CancellationToken cancellationToken)
+        {
+            Templates.Add(template);
+            return Task.CompletedTask;
+        }
 
         public Task AddAuditLogAsync(AuditLog auditLog, CancellationToken cancellationToken)
         {

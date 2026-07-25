@@ -21,6 +21,11 @@ public sealed class ConversationMessage : AuditableEntity
     public string? AIOutcome { get; set; }
     public string? FailureCategory { get; set; }
     public string? EscalationReason { get; set; }
+    public bool IsTemplateMessage { get; set; }
+    public Guid? WhatsAppTemplateId { get; set; }
+    public string? TemplateName { get; set; }
+    public string? TemplateLanguageCode { get; set; }
+    public string? TemplateRenderedPreview { get; set; }
     public bool IsInternal { get; set; }
     public DateTimeOffset SentAt { get; set; }
     public bool IsDeleted { get; set; }

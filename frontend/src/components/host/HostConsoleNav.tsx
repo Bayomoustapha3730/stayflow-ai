@@ -1,10 +1,11 @@
 interface HostConsoleNavProps {
   conversationsHref: string;
   propertyKnowledgeHref?: string | null;
-  current: "conversations" | "knowledge";
+  whatsappSettingsHref?: string | null;
+  current: "conversations" | "knowledge" | "settings";
 }
 
-export function HostConsoleNav({ conversationsHref, propertyKnowledgeHref, current }: HostConsoleNavProps) {
+export function HostConsoleNav({ conversationsHref, propertyKnowledgeHref, whatsappSettingsHref, current }: HostConsoleNavProps) {
   return (
     <nav className="sf-host-console-nav" aria-label="Host console navigation">
       <a className={current === "conversations" ? "active" : ""} href={conversationsHref}>
@@ -16,6 +17,13 @@ export function HostConsoleNav({ conversationsHref, propertyKnowledgeHref, curre
         </a>
       ) : (
         <span className="disabled" aria-disabled="true">Property Knowledge</span>
+      )}
+      {whatsappSettingsHref ? (
+        <a className={current === "settings" ? "active" : ""} href={whatsappSettingsHref}>
+          WhatsApp Settings
+        </a>
+      ) : (
+        <span className="disabled" aria-disabled="true">WhatsApp Settings</span>
       )}
     </nav>
   );

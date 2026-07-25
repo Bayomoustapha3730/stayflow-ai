@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Conversations;
+using StayFlow.Api.DTOs.WhatsApp;
 using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Controllers;
@@ -14,7 +15,9 @@ namespace StayFlow.Api.Controllers;
 [Route("conversations")]
 [Produces("application/json")]
 [Authorize]
-public sealed class ConversationsController(IConversationService conversationService) : ControllerBase
+public sealed class ConversationsController(
+    IConversationService conversationService,
+    IWhatsAppTemplateService whatsAppTemplateService) : ControllerBase
 {
     [HttpGet]
     [RequiresPermission("conversations.read")]
@@ -71,6 +74,32 @@ public sealed class ConversationsController(IConversationService conversationSer
         CancellationToken cancellationToken)
     {
         var response = await conversationService.AddHostMessageAsync(conversationId, request, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpGet("{conversationId:guid}/whatsapp/window")]
+    [RequiresPermission("conversations.read")]
+    [ProducesResponseType(typeof(ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>>> GetWhatsAppWindow(
+        Guid conversationId,
+        CancellationToken cancellationToken)
+    {
+        var response = await whatsAppTemplateService.GetCustomerServiceWindowStatusAsync(conversationId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("{conversationId:guid}/whatsapp/templates/{templateId:guid}/send")]
+    [RequiresPermission("conversations.reply")]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ConversationMessageResponse>>> SendWhatsAppTemplate(
+        Guid conversationId,
+        Guid templateId,
+        SendWhatsAppTemplateMessageRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await whatsAppTemplateService.SendTemplateMessageAsync(conversationId, templateId, request, cancellationToken);
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 

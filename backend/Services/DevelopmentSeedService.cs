@@ -20,6 +20,11 @@ public sealed class DevelopmentSeedService(
     private static readonly Guid DemoDemoReservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid DemoDemoRoleId = Guid.Parse("66666666-6666-6666-6666-666666666666");
     private static readonly Guid DemoWhatsAppIntegrationId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+    private static readonly Guid DemoTemplateWelcomeGuestId = Guid.Parse("88888888-8888-4888-8888-888888888881");
+    private static readonly Guid DemoTemplateBookingConfirmationId = Guid.Parse("88888888-8888-4888-8888-888888888882");
+    private static readonly Guid DemoTemplateLateCheckoutId = Guid.Parse("88888888-8888-4888-8888-888888888883");
+    private static readonly Guid DemoTemplateCheckinInstructionsId = Guid.Parse("88888888-8888-4888-8888-888888888884");
+    private static readonly Guid DemoTemplateCheckoutReminderId = Guid.Parse("88888888-8888-4888-8888-888888888885");
 
     private const string DemoUserEmail = "demo.user@stayflow.local";
     private const string DemoUserFullName = "Demo User";
@@ -42,6 +47,7 @@ public sealed class DevelopmentSeedService(
         await EnsureDemoReservationAsync(currentDate, cancellationToken);
         await EnsureDemoPropertyKnowledgeAsync(cancellationToken);
         await EnsureDemoWhatsAppIntegrationAsync(cancellationToken);
+        await EnsureDemoWhatsAppTemplatesAsync(cancellationToken);
         await EnsureDemoUserRoleAsync(demoUser.Id, role.Id, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -217,6 +223,121 @@ public sealed class DevelopmentSeedService(
         integration.WhatsAppBusinessAccountId = "demo-waba-id";
         integration.BusinessPhoneNumberMasked = "+1******0002";
         integration.IsActive = true;
+    }
+
+    private async Task EnsureDemoWhatsAppTemplatesAsync(CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsRelational())
+        {
+            var pendingMigrations = await dbContext.Database.GetPendingMigrationsAsync(cancellationToken);
+            if (pendingMigrations.Any(migration => migration.Contains("AddWhatsAppProductionTemplates", StringComparison.Ordinal)))
+            {
+                return;
+            }
+        }
+
+        var seededTemplates = new[]
+        {
+            new
+            {
+                Id = DemoTemplateWelcomeGuestId,
+                Name = "welcome_guest",
+                LanguageCode = "en",
+                Category = "UTILITY",
+                Status = "APPROVED",
+                HeaderType = "TEXT",
+                BodyText = "Hello {{1}}, welcome to StayFlow. Your stay starts on {{2}}.",
+                FooterText = "StayFlow Concierge",
+                VariableCount = 2
+            },
+            new
+            {
+                Id = DemoTemplateBookingConfirmationId,
+                Name = "booking_confirmation",
+                LanguageCode = "fr",
+                Category = "UTILITY",
+                Status = "APPROVED",
+                HeaderType = "TEXT",
+                BodyText = "Bonjour {{1}}, votre reservation {{2}} est confirmee.",
+                FooterText = "StayFlow Concierge",
+                VariableCount = 2
+            },
+            new
+            {
+                Id = DemoTemplateLateCheckoutId,
+                Name = "late_checkout",
+                LanguageCode = "en",
+                Category = "MARKETING",
+                Status = "PENDING",
+                HeaderType = (string?)null,
+                BodyText = "Late checkout request for {{1}} is under review.",
+                FooterText = (string?)null,
+                VariableCount = 1
+            },
+            new
+            {
+                Id = DemoTemplateCheckinInstructionsId,
+                Name = "checkin_instructions",
+                LanguageCode = "es",
+                Category = "AUTHENTICATION",
+                Status = "APPROVED",
+                HeaderType = "TEXT",
+                BodyText = "Hola {{1}}, usa el codigo {{2}} para el check-in.",
+                FooterText = "StayFlow Concierge",
+                VariableCount = 2
+            },
+            new
+            {
+                Id = DemoTemplateCheckoutReminderId,
+                Name = "checkout_reminder",
+                LanguageCode = "en",
+                Category = "UTILITY",
+                Status = "REJECTED",
+                HeaderType = (string?)null,
+                BodyText = "Reminder: checkout is at {{1}}.",
+                FooterText = (string?)null,
+                VariableCount = 1
+            }
+        };
+
+        foreach (var item in seededTemplates)
+        {
+            // Upsert by tenant + integration + template identity so reruns are deterministic and duplicate-safe.
+            var template = await dbContext.WhatsAppTemplates
+                .FirstOrDefaultAsync(t =>
+                    t.CompanyId == SeedData.DemoCompanyId
+                    && t.WhatsAppIntegrationId == DemoWhatsAppIntegrationId
+                    && t.Name == item.Name
+                    && t.LanguageCode == item.LanguageCode,
+                    cancellationToken);
+
+            if (template is null)
+            {
+                template = await dbContext.WhatsAppTemplates
+                    .FirstOrDefaultAsync(t => t.Id == item.Id, cancellationToken);
+            }
+
+            if (template is null)
+            {
+                template = new WhatsAppTemplate { Id = item.Id };
+                dbContext.WhatsAppTemplates.Add(template);
+            }
+
+            template.CompanyId = SeedData.DemoCompanyId;
+            template.WhatsAppIntegrationId = DemoWhatsAppIntegrationId;
+            template.ExternalTemplateId = $"dev-seeded-{item.Name}-{item.LanguageCode}";
+            template.Name = item.Name;
+            template.LanguageCode = item.LanguageCode;
+            template.Category = item.Category;
+            template.Status = item.Status;
+            template.HeaderType = item.HeaderType;
+            template.BodyText = item.BodyText;
+            template.FooterText = item.FooterText;
+            template.VariableCount = item.VariableCount;
+            template.ComponentsJson = "{\"source\":\"development-seed\"}";
+            template.LastSyncedAt = DateTimeOffset.UtcNow;
+            template.IsActive = true;
+        }
     }
 
     private async Task<Role> GetOrCreateDemoRoleAsync(CancellationToken cancellationToken)

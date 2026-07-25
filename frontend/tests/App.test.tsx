@@ -15,6 +15,10 @@ vi.mock("../src/pages/PropertyKnowledgePage", () => ({
   )
 }));
 
+vi.mock("../src/pages/WhatsAppSettingsPage", () => ({
+  WhatsAppSettingsPage: () => <div data-testid="whatsapp-settings-page">whatsapp-settings</div>
+}));
+
 import App from "../src/App";
 
 describe("App routing", () => {
@@ -41,6 +45,14 @@ describe("App routing", () => {
     render(<App />);
 
     expect(screen.getByTestId("property-knowledge-page")).toHaveTextContent("22222222-2222-4222-8222-222222222222");
+  });
+
+  it("renders the WhatsApp settings page for host settings route", () => {
+    window.history.pushState({}, "", "/host/settings/whatsapp");
+
+    render(<App />);
+
+    expect(screen.getByTestId("whatsapp-settings-page")).toBeInTheDocument();
   });
 
   it("passes a null property ID when no valid demo fallback is configured", () => {

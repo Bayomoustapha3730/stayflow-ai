@@ -38,8 +38,14 @@ public sealed class ConversationChannelDispatcher(
                 DeliveredAt = message.DeliveredAt,
                 ReadAt = message.ReadAt,
                 FailedAt = message.FailedAt,
-                FailureCode = message.FailureCode,
-                FailureReason = message.FailureReason,
+                FailureCode = null,
+                FailureReason = null,
+                SafeFailureSummary = message.FailureReason,
+                IsTemplateMessage = message.IsTemplateMessage,
+                WhatsAppTemplateId = message.WhatsAppTemplateId,
+                TemplateName = message.TemplateName,
+                TemplateLanguageCode = message.TemplateLanguageCode,
+                TemplateRenderedPreview = message.TemplateRenderedPreview,
                 SentAt = message.SentAt
             },
             timestamp = DateTimeOffset.UtcNow
