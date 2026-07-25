@@ -301,6 +301,16 @@ public sealed class CopilotServiceTests
             return Task.FromResult(Conversations.FirstOrDefault(conversation => conversation.CompanyId == requestedCompanyId && conversation.Id == conversationId));
         }
 
+        public Task<ConversationMessage?> GetMessageForConversationAsync(Guid requestedCompanyId, Guid conversationId, Guid messageId, CancellationToken cancellationToken)
+        {
+            var message = Messages.FirstOrDefault(item =>
+                item.CompanyId == requestedCompanyId
+                && item.ConversationId == conversationId
+                && item.Id == messageId);
+
+            return Task.FromResult(message);
+        }
+
         public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
             => throw new NotImplementedException();
 

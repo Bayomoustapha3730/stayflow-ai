@@ -422,11 +422,62 @@ public sealed class ConversationServiceTests
         Assert.Equal(fixture.User.Id, readState.ParticipantId);
     }
 
+    [Fact]
+    public async Task GetMessageForConversationAsync_ReturnsMessageOnlyWhenCompanyConversationAndMessageMatch()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        var message = fixture.Repository.NewMessage(conversation, "Failed outbound", ConversationSenderType.Host);
+        fixture.Repository.Messages.Add(message);
+
+        var found = await fixture.Repository.GetMessageForConversationAsync(fixture.CompanyId, conversation.Id, message.Id, CancellationToken.None);
+        var wrongCompany = await fixture.Repository.GetMessageForConversationAsync(Guid.NewGuid(), conversation.Id, message.Id, CancellationToken.None);
+        var wrongConversation = await fixture.Repository.GetMessageForConversationAsync(fixture.CompanyId, Guid.NewGuid(), message.Id, CancellationToken.None);
+        var wrongMessage = await fixture.Repository.GetMessageForConversationAsync(fixture.CompanyId, conversation.Id, Guid.NewGuid(), CancellationToken.None);
+
+        Assert.NotNull(found);
+        Assert.Equal(message.Id, found!.Id);
+        Assert.Null(wrongCompany);
+        Assert.Null(wrongConversation);
+        Assert.Null(wrongMessage);
+    }
+
+    [Fact]
+    public async Task UpdateMessageDeliveryStatusAsync_PublishesDeliveryRealtimeEvent()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(humanTakeover: true);
+        conversation.Channel = GuestChannel.WhatsApp;
+        fixture.Repository.Conversations.Add(conversation);
+        var message = fixture.Repository.NewMessage(conversation, "Host reply", ConversationSenderType.Host);
+        message.Provider = ConversationMessageProvider.WhatsAppCloud;
+        message.DeliveryStatus = ConversationMessageDeliveryStatus.Pending;
+        fixture.Repository.Messages.Add(message);
+
+        var response = await fixture.Service.UpdateMessageDeliveryStatusAsync(
+            conversation.Id,
+            message.Id,
+            ConversationMessageDeliveryStatus.Sent,
+            DateTimeOffset.UtcNow,
+            failureCode: null,
+            failureReason: null,
+            CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(fixture.RealtimePublisher.DeliveryUpdates);
+        var deliveryEvent = fixture.RealtimePublisher.DeliveryUpdates.Single();
+        Assert.Equal(fixture.CompanyId, deliveryEvent.CompanyId);
+        Assert.Equal(conversation.Id, deliveryEvent.ConversationId);
+        Assert.NotNull(deliveryEvent.Payload);
+    }
+
     private sealed class Fixture
     {
         public Fixture(int maxMessageCharacters = 2000)
         {
             Repository = new FakeConversationRepository(CompanyId);
+            RealtimePublisher = new RecordingConversationRealtimePublisher();
             Guest = new Guest { Id = Guid.NewGuid(), CompanyId = CompanyId, FirstName = "Demo", LastName = "Guest", PreferredLanguage = "en", CountryCode = "KE", IsActive = true };
             Property = new Property { Id = Guid.NewGuid(), CompanyId = CompanyId, Name = "Demo", City = "Nairobi", CountryCode = "KE", AddressLine1 = "Road", TimeZone = "Africa/Nairobi", IsActive = true };
             Reservation = new Reservation { Id = Guid.NewGuid(), CompanyId = CompanyId, PropertyId = Property.Id, PrimaryGuestId = Guest.Id, Property = Property, PrimaryGuest = Guest, CheckInDate = new DateOnly(2026, 8, 1), CheckOutDate = new DateOnly(2026, 8, 4), IsActive = true };
@@ -439,7 +490,7 @@ public sealed class ConversationServiceTests
                 Repository,
                 new FakeCurrentTenantContext(CompanyId, User.Id),
                 new ConversationStatusTransitionPolicy(),
-                new NoOpConversationRealtimePublisher(),
+                RealtimePublisher,
                 new NoOpConversationChannelDispatcher(),
                 Options.Create(new ConversationOptions { MaxMessageCharacters = maxMessageCharacters, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
         }
@@ -450,6 +501,7 @@ public sealed class ConversationServiceTests
         public Reservation Reservation { get; }
         public User User { get; }
         public FakeConversationRepository Repository { get; }
+        public RecordingConversationRealtimePublisher RealtimePublisher { get; }
         public ConversationService Service { get; }
     }
 
@@ -527,6 +579,16 @@ public sealed class ConversationServiceTests
         public Task<Conversation?> GetByIdForCompanyAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
         {
             return Task.FromResult(Conversations.FirstOrDefault(conversation => conversation.CompanyId == requestedCompanyId && conversation.Id == conversationId));
+        }
+
+        public Task<ConversationMessage?> GetMessageForConversationAsync(Guid requestedCompanyId, Guid conversationId, Guid messageId, CancellationToken cancellationToken)
+        {
+            var message = Messages.FirstOrDefault(item =>
+                item.CompanyId == requestedCompanyId
+                && item.ConversationId == conversationId
+                && item.Id == messageId);
+
+            return Task.FromResult(message);
         }
 
         public Task<Conversation?> GetOpenConversationAsync(Guid requestedCompanyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
@@ -811,8 +873,10 @@ public sealed class ConversationServiceTests
         }
     }
 
-    private sealed class NoOpConversationRealtimePublisher : IConversationRealtimePublisher
+    private sealed class RecordingConversationRealtimePublisher : IConversationRealtimePublisher
     {
+        public List<(Guid CompanyId, Guid ConversationId, object Payload)> DeliveryUpdates { get; } = [];
+
         public Task PublishMessageCreatedAsync(Guid companyId, Guid conversationId, object payload, bool internalOnly, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishTypingStartedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
@@ -820,6 +884,12 @@ public sealed class ConversationServiceTests
         public Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
+        {
+            DeliveryUpdates.Add((companyId, conversationId, payload));
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher

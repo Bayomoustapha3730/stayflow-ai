@@ -9,4 +9,5 @@ public interface IConversationRealtimePublisher
     Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken);
     Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken);
     Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken);
+    Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken);
 }

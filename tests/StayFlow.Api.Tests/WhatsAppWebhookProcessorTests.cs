@@ -77,6 +77,20 @@ public sealed class WhatsAppWebhookProcessorTests
         Assert.Equal(ConversationMessageDeliveryStatus.Read, fixture.ConversationService.LastDeliveryStatus);
     }
 
+    [Fact]
+    public async Task FakeConversationService_RetryFailedMessageAsync_RecordsIdentifiers()
+    {
+        var service = new FakeConversationService(Guid.NewGuid());
+        var conversationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+
+        var result = await service.RetryFailedMessageAsync(conversationId, messageId, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(conversationId, service.RetriedConversationId);
+        Assert.Equal(messageId, service.RetriedMessageId);
+    }
+
     private static Reservation CreateReservation(Guid companyId, Guid propertyId, Guid guestId, DateOnly checkIn, DateOnly checkOut, ReservationStatus status)
     {
         return new Reservation
@@ -367,6 +381,11 @@ public sealed class WhatsAppWebhookProcessorTests
         public Task<Dictionary<Guid, int>> GetUnreadMessageCountsForHostAsync(Guid companyId, Guid hostUserId, IReadOnlyCollection<Guid> conversationIds, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<int> GetUnreadHostMessageCountForGuestAsync(Guid companyId, Guid guestId, Guid conversationId, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<Conversation?> GetByIdForCompanyAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ConversationMessage?> GetMessageForConversationAsync(Guid companyId, Guid conversationId, Guid messageId, CancellationToken cancellationToken)
+            => Task.FromResult(messages.FirstOrDefault(item =>
+                item.CompanyId == companyId
+                && item.ConversationId == conversationId
+                && item.Id == messageId));
         public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<PagedResult<ConversationMessage>> GetMessagesAsync(Guid companyId, Guid conversationId, ConversationHistoryQueryParameters query, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ConversationMessage?> GetLatestVisibleMessageAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken) => throw new NotImplementedException();
@@ -421,6 +440,17 @@ public sealed class WhatsAppWebhookProcessorTests
         public AddGuestMessageRequest? LastGuestMessageRequest { get; private set; }
         public bool HumanTakeoverEnabled { get; private set; }
         public ConversationMessageDeliveryStatus? LastDeliveryStatus { get; private set; }
+        public Guid? RetriedConversationId { get; private set; }
+        public Guid? RetriedMessageId { get; private set; }
+        public ApiResponse<ConversationMessageResponse> RetryResult { get; set; } = ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = Guid.Empty,
+            SenderType = ConversationSenderType.Host,
+            MessageType = ConversationMessageType.Text,
+            Content = "retry",
+            SentAt = DateTimeOffset.UtcNow
+        });
 
         public Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(ConversationListQueryParameters query, CancellationToken cancellationToken) => throw new NotImplementedException();
 
@@ -469,6 +499,12 @@ public sealed class WhatsAppWebhookProcessorTests
 
         public Task<ApiResponse<ConversationMessageResponse>> AddAIMessageAsync(Guid conversationId, string content, DTOs.AIOrchestration.AIOrchestrationResult result, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<ConversationMessageResponse>> AddHostMessageAsync(Guid conversationId, AddHostMessageRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ConversationMessageResponse>> RetryFailedMessageAsync(Guid currentConversationId, Guid messageId, CancellationToken cancellationToken)
+        {
+            RetriedConversationId = currentConversationId;
+            RetriedMessageId = messageId;
+            return Task.FromResult(RetryResult);
+        }
         public Task<ApiResponse<ConversationMessageResponse>> AddInternalNoteAsync(Guid conversationId, AddInternalNoteRequest request, CancellationToken cancellationToken) => Task.FromResult(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse { Id = Guid.NewGuid(), ConversationId = conversationId, SenderType = ConversationSenderType.System, MessageType = ConversationMessageType.InternalNote, Content = request.Content, IsInternal = true, SentAt = DateTimeOffset.UtcNow }));
 
         public Task<ApiResponse<ConversationMessageResponse>> UpdateMessageDeliveryStatusAsync(Guid currentConversationId, Guid messageId, ConversationMessageDeliveryStatus status, DateTimeOffset occurredAt, string? failureCode, string? failureReason, CancellationToken cancellationToken)

@@ -34,9 +34,13 @@ public sealed class ConversationService(
             Page = query.Page,
             PageSize = query.PageSize,
             Status = query.Status,
+            Channel = query.Channel,
+            ReadState = query.ReadState,
+            HasFailedOutboundMessage = query.HasFailedOutboundMessage,
             PropertyId = query.PropertyId,
             RequiresHostAttention = query.RequiresHostAttention,
-            Search = NormalizeIdentity(query.Search)
+            Search = NormalizeIdentity(query.Search),
+            HostUserId = currentTenantContext.UserId
         };
 
         var result = await conversationRepository.ListConversationsAsync(companyId, normalizedQuery, cancellationToken);
@@ -217,6 +221,97 @@ public sealed class ConversationService(
             cancellationToken);
     }
 
+    public async Task<ApiResponse<ConversationMessageResponse>> RetryFailedMessageAsync(Guid conversationId, Guid messageId, CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail(tenantError, [tenantError]);
+        }
+
+        var conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation was not found.");
+        }
+
+        var message = await conversationRepository.GetMessageForConversationAsync(companyId, conversationId, messageId, cancellationToken);
+        if (message is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation message was not found.");
+        }
+
+        if (conversation.Channel != DTOs.ReservationContext.GuestChannel.WhatsApp)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Retry is only available for WhatsApp conversations.");
+        }
+
+        if (conversation.Status == ConversationStatus.Closed)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation state does not allow this message.");
+        }
+
+        if (!conversation.HumanTakeoverEnabled)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Enable human takeover before sending a host reply.");
+        }
+
+        if (message.IsInternal || message.SenderType == ConversationSenderType.Guest || message.DeliveryStatus != ConversationMessageDeliveryStatus.Failed)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Only failed outbound WhatsApp messages can be retried.");
+        }
+
+        if (message.Provider != ConversationMessageProvider.WhatsAppCloud)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Only WhatsApp Cloud messages can be retried.");
+        }
+
+        if (!transitionPolicy.CanStoreMessage(conversation, ConversationSenderType.Host))
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation state does not allow this message.");
+        }
+
+        var retryMessage = new ConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            ConversationId = conversation.Id,
+            SenderType = ConversationSenderType.Host,
+            Content = message.Content,
+            MessageType = ConversationMessageType.Text,
+            Provider = ConversationMessageProvider.WhatsAppCloud,
+            DeliveryStatus = ConversationMessageDeliveryStatus.Pending,
+            RetryOfMessageId = message.Id,
+            SendAttemptNumber = Math.Max(1, message.SendAttemptNumber) + 1,
+            SentAt = DateTimeOffset.UtcNow,
+            IsInternal = false
+        };
+
+        conversation.LastActivityAt = retryMessage.SentAt;
+
+        await conversationRepository.AddMessageAsync(retryMessage, cancellationToken);
+        await AuditAsync(companyId, conversation.Id, "HostMessageRetryStored", conversation.Status, ConversationSenderType.Host, cancellationToken);
+        await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        await realtimePublisher.PublishMessageCreatedAsync(companyId, conversation.Id, new
+        {
+            conversationId = conversation.Id,
+            message = MapMessage(retryMessage, conversation),
+            isInternal = false,
+            timestamp = DateTimeOffset.UtcNow
+        }, false, cancellationToken);
+
+        await realtimePublisher.PublishConversationUnreadCountChangedAsync(companyId, new
+        {
+            conversationId = conversation.Id,
+            senderType = ConversationSenderType.Host.ToString(),
+            timestamp = DateTimeOffset.UtcNow
+        }, cancellationToken);
+
+        await conversationChannelDispatcher.DispatchOutboundMessageAsync(conversation, retryMessage, cancellationToken);
+
+        return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(retryMessage, conversation), "Conversation message retry sent successfully.");
+    }
+
     public async Task<ApiResponse<ConversationMessageResponse>> AddInternalNoteAsync(Guid conversationId, AddInternalNoteRequest request, CancellationToken cancellationToken)
     {
         return await AddMessageAsync(
@@ -254,7 +349,7 @@ public sealed class ConversationService(
             return ApiResponse<ConversationMessageResponse>.Fail("Conversation was not found.");
         }
 
-        var message = conversation.Messages.FirstOrDefault(item => item.Id == messageId);
+        var message = await conversationRepository.GetMessageForConversationAsync(companyId, conversation.Id, messageId, cancellationToken);
         if (message is null)
         {
             return ApiResponse<ConversationMessageResponse>.Fail("Conversation message was not found.");
@@ -262,14 +357,14 @@ public sealed class ConversationService(
 
         if (!TryApplyDeliveryStatus(message, status, occurredAt, failureCode, failureReason))
         {
-            return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Conversation message delivery status already reflects this event.");
+            return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message, conversation), "Conversation message delivery status already reflects this event.");
         }
 
         await AuditAsync(companyId, conversation.Id, "ConversationMessageDeliveryUpdated", conversation.Status, message.SenderType, cancellationToken);
         await conversationRepository.SaveChangesAsync(cancellationToken);
-        await PublishMessageUpdatedAsync(companyId, conversation.Id, message, cancellationToken);
+        await PublishMessageUpdatedAsync(companyId, conversation.Id, message, conversation, cancellationToken);
 
-        return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Conversation message delivery status updated successfully.");
+        return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message, conversation), "Conversation message delivery status updated successfully.");
     }
 
     public Task<ApiResponse<ConversationDetailResponse>> EscalateConversationAsync(Guid conversationId, EscalateConversationRequest request, CancellationToken cancellationToken)
@@ -448,6 +543,14 @@ public sealed class ConversationService(
             return ApiResponse<ConversationMessageResponse>.Fail("Conversation state does not allow this message.");
         }
 
+        if (senderType == ConversationSenderType.Host
+            && !isInternal
+            && conversation.Channel == DTOs.ReservationContext.GuestChannel.WhatsApp
+            && !conversation.HumanTakeoverEnabled)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Enable human takeover before sending a host reply.");
+        }
+
         var normalizedSentAt = (sentAt ?? DateTimeOffset.UtcNow).ToUniversalTime();
         var resolvedProvider = ResolveProvider(conversation, senderType, provider, isInternal);
         var message = new ConversationMessage
@@ -484,7 +587,7 @@ public sealed class ConversationService(
         await realtimePublisher.PublishMessageCreatedAsync(companyId, conversation.Id, new
         {
             conversationId = conversation.Id,
-            message = MapMessage(message),
+            message = MapMessage(message, conversation),
             isInternal,
             timestamp = DateTimeOffset.UtcNow
         }, isInternal, cancellationToken);
@@ -501,7 +604,7 @@ public sealed class ConversationService(
             await conversationChannelDispatcher.DispatchOutboundMessageAsync(conversation, message, cancellationToken);
         }
 
-        return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Conversation message stored successfully.");
+        return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message, conversation), "Conversation message stored successfully.");
     }
 
     private async Task<ApiResponse<ConversationDetailResponse>> TransitionAsync(Guid conversationId, ConversationStatus targetStatus, string auditAction, Action<Conversation> mutate, CancellationToken cancellationToken)
@@ -703,6 +806,14 @@ public sealed class ConversationService(
             errors.Add("PropertyId must be a valid identifier.");
         }
 
+        if (query.ReadState is not null)
+        {
+            if (query.HostUserId is not { } hostUserId || hostUserId == Guid.Empty)
+            {
+                errors.Add("ReadState filtering requires an authenticated host user context.");
+            }
+        }
+
         return errors;
     }
 
@@ -807,12 +918,30 @@ public sealed class ConversationService(
                     Id = conversation.AssignedUser.Id,
                     FullName = conversation.AssignedUser.FullName
                 },
-            Messages = conversation.Messages.Where(message => !message.IsInternal).OrderBy(message => message.SentAt).Select(MapMessage).ToList()
+            HasFailedOutboundMessage = conversation.Messages.Any(message =>
+                !message.IsInternal
+                && message.Provider == ConversationMessageProvider.WhatsAppCloud
+                && message.SenderType != ConversationSenderType.Guest
+                && message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed),
+            Messages = conversation.Messages
+                .Where(message => !message.IsInternal)
+                .OrderBy(message => message.SentAt)
+                .Select(message => MapMessage(message, conversation))
+                .ToList()
         };
     }
 
     private static ConversationMessageResponse MapMessage(ConversationMessage message)
     {
+        return MapMessage(message, null);
+    }
+
+    private static ConversationMessageResponse MapMessage(ConversationMessage message, Conversation? conversation)
+    {
+        var safeFailureSummary = message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed
+            ? WhatsAppFailureMapper.Map(message.FailureCode, message.FailureReason).Summary
+            : null;
+
         return new ConversationMessageResponse
         {
             Id = message.Id,
@@ -826,6 +955,7 @@ public sealed class ConversationService(
             DeliveredAt = message.DeliveredAt,
             ReadAt = message.ReadAt,
             FailedAt = message.FailedAt,
+<<<<<<< HEAD
             FailureCode = null,
             FailureReason = null,
             SafeFailureSummary = message.FailureReason,
@@ -834,18 +964,42 @@ public sealed class ConversationService(
             TemplateName = message.TemplateName,
             TemplateLanguageCode = message.TemplateLanguageCode,
             TemplateRenderedPreview = message.TemplateRenderedPreview,
+=======
+            SafeFailureSummary = safeFailureSummary,
+            RetryOfMessageId = message.RetryOfMessageId,
+            SendAttemptNumber = message.SendAttemptNumber,
+            CanRetry = CanRetryMessage(message, conversation),
+>>>>>>> origin/main
             SentAt = message.SentAt
         };
     }
 
-    private async Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, ConversationMessage message, CancellationToken cancellationToken)
+    private async Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, ConversationMessage message, Conversation conversation, CancellationToken cancellationToken)
     {
+        var safeFailureSummary = message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed
+            ? WhatsAppFailureMapper.Map(message.FailureCode, message.FailureReason).Summary
+            : null;
+
         await realtimePublisher.PublishMessageUpdatedAsync(companyId, conversationId, new
         {
             conversationId,
-            message = MapMessage(message),
+            message = MapMessage(message, conversation),
             timestamp = DateTimeOffset.UtcNow
         }, cancellationToken);
+
+        if (message.DeliveryStatus is not null)
+        {
+            await realtimePublisher.PublishMessageDeliveryUpdatedAsync(companyId, conversationId, new
+            {
+                conversationId,
+                messageId = message.Id,
+                deliveryStatus = message.DeliveryStatus,
+                deliveredAt = message.DeliveredAt,
+                readAt = message.ReadAt,
+                failedAt = message.FailedAt,
+                safeFailureSummary
+            }, cancellationToken);
+        }
     }
 
     private static ConversationMessageProvider ResolveProvider(Conversation conversation, ConversationSenderType senderType, ConversationMessageProvider requestedProvider, bool isInternal)
@@ -924,6 +1078,7 @@ public sealed class ConversationService(
                 message.FailedAt = null;
                 message.FailureCode = null;
                 message.FailureReason = null;
+                message.FailureCategory = null;
                 break;
             case ConversationMessageDeliveryStatus.Delivered:
                 changed |= message.DeliveredAt != occurredAt;
@@ -931,6 +1086,7 @@ public sealed class ConversationService(
                 message.FailedAt = null;
                 message.FailureCode = null;
                 message.FailureReason = null;
+                message.FailureCategory = null;
                 break;
             case ConversationMessageDeliveryStatus.Read:
                 changed |= message.ReadAt != occurredAt;
@@ -939,14 +1095,22 @@ public sealed class ConversationService(
                 message.FailedAt = null;
                 message.FailureCode = null;
                 message.FailureReason = null;
+                message.FailureCategory = null;
                 break;
             case ConversationMessageDeliveryStatus.Failed:
+                var mapped = WhatsAppFailureMapper.Map(failureCode, failureReason);
                 changed |= message.FailedAt != occurredAt
                     || !string.Equals(message.FailureCode, NormalizeIdentity(failureCode), StringComparison.Ordinal)
-                    || !string.Equals(message.FailureReason, NormalizeIdentity(failureReason), StringComparison.Ordinal);
+                    || !string.Equals(message.FailureReason, NormalizeIdentity(failureReason), StringComparison.Ordinal)
+                    || !string.Equals(message.FailureCategory, mapped.Category, StringComparison.Ordinal);
                 message.FailedAt = occurredAt;
                 message.FailureCode = NormalizeIdentity(failureCode);
+<<<<<<< HEAD
                 message.FailureReason = NormalizeIdentity(MapSafeFailureSummary(failureCode, failureReason));
+=======
+                message.FailureReason = NormalizeIdentity(failureReason);
+                message.FailureCategory = mapped.Category;
+>>>>>>> origin/main
                 break;
             default:
                 break;
@@ -961,13 +1125,14 @@ public sealed class ConversationService(
         {
             ConversationMessageDeliveryStatus.Pending => 0,
             ConversationMessageDeliveryStatus.Sent => 1,
-            ConversationMessageDeliveryStatus.Delivered => 2,
-            ConversationMessageDeliveryStatus.Read => 3,
-            ConversationMessageDeliveryStatus.Failed => 4,
+            ConversationMessageDeliveryStatus.Failed => 2,
+            ConversationMessageDeliveryStatus.Delivered => 3,
+            ConversationMessageDeliveryStatus.Read => 4,
             _ => 0
         };
     }
 
+<<<<<<< HEAD
     private static string MapSafeFailureSummary(string? failureCode, string? failureReason)
     {
         var normalizedCode = NormalizeIdentity(failureCode)?.ToLowerInvariant();
@@ -994,6 +1159,31 @@ public sealed class ConversationService(
         }
 
         return "WhatsApp could not deliver this message.";
+=======
+    private static bool CanRetryMessage(ConversationMessage message, Conversation? conversation)
+    {
+        if (message.IsInternal
+            || message.SenderType == ConversationSenderType.Guest
+            || message.Provider != ConversationMessageProvider.WhatsAppCloud
+            || message.DeliveryStatus != ConversationMessageDeliveryStatus.Failed)
+        {
+            return false;
+        }
+
+        if (conversation is null)
+        {
+            return true;
+        }
+
+        if (conversation.Channel != DTOs.ReservationContext.GuestChannel.WhatsApp
+            || conversation.Status == ConversationStatus.Closed
+            || !conversation.HumanTakeoverEnabled)
+        {
+            return false;
+        }
+
+        return true;
+>>>>>>> origin/main
     }
 
     private static bool IsHostAttentionConversation(Conversation conversation)
@@ -1031,6 +1221,7 @@ public sealed class ConversationService(
             LatestVisibleMessageSenderType = item.LatestVisibleMessageSenderType,
             LatestVisibleMessageTimestamp = item.LatestVisibleMessageTimestamp,
             TotalVisibleMessageCount = item.TotalVisibleMessageCount,
+            HasFailedOutboundMessage = item.HasFailedOutboundMessage,
             UnreadMessageCount = unreadCount,
             LastReadAt = lastReadAt
         };

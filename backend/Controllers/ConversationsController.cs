@@ -77,6 +77,7 @@ public sealed class ConversationsController(
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
+<<<<<<< HEAD
     [HttpGet("{conversationId:guid}/whatsapp/window")]
     [RequiresPermission("conversations.read")]
     [ProducesResponseType(typeof(ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>), StatusCodes.Status200OK)]
@@ -100,6 +101,18 @@ public sealed class ConversationsController(
         CancellationToken cancellationToken)
     {
         var response = await whatsAppTemplateService.SendTemplateMessageAsync(conversationId, templateId, request, cancellationToken);
+=======
+    [HttpPost("{conversationId:guid}/messages/{messageId:guid}/retry")]
+    [RequiresPermission("conversations.reply")]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ConversationMessageResponse>>> RetryMessage(
+        Guid conversationId,
+        Guid messageId,
+        CancellationToken cancellationToken)
+    {
+        var response = await conversationService.RetryFailedMessageAsync(conversationId, messageId, cancellationToken);
+>>>>>>> origin/main
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 

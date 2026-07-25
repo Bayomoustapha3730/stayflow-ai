@@ -59,9 +59,13 @@ public sealed class ConversationListQueryParameters : PaginationQuery
     public int Page { get; init; } = 1;
     public new int PageSize { get; init; } = 25;
     public ConversationStatus? Status { get; init; }
+    public GuestChannel? Channel { get; init; }
+    public ConversationReadStateFilter? ReadState { get; init; }
+    public bool? HasFailedOutboundMessage { get; init; }
     public Guid? PropertyId { get; init; }
     public bool? RequiresHostAttention { get; init; }
     public string? Search { get; init; }
+    public Guid? HostUserId { get; init; }
 
     public new int NormalizedPageSize => PageSize switch
     {
@@ -69,6 +73,12 @@ public sealed class ConversationListQueryParameters : PaginationQuery
         > MaxListPageSize => MaxListPageSize,
         _ => PageSize
     };
+}
+
+public enum ConversationReadStateFilter
+{
+    Unread = 0,
+    Read = 1
 }
 
 public sealed class ConversationListResponse
@@ -107,6 +117,7 @@ public class ConversationSummaryResponse
     public DateTimeOffset? LatestVisibleMessageTimestamp { get; init; }
     public int TotalVisibleMessageCount { get; init; }
     public int UnreadMessageCount { get; init; }
+    public bool HasFailedOutboundMessage { get; init; }
     public DateTimeOffset? LastReadAt { get; init; }
 }
 
@@ -132,6 +143,7 @@ public sealed class ConversationMessageResponse
     public DateTimeOffset? DeliveredAt { get; init; }
     public DateTimeOffset? ReadAt { get; init; }
     public DateTimeOffset? FailedAt { get; init; }
+<<<<<<< HEAD
     public string? FailureCode { get; init; }
     public string? FailureReason { get; init; }
     public string? SafeFailureSummary { get; init; }
@@ -140,6 +152,12 @@ public sealed class ConversationMessageResponse
     public string? TemplateName { get; init; }
     public string? TemplateLanguageCode { get; init; }
     public string? TemplateRenderedPreview { get; init; }
+=======
+    public string? SafeFailureSummary { get; init; }
+    public Guid? RetryOfMessageId { get; init; }
+    public int SendAttemptNumber { get; init; }
+    public bool CanRetry { get; init; }
+>>>>>>> origin/main
     public DateTimeOffset SentAt { get; init; }
 }
 

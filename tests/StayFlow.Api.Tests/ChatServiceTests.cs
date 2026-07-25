@@ -400,6 +400,16 @@ public sealed class ChatServiceTests
             return Task.FromResult(Conversations.FirstOrDefault(conversation => conversation.CompanyId == requestedCompanyId && conversation.Id == conversationId));
         }
 
+        public Task<ConversationMessage?> GetMessageForConversationAsync(Guid requestedCompanyId, Guid conversationId, Guid messageId, CancellationToken cancellationToken)
+        {
+            var message = Messages.FirstOrDefault(item =>
+                item.CompanyId == requestedCompanyId
+                && item.ConversationId == conversationId
+                && item.Id == messageId);
+
+            return Task.FromResult(message);
+        }
+
         public Task<Conversation?> GetOpenConversationAsync(Guid requestedCompanyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
         {
             return Task.FromResult(Conversations.FirstOrDefault(conversation =>
@@ -551,6 +561,7 @@ public sealed class ChatServiceTests
         public Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher
