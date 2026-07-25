@@ -2,7 +2,15 @@ import type { ConversationMessageType, ConversationSenderType, ConversationStatu
 import type { PagedResult } from "./chat";
 import type { ConversationMessageDeliveryStatus } from "./messageDelivery";
 
+export enum ConversationReadStateFilter {
+  Unread = 0,
+  Read = 1
+}
+
 export interface ConversationListQuery {
+  channel?: GuestChannel;
+  readState?: ConversationReadStateFilter;
+  hasFailedOutboundMessage?: boolean;
   status?: ConversationStatus;
   propertyId?: string;
   requiresHostAttention?: boolean;
@@ -45,6 +53,7 @@ export interface ConversationSummary {
   latestVisibleMessageTimestamp?: string | null;
   totalVisibleMessageCount: number;
   unreadMessageCount: number;
+  hasFailedOutboundMessage: boolean;
   lastReadAt?: string | null;
 }
 
@@ -68,8 +77,10 @@ export interface ConversationMessage {
   deliveredAt?: string | null;
   readAt?: string | null;
   failedAt?: string | null;
-  failureCode?: string | null;
-  failureReason?: string | null;
+  safeFailureSummary?: string | null;
+  retryOfMessageId?: string | null;
+  sendAttemptNumber?: number;
+  canRetry?: boolean;
   optimisticId?: string;
 }
 

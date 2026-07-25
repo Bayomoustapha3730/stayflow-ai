@@ -22,6 +22,11 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             conversationsQuery = conversationsQuery.Where(conversation => conversation.Status == status);
         }
 
+        if (query.Channel is { } channel)
+        {
+            conversationsQuery = conversationsQuery.Where(conversation => conversation.Channel == channel);
+        }
+
         if (query.PropertyId is { } propertyId)
         {
             conversationsQuery = conversationsQuery.Where(conversation => conversation.PropertyId == propertyId);
@@ -34,6 +39,47 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
                     || conversation.Status == ConversationStatus.AwaitingHost
                     || conversation.Status == ConversationStatus.Escalated
                     || conversation.Status == ConversationStatus.HumanManaged) == requiresHostAttention);
+        }
+
+        if (query.ReadState is { } readState && query.HostUserId is { } hostUserId && hostUserId != Guid.Empty)
+        {
+            conversationsQuery = readState switch
+            {
+                ConversationReadStateFilter.Unread => conversationsQuery.Where(conversation =>
+                    conversation.Messages.Any(message =>
+                        !message.IsInternal
+                        && !message.IsDeleted
+                        && message.SenderType == ConversationSenderType.Guest
+                        && !dbContext.ConversationParticipantReadStates.Any(state =>
+                            state.CompanyId == companyId
+                            && state.ParticipantKind == ConversationParticipantKind.HostUser
+                            && state.ParticipantId == hostUserId
+                            && state.ConversationId == conversation.Id
+                            && message.SentAt <= state.LastReadAt))),
+                ConversationReadStateFilter.Read => conversationsQuery.Where(conversation =>
+                    !conversation.Messages.Any(message =>
+                        !message.IsInternal
+                        && !message.IsDeleted
+                        && message.SenderType == ConversationSenderType.Guest
+                        && !dbContext.ConversationParticipantReadStates.Any(state =>
+                            state.CompanyId == companyId
+                            && state.ParticipantKind == ConversationParticipantKind.HostUser
+                            && state.ParticipantId == hostUserId
+                            && state.ConversationId == conversation.Id
+                            && message.SentAt <= state.LastReadAt))),
+                _ => conversationsQuery
+            };
+        }
+
+        if (query.HasFailedOutboundMessage is { } hasFailedOutboundMessage)
+        {
+            conversationsQuery = conversationsQuery.Where(conversation =>
+                conversation.Messages.Any(message =>
+                    !message.IsInternal
+                    && !message.IsDeleted
+                    && message.Provider == ConversationMessageProvider.WhatsAppCloud
+                    && message.SenderType != ConversationSenderType.Guest
+                    && message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed) == hasFailedOutboundMessage);
         }
 
         if (!string.IsNullOrWhiteSpace(query.Search))
@@ -134,6 +180,13 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
                     .Select(message => (DateTimeOffset?)message.SentAt)
                     .FirstOrDefault(),
                 TotalVisibleMessageCount = conversation.Messages.Count(message => !message.IsInternal && !message.IsDeleted)
+                ,
+                HasFailedOutboundMessage = conversation.Messages.Any(message =>
+                    !message.IsInternal
+                    && !message.IsDeleted
+                    && message.Provider == ConversationMessageProvider.WhatsAppCloud
+                    && message.SenderType != ConversationSenderType.Guest
+                    && message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed)
             })
             .ToListAsync(cancellationToken);
 
@@ -155,6 +208,14 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             .ThenInclude(property => property.PropertyKnowledgeArticles)
             .Include(conversation => conversation.AssignedUser)
             .FirstOrDefaultAsync(conversation => conversation.CompanyId == companyId && conversation.Id == conversationId, cancellationToken);
+    }
+
+    public Task<ConversationMessage?> GetMessageForConversationAsync(Guid companyId, Guid conversationId, Guid messageId, CancellationToken cancellationToken)
+    {
+        return dbContext.ConversationMessages
+            .FirstOrDefaultAsync(message => message.CompanyId == companyId
+                && message.ConversationId == conversationId
+                && message.Id == messageId, cancellationToken);
     }
 
     public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)

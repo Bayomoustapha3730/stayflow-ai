@@ -53,6 +53,7 @@ describe("WhatsApp host rendering", () => {
           latestVisibleMessageTimestamp: "2026-07-22T11:00:00Z",
           totalVisibleMessageCount: 2,
           unreadMessageCount: 1,
+          hasFailedOutboundMessage: false,
           lastReadAt: null,
           messages: []
         }}
@@ -111,6 +112,7 @@ describe("WhatsApp host rendering", () => {
           latestVisibleMessageTimestamp: "2026-07-22T11:00:00Z",
           totalVisibleMessageCount: 2,
           unreadMessageCount: 1,
+          hasFailedOutboundMessage: false,
           lastReadAt: null
         }}
         isSelected={false}

@@ -283,6 +283,14 @@ public sealed class AIReplyPipelineTraceTests
         public Task<Conversation?> GetByIdForCompanyAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
             => Task.FromResult(requestedCompanyId == companyId && conversationId == conversation.Id ? conversation : null);
 
+        public Task<ConversationMessage?> GetMessageForConversationAsync(Guid requestedCompanyId, Guid requestedConversationId, Guid messageId, CancellationToken cancellationToken)
+            => Task.FromResult(
+                requestedCompanyId == companyId
+                && requestedConversationId == conversation.Id
+                && messageId == message.Id
+                    ? message
+                    : null);
+
         public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
             => throw new NotImplementedException();
 

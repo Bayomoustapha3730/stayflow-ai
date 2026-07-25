@@ -30,6 +30,7 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
         builder.Property(message => message.ProviderRequestId).HasMaxLength(160);
         builder.Property(message => message.AIOutcome).HasMaxLength(80);
         builder.Property(message => message.FailureCategory).HasMaxLength(80);
+        builder.Property(message => message.SendAttemptNumber).HasDefaultValue(1);
         builder.Property(message => message.EscalationReason).HasMaxLength(120);
 
         builder.HasOne(message => message.Company)
@@ -42,12 +43,19 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
             .HasForeignKey(message => message.ConversationId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.HasOne(message => message.RetryOfMessage)
+            .WithMany(message => message.RetryAttempts)
+            .HasForeignKey(message => message.RetryOfMessageId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasIndex(message => message.CompanyId);
         builder.HasIndex(message => message.ConversationId);
         builder.HasIndex(message => message.SentAt);
         builder.HasIndex(message => message.CreatedAt);
         builder.HasIndex(message => message.ExternalMessageId);
         builder.HasIndex(message => message.IsDeleted);
+        builder.HasIndex(message => message.RetryOfMessageId);
+        builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.DeliveryStatus });
         builder.HasIndex(message => new { message.ConversationId, message.SentAt });
         builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.SentAt });
         builder.HasIndex(message => new { message.CompanyId, message.Provider, message.ExternalMessageId })

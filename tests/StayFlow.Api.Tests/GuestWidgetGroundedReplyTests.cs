@@ -343,6 +343,16 @@ public sealed class GuestWidgetGroundedReplyTests
             return Task.FromResult<Conversation?>(conversation);
         }
 
+        public Task<ConversationMessage?> GetMessageForConversationAsync(Guid companyId, Guid conversationId, Guid messageId, CancellationToken cancellationToken)
+        {
+            var message = Messages.FirstOrDefault(item =>
+                item.CompanyId == companyId
+                && item.ConversationId == conversationId
+                && item.Id == messageId);
+
+            return Task.FromResult(message);
+        }
+
         public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
         {
             var conversation = Conversations.FirstOrDefault(item => item.CompanyId == companyId
@@ -474,6 +484,9 @@ public sealed class GuestWidgetGroundedReplyTests
             => Task.CompletedTask;
 
         public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
             => Task.CompletedTask;
     }
 
