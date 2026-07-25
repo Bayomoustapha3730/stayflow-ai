@@ -1,5 +1,6 @@
 import type { ConversationMessageType, ConversationSenderType, ConversationStatus, GuestChannel } from "./enums";
 import type { PagedResult } from "./chat";
+import type { ConversationMessageDeliveryStatus } from "./messageDelivery";
 
 export interface ConversationListQuery {
   status?: ConversationStatus;
@@ -62,7 +63,13 @@ export interface ConversationMessage {
   isInternal: boolean;
   sentAt: string;
   authorDisplayName?: string | null;
-  deliveryStatus?: "sending" | "failed";
+  provider?: number;
+  deliveryStatus?: ConversationMessageDeliveryStatus | null;
+  deliveredAt?: string | null;
+  readAt?: string | null;
+  failedAt?: string | null;
+  failureCode?: string | null;
+  failureReason?: string | null;
   optimisticId?: string;
 }
 
@@ -95,6 +102,7 @@ export interface ConversationGuestSummary {
   firstName: string;
   lastName: string;
   email?: string | null;
+  maskedPhoneNumber?: string | null;
 }
 
 export interface ConversationPropertySummary {

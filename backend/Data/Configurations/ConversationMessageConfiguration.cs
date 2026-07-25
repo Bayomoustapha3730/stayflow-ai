@@ -21,6 +21,10 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
         builder.Property(message => message.Content).HasMaxLength(4000).IsRequired();
         builder.Property(message => message.MessageType).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(message => message.ExternalMessageId).HasMaxLength(160);
+        builder.Property(message => message.Provider).HasConversion<string>().HasMaxLength(40).IsRequired();
+        builder.Property(message => message.DeliveryStatus).HasConversion<string>().HasMaxLength(40);
+        builder.Property(message => message.FailureCode).HasMaxLength(80);
+        builder.Property(message => message.FailureReason).HasMaxLength(240);
         builder.Property(message => message.ProviderName).HasMaxLength(80);
         builder.Property(message => message.ProviderModel).HasMaxLength(120);
         builder.Property(message => message.ProviderRequestId).HasMaxLength(160);
@@ -46,7 +50,7 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
         builder.HasIndex(message => message.IsDeleted);
         builder.HasIndex(message => new { message.ConversationId, message.SentAt });
         builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.SentAt });
-        builder.HasIndex(message => new { message.CompanyId, message.ExternalMessageId })
+        builder.HasIndex(message => new { message.CompanyId, message.Provider, message.ExternalMessageId })
             .IsUnique()
             .HasFilter("\"ExternalMessageId\" IS NOT NULL");
     }

@@ -19,6 +19,7 @@ public sealed class DevelopmentSeedService(
     private static readonly Guid DemoDemoGuestId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid DemoDemoReservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid DemoDemoRoleId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+    private static readonly Guid DemoWhatsAppIntegrationId = Guid.Parse("77777777-7777-7777-7777-777777777777");
 
     private const string DemoUserEmail = "demo.user@stayflow.local";
     private const string DemoUserFullName = "Demo User";
@@ -40,6 +41,7 @@ public sealed class DevelopmentSeedService(
         var currentDate = DateOnly.FromDateTime(DateTime.UtcNow);
         await EnsureDemoReservationAsync(currentDate, cancellationToken);
         await EnsureDemoPropertyKnowledgeAsync(cancellationToken);
+        await EnsureDemoWhatsAppIntegrationAsync(cancellationToken);
         await EnsureDemoUserRoleAsync(demoUser.Id, role.Id, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -187,6 +189,34 @@ public sealed class DevelopmentSeedService(
             existing.CreatedByUserId = DemoDemoUserId;
             existing.UpdatedByUserId = DemoDemoUserId;
         }
+    }
+
+    private async Task EnsureDemoWhatsAppIntegrationAsync(CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsRelational())
+        {
+            var pendingMigrations = await dbContext.Database.GetPendingMigrationsAsync(cancellationToken);
+            if (pendingMigrations.Any(migration => migration.Contains("AddWhatsAppMessagingFoundation", StringComparison.Ordinal)))
+            {
+                return;
+            }
+        }
+
+        var integration = await dbContext.WhatsAppIntegrations
+            .FirstOrDefaultAsync(item => item.Id == DemoWhatsAppIntegrationId, cancellationToken);
+
+        if (integration is null)
+        {
+            integration = new WhatsAppIntegration { Id = DemoWhatsAppIntegrationId };
+            dbContext.WhatsAppIntegrations.Add(integration);
+        }
+
+        integration.CompanyId = SeedData.DemoCompanyId;
+        integration.DisplayName = "Demo WhatsApp Concierge";
+        integration.PhoneNumberId = "demo-phone-number-id";
+        integration.WhatsAppBusinessAccountId = "demo-waba-id";
+        integration.BusinessPhoneNumberMasked = "+1******0002";
+        integration.IsActive = true;
     }
 
     private async Task<Role> GetOrCreateDemoRoleAsync(CancellationToken cancellationToken)

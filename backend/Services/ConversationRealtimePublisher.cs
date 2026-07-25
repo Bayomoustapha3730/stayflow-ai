@@ -17,6 +17,15 @@ public sealed class ConversationRealtimePublisher(IHubContext<ConversationHub> h
             .SendCoreAsync("ConversationMessageCreated", [payload], cancellationToken);
     }
 
+    public async Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
+    {
+        await hubContext.Clients.Group(ConversationHubChannels.HostCompanyGroup(companyId))
+            .SendCoreAsync("ConversationMessageUpdated", [payload], cancellationToken);
+
+        await hubContext.Clients.Group(ConversationHubChannels.ConversationGroup(conversationId))
+            .SendCoreAsync("ConversationMessageUpdated", [payload], cancellationToken);
+    }
+
     public Task PublishTypingStartedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken)
     {
         if (hostOnly)

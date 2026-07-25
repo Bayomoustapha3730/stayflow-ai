@@ -7,6 +7,7 @@ import {
   releaseConversationConnection,
   subscribeConversationConnectionState,
   RealtimeMessageEvent,
+  ConversationMessageUpdatedEvent,
   TypingEvent,
   ConversationUnreadCountChangedEvent,
   ConversationAssignedEvent,
@@ -19,6 +20,7 @@ interface UseConversationRealtimeOptions {
   conversationId: string | null;
   enabled: boolean;
   onMessageCreated?: (event: RealtimeMessageEvent) => void;
+  onMessageUpdated?: (event: ConversationMessageUpdatedEvent) => void;
   onTypingStarted?: (event: TypingEvent) => void;
   onTypingStopped?: (event: TypingEvent) => void;
   onUnreadChanged?: (event: ConversationUnreadCountChangedEvent) => void;
@@ -44,6 +46,7 @@ export function useConversationRealtime({
   conversationId,
   enabled,
   onMessageCreated,
+  onMessageUpdated,
   onTypingStarted,
   onTypingStopped,
   onUnreadChanged,
@@ -59,6 +62,7 @@ export function useConversationRealtime({
   const latestConversationIdRef = useRef<string | null>(conversationId);
   const callbacksRef = useRef({
     onMessageCreated,
+    onMessageUpdated,
     onTypingStarted,
     onTypingStopped,
     onUnreadChanged,
@@ -70,6 +74,7 @@ export function useConversationRealtime({
   useEffect(() => {
     callbacksRef.current = {
       onMessageCreated,
+      onMessageUpdated,
       onTypingStarted,
       onTypingStopped,
       onUnreadChanged,
@@ -129,6 +134,9 @@ export function useConversationRealtime({
     const unsubscribers = [
       onConversationRealtimeEvent(connection, "ConversationMessageCreated", (event: RealtimeMessageEvent) => {
         callbacksRef.current.onMessageCreated?.(event);
+      }),
+      onConversationRealtimeEvent(connection, "ConversationMessageUpdated", (event: ConversationMessageUpdatedEvent) => {
+        callbacksRef.current.onMessageUpdated?.(event);
       }),
       onConversationRealtimeEvent(connection, "TypingStarted", (event: TypingEvent) => {
         callbacksRef.current.onTypingStarted?.(event);

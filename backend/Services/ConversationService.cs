@@ -13,6 +13,7 @@ public sealed class ConversationService(
     ICurrentTenantContext currentTenantContext,
     IConversationStatusTransitionPolicy transitionPolicy,
     IConversationRealtimePublisher realtimePublisher,
+    IConversationChannelDispatcher conversationChannelDispatcher,
     IOptions<ConversationOptions> options) : IConversationService
 {
     public async Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(ConversationListQueryParameters query, CancellationToken cancellationToken)
@@ -161,13 +162,25 @@ public sealed class ConversationService(
 
     public async Task<ApiResponse<ConversationMessageResponse>> AddGuestMessageAsync(Guid conversationId, AddGuestMessageRequest request, CancellationToken cancellationToken)
     {
-        var duplicate = await FindDuplicateAsync(request.ExternalMessageId, cancellationToken);
+        var duplicate = await FindDuplicateAsync(request.ExternalMessageId, request.Provider, cancellationToken);
         if (duplicate is not null)
         {
             return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(duplicate), "Message already exists.");
         }
 
-        return await AddMessageAsync(conversationId, ConversationSenderType.Guest, ConversationMessageType.Text, request.Content, request.SentAt, request.ExternalMessageId, null, false, "GuestMessageStored", cancellationToken);
+        return await AddMessageAsync(
+            conversationId,
+            ConversationSenderType.Guest,
+            ConversationMessageType.Text,
+            request.Content,
+            request.SentAt,
+            request.ExternalMessageId,
+            request.Provider,
+            request.DeliveryStatus,
+            null,
+            false,
+            "GuestMessageStored",
+            cancellationToken);
     }
 
     public async Task<ApiResponse<ConversationMessageResponse>> AddAIMessageAsync(Guid conversationId, string content, AIOrchestrationResult result, CancellationToken cancellationToken)
@@ -179,6 +192,8 @@ public sealed class ConversationService(
             content,
             DateTimeOffset.UtcNow,
             null,
+            ConversationMessageProvider.None,
+            null,
             result,
             result.Outcome != AIOrchestrationOutcome.Responded,
             result.Outcome == AIOrchestrationOutcome.Responded ? "AIMessageStored" : "ConversationEscalated",
@@ -187,12 +202,74 @@ public sealed class ConversationService(
 
     public async Task<ApiResponse<ConversationMessageResponse>> AddHostMessageAsync(Guid conversationId, AddHostMessageRequest request, CancellationToken cancellationToken)
     {
-        return await AddMessageAsync(conversationId, ConversationSenderType.Host, ConversationMessageType.Text, request.Content, request.SentAt, null, null, false, "HostMessageStored", cancellationToken);
+        return await AddMessageAsync(
+            conversationId,
+            ConversationSenderType.Host,
+            ConversationMessageType.Text,
+            request.Content,
+            request.SentAt,
+            null,
+            request.Provider,
+            null,
+            null,
+            false,
+            "HostMessageStored",
+            cancellationToken);
     }
 
     public async Task<ApiResponse<ConversationMessageResponse>> AddInternalNoteAsync(Guid conversationId, AddInternalNoteRequest request, CancellationToken cancellationToken)
     {
-        return await AddMessageAsync(conversationId, ConversationSenderType.System, ConversationMessageType.InternalNote, request.Content, DateTimeOffset.UtcNow, null, null, true, "InternalNoteAdded", cancellationToken);
+        return await AddMessageAsync(
+            conversationId,
+            ConversationSenderType.System,
+            ConversationMessageType.InternalNote,
+            request.Content,
+            DateTimeOffset.UtcNow,
+            null,
+            ConversationMessageProvider.None,
+            null,
+            null,
+            true,
+            "InternalNoteAdded",
+            cancellationToken);
+    }
+
+    public async Task<ApiResponse<ConversationMessageResponse>> UpdateMessageDeliveryStatusAsync(
+        Guid conversationId,
+        Guid messageId,
+        ConversationMessageDeliveryStatus status,
+        DateTimeOffset occurredAt,
+        string? failureCode,
+        string? failureReason,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail(tenantError, [tenantError]);
+        }
+
+        var conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation was not found.");
+        }
+
+        var message = conversation.Messages.FirstOrDefault(item => item.Id == messageId);
+        if (message is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation message was not found.");
+        }
+
+        if (!TryApplyDeliveryStatus(message, status, occurredAt, failureCode, failureReason))
+        {
+            return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Conversation message delivery status already reflects this event.");
+        }
+
+        await AuditAsync(companyId, conversation.Id, "ConversationMessageDeliveryUpdated", conversation.Status, message.SenderType, cancellationToken);
+        await conversationRepository.SaveChangesAsync(cancellationToken);
+        await PublishMessageUpdatedAsync(companyId, conversation.Id, message, cancellationToken);
+
+        return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Conversation message delivery status updated successfully.");
     }
 
     public Task<ApiResponse<ConversationDetailResponse>> EscalateConversationAsync(Guid conversationId, EscalateConversationRequest request, CancellationToken cancellationToken)
@@ -342,6 +419,8 @@ public sealed class ConversationService(
         string content,
         DateTimeOffset? sentAt,
         string? externalMessageId,
+        ConversationMessageProvider provider,
+        ConversationMessageDeliveryStatus? deliveryStatus,
         AIOrchestrationResult? aiResult,
         bool isInternal,
         string auditAction,
@@ -370,6 +449,7 @@ public sealed class ConversationService(
         }
 
         var normalizedSentAt = (sentAt ?? DateTimeOffset.UtcNow).ToUniversalTime();
+        var resolvedProvider = ResolveProvider(conversation, senderType, provider, isInternal);
         var message = new ConversationMessage
         {
             Id = Guid.NewGuid(),
@@ -379,6 +459,8 @@ public sealed class ConversationService(
             Content = content.Trim(),
             MessageType = messageType,
             ExternalMessageId = NormalizeIdentity(externalMessageId),
+            Provider = resolvedProvider,
+            DeliveryStatus = ResolveInitialDeliveryStatus(senderType, resolvedProvider, deliveryStatus, aiResult, isInternal),
             ProviderName = aiResult?.ProviderMetadata?.ProviderName,
             ProviderModel = aiResult?.ProviderMetadata?.ModelName,
             ProviderRequestId = aiResult?.ProviderMetadata?.RequestId,
@@ -413,6 +495,11 @@ public sealed class ConversationService(
             senderType = senderType.ToString(),
             timestamp = DateTimeOffset.UtcNow
         }, cancellationToken);
+
+        if (!isInternal && senderType is ConversationSenderType.Host or ConversationSenderType.AI)
+        {
+            await conversationChannelDispatcher.DispatchOutboundMessageAsync(conversation, message, cancellationToken);
+        }
 
         return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Conversation message stored successfully.");
     }
@@ -569,14 +656,14 @@ public sealed class ConversationService(
             : await conversationRepository.GetByIdForCompanyAsync(companyId, conversationId, cancellationToken);
     }
 
-    private async Task<ConversationMessage?> FindDuplicateAsync(string? externalMessageId, CancellationToken cancellationToken)
+    private async Task<ConversationMessage?> FindDuplicateAsync(string? externalMessageId, ConversationMessageProvider provider, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(externalMessageId) || !TryGetCompanyId(out var companyId, out _))
         {
             return null;
         }
 
-        return await conversationRepository.FindByExternalMessageIdAsync(companyId, externalMessageId.Trim(), cancellationToken);
+        return await conversationRepository.FindByExternalMessageIdAsync(companyId, externalMessageId.Trim(), provider == ConversationMessageProvider.None ? null : provider, cancellationToken);
     }
 
     private IReadOnlyCollection<string> ValidateContent(string content)
@@ -692,6 +779,7 @@ public sealed class ConversationService(
                 LastName = conversation.Guest?.LastName ?? string.Empty,
                 FullName = conversation.Guest is null ? string.Empty : $"{conversation.Guest.FirstName} {conversation.Guest.LastName}".Trim(),
                 Email = conversation.Guest?.Email,
+                MaskedPhoneNumber = PhoneNumberMasker.Mask(conversation.Guest?.PhoneNumber),
                 PreferredLanguage = conversation.Guest?.PreferredLanguage ?? string.Empty
             },
             Reservation = conversation.Reservation is null
@@ -733,7 +821,144 @@ public sealed class ConversationService(
             MessageType = message.MessageType,
             Content = message.Content,
             IsInternal = message.IsInternal,
+            Provider = message.Provider,
+            DeliveryStatus = message.DeliveryStatus,
+            DeliveredAt = message.DeliveredAt,
+            ReadAt = message.ReadAt,
+            FailedAt = message.FailedAt,
+            FailureCode = message.FailureCode,
+            FailureReason = message.FailureReason,
             SentAt = message.SentAt
+        };
+    }
+
+    private async Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, ConversationMessage message, CancellationToken cancellationToken)
+    {
+        await realtimePublisher.PublishMessageUpdatedAsync(companyId, conversationId, new
+        {
+            conversationId,
+            message = MapMessage(message),
+            timestamp = DateTimeOffset.UtcNow
+        }, cancellationToken);
+    }
+
+    private static ConversationMessageProvider ResolveProvider(Conversation conversation, ConversationSenderType senderType, ConversationMessageProvider requestedProvider, bool isInternal)
+    {
+        if (isInternal)
+        {
+            return ConversationMessageProvider.None;
+        }
+
+        if (requestedProvider != ConversationMessageProvider.None)
+        {
+            return requestedProvider;
+        }
+
+        return conversation.Channel == DTOs.ReservationContext.GuestChannel.WhatsApp && senderType is ConversationSenderType.Host or ConversationSenderType.AI
+            ? ConversationMessageProvider.WhatsAppCloud
+            : ConversationMessageProvider.None;
+    }
+
+    private static ConversationMessageDeliveryStatus? ResolveInitialDeliveryStatus(
+        ConversationSenderType senderType,
+        ConversationMessageProvider provider,
+        ConversationMessageDeliveryStatus? requestedStatus,
+        AIOrchestrationResult? aiResult,
+        bool isInternal)
+    {
+        if (isInternal)
+        {
+            return null;
+        }
+
+        if (requestedStatus is not null)
+        {
+            return requestedStatus;
+        }
+
+        if (provider == ConversationMessageProvider.WhatsAppCloud && senderType is ConversationSenderType.Host or ConversationSenderType.AI)
+        {
+            return ConversationMessageDeliveryStatus.Pending;
+        }
+
+        if (provider == ConversationMessageProvider.WhatsAppCloud && senderType == ConversationSenderType.Guest)
+        {
+            return null;
+        }
+
+        if (aiResult is not null && aiResult.Outcome != AIOrchestrationOutcome.Responded)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    private static bool TryApplyDeliveryStatus(
+        ConversationMessage message,
+        ConversationMessageDeliveryStatus nextStatus,
+        DateTimeOffset occurredAt,
+        string? failureCode,
+        string? failureReason)
+    {
+        if (message.DeliveryStatus is { } currentStatus && DeliveryStatusRank(nextStatus) < DeliveryStatusRank(currentStatus))
+        {
+            return false;
+        }
+
+        var changed = message.DeliveryStatus != nextStatus;
+        message.DeliveryStatus = nextStatus;
+
+        switch (nextStatus)
+        {
+            case ConversationMessageDeliveryStatus.Sent:
+                changed |= message.DeliveredAt is not null || message.ReadAt is not null || message.FailedAt is not null;
+                message.DeliveredAt = null;
+                message.ReadAt = null;
+                message.FailedAt = null;
+                message.FailureCode = null;
+                message.FailureReason = null;
+                break;
+            case ConversationMessageDeliveryStatus.Delivered:
+                changed |= message.DeliveredAt != occurredAt;
+                message.DeliveredAt = occurredAt;
+                message.FailedAt = null;
+                message.FailureCode = null;
+                message.FailureReason = null;
+                break;
+            case ConversationMessageDeliveryStatus.Read:
+                changed |= message.ReadAt != occurredAt;
+                message.DeliveredAt ??= occurredAt;
+                message.ReadAt = occurredAt;
+                message.FailedAt = null;
+                message.FailureCode = null;
+                message.FailureReason = null;
+                break;
+            case ConversationMessageDeliveryStatus.Failed:
+                changed |= message.FailedAt != occurredAt
+                    || !string.Equals(message.FailureCode, NormalizeIdentity(failureCode), StringComparison.Ordinal)
+                    || !string.Equals(message.FailureReason, NormalizeIdentity(failureReason), StringComparison.Ordinal);
+                message.FailedAt = occurredAt;
+                message.FailureCode = NormalizeIdentity(failureCode);
+                message.FailureReason = NormalizeIdentity(failureReason);
+                break;
+            default:
+                break;
+        }
+
+        return changed;
+    }
+
+    private static int DeliveryStatusRank(ConversationMessageDeliveryStatus status)
+    {
+        return status switch
+        {
+            ConversationMessageDeliveryStatus.Pending => 0,
+            ConversationMessageDeliveryStatus.Sent => 1,
+            ConversationMessageDeliveryStatus.Delivered => 2,
+            ConversationMessageDeliveryStatus.Read => 3,
+            ConversationMessageDeliveryStatus.Failed => 4,
+            _ => 0
         };
     }
 

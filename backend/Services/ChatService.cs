@@ -48,7 +48,11 @@ public sealed class ChatService(
 
         if (!string.IsNullOrWhiteSpace(request.ExternalMessageId))
         {
-            var duplicate = await conversationRepository.FindByExternalMessageIdAsync(companyId, request.ExternalMessageId.Trim(), cancellationToken);
+            var duplicate = await conversationRepository.FindByExternalMessageIdAsync(
+                companyId,
+                request.ExternalMessageId.Trim(),
+                request.Channel == GuestChannel.WhatsApp ? ConversationMessageProvider.WhatsAppCloud : null,
+                cancellationToken);
             if (duplicate is not null)
             {
                 await AuditAsync(companyId, duplicate.ConversationId, request.GuestId, "DuplicateExternalMessageIgnored", request.Channel, null, null, cancellationToken);

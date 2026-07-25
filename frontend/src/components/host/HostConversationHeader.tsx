@@ -1,4 +1,5 @@
 import type { ConversationDetail } from "../../models/hostConversations";
+import { channelLabel } from "../../models/enums";
 import { formatRelativeTime } from "../../utils/dateTime";
 import { HostStatusBadge } from "./HostStatusBadge";
 
@@ -18,11 +19,12 @@ export function HostConversationHeader({ conversation, isRefreshing, onRefresh }
     <header className="sf-host-detail-header">
       <div>
         <h2>{guestName}</h2>
-        <p>{conversation.guest?.email?.trim() || "Email unavailable"}</p>
+        <p>{conversation.guest?.email?.trim() || conversation.guest?.maskedPhoneNumber || "Contact unavailable"}</p>
       </div>
 
       <div className="sf-host-detail-header-meta">
         <HostStatusBadge status={conversation.status} />
+        <span className="sf-host-pill">{channelLabel(conversation.channel)}</span>
         {conversation.requiresHostAttention ? (
           <span className="sf-host-pill sf-host-pill-attention">Needs host attention</span>
         ) : null}

@@ -15,6 +15,7 @@ This handbook defines the engineering practices used to build and maintain StayF
 - [Logging Standards](LoggingStandards.md)
 - [Error Handling](ErrorHandling.md)
 - [Conversation Context Engine](ConversationContextEngine.md)
+- [WhatsApp Cloud Integration](WhatsAppCloudIntegration.md)
 
 ## Engineering Principles
 

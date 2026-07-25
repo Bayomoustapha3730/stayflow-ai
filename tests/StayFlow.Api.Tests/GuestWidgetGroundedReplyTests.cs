@@ -215,6 +215,7 @@ public sealed class GuestWidgetGroundedReplyTests
                 tenant,
                 new ConversationStatusTransitionPolicy(),
                 new NoOpConversationRealtimePublisher(),
+                new NoOpConversationChannelDispatcher(),
                 Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
 
             var replyOrchestrator = new AIReplyOrchestrator(
@@ -383,8 +384,8 @@ public sealed class GuestWidgetGroundedReplyTests
         public Task<IReadOnlyCollection<ConversationParticipantReadState>> GetReadStatesForParticipantAsync(Guid companyId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyCollection<ConversationParticipantReadState>>([]);
 
-        public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid companyId, string externalMessageId, CancellationToken cancellationToken)
-            => Task.FromResult(Messages.FirstOrDefault(item => item.CompanyId == companyId && item.ExternalMessageId == externalMessageId));
+        public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid companyId, string externalMessageId, ConversationMessageProvider? provider, CancellationToken cancellationToken)
+            => Task.FromResult(Messages.FirstOrDefault(item => item.CompanyId == companyId && item.ExternalMessageId == externalMessageId && (provider is null || item.Provider == provider)));
 
         public Task<Guest?> GetGuestAsync(Guid companyId, Guid guestId, CancellationToken cancellationToken)
             => Task.FromResult(Guests.FirstOrDefault(item => item.CompanyId == companyId && item.Id == guestId && item.IsActive));
@@ -457,6 +458,9 @@ public sealed class GuestWidgetGroundedReplyTests
         public Task PublishMessageCreatedAsync(Guid companyId, Guid conversationId, object payload, bool internalOnly, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
+        public Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
         public Task PublishTypingStartedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
@@ -471,5 +475,10 @@ public sealed class GuestWidgetGroundedReplyTests
 
         public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken)
             => Task.CompletedTask;
+    }
+
+    private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher
+    {
+        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

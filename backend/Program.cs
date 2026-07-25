@@ -1,11 +1,22 @@
 using StayFlow.Api.Extensions;
 using StayFlow.Api.Hubs;
 using StayFlow.Api.Middleware;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("whatsapp-webhook", limiterOptions =>
+    {
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.PermitLimit = 120;
+        limiterOptions.QueueLimit = 0;
+    });
+});
 
 builder.Services.AddCors(options =>
 {
@@ -56,6 +67,7 @@ app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
 
 app.UseCors("StayFlowFrontendDevelopment");
+app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())
 {

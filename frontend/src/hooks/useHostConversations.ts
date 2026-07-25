@@ -240,6 +240,9 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
 
       scheduleRefresh();
     },
+    onMessageUpdated: () => {
+      scheduleRefresh();
+    },
     onAssigned: (event) => {
       setResponse((current) => {
         if (!current) {

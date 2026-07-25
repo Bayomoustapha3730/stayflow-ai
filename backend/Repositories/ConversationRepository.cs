@@ -87,6 +87,7 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
                     LastName = conversation.Guest.LastName,
                     FullName = conversation.Guest.FirstName + " " + conversation.Guest.LastName,
                     Email = conversation.Guest.Email,
+                    MaskedPhoneNumber = Services.PhoneNumberMasker.Mask(conversation.Guest.PhoneNumber),
                     PreferredLanguage = conversation.Guest.PreferredLanguage
                 },
                 Property = conversation.Property == null
@@ -150,7 +151,7 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
         return dbContext.Conversations
             .Include(conversation => conversation.Guest)
             .Include(conversation => conversation.Reservation)
-            .Include(conversation => conversation.Property)
+            .Include(conversation => conversation.Property!)
             .ThenInclude(property => property.PropertyKnowledgeArticles)
             .Include(conversation => conversation.AssignedUser)
             .FirstOrDefaultAsync(conversation => conversation.CompanyId == companyId && conversation.Id == conversationId, cancellationToken);
@@ -295,11 +296,18 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             .FirstOrDefaultAsync(cancellationToken);
     }
 
-    public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid companyId, string externalMessageId, CancellationToken cancellationToken)
+    public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid companyId, string externalMessageId, ConversationMessageProvider? provider, CancellationToken cancellationToken)
     {
-        return dbContext.ConversationMessages
+        var query = dbContext.ConversationMessages
             .AsNoTracking()
-            .FirstOrDefaultAsync(message => message.CompanyId == companyId && message.ExternalMessageId == externalMessageId, cancellationToken);
+            .Where(message => message.CompanyId == companyId && message.ExternalMessageId == externalMessageId);
+
+        if (provider is { } expectedProvider)
+        {
+            query = query.Where(message => message.Provider == expectedProvider);
+        }
+
+        return query.FirstOrDefaultAsync(cancellationToken);
     }
 
     public Task<ConversationParticipantReadState?> GetReadStateAsync(
