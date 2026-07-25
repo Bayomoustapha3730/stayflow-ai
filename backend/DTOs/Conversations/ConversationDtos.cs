@@ -29,6 +29,7 @@ public sealed class AddHostMessageRequest
     public string Content { get; init; } = string.Empty;
     public DateTimeOffset? SentAt { get; init; }
     public ConversationMessageProvider Provider { get; init; } = ConversationMessageProvider.None;
+    public bool BypassCustomerServiceWindowPolicy { get; init; }
 }
 
 public sealed class AddInternalNoteRequest
@@ -142,10 +143,21 @@ public sealed class ConversationMessageResponse
     public DateTimeOffset? DeliveredAt { get; init; }
     public DateTimeOffset? ReadAt { get; init; }
     public DateTimeOffset? FailedAt { get; init; }
+<<<<<<< HEAD
+    public string? FailureCode { get; init; }
+    public string? FailureReason { get; init; }
+    public string? SafeFailureSummary { get; init; }
+    public bool IsTemplateMessage { get; init; }
+    public Guid? WhatsAppTemplateId { get; init; }
+    public string? TemplateName { get; init; }
+    public string? TemplateLanguageCode { get; init; }
+    public string? TemplateRenderedPreview { get; init; }
+=======
     public string? SafeFailureSummary { get; init; }
     public Guid? RetryOfMessageId { get; init; }
     public int SendAttemptNumber { get; init; }
     public bool CanRetry { get; init; }
+>>>>>>> origin/main
     public DateTimeOffset SentAt { get; init; }
 }
 

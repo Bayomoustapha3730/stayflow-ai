@@ -1,0 +1,245 @@
+.sf-whatsapp-settings-page {
+  padding-bottom: 40px;
+}
+
+.sf-whatsapp-header {
+  align-items: end;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sf-whatsapp-header h1 {
+  margin: 4px 0 0;
+}
+
+.sf-whatsapp-subtitle {
+  color: var(--sf-host-muted);
+  margin: 8px 0 0;
+}
+
+.sf-whatsapp-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sf-whatsapp-header-actions button,
+.sf-whatsapp-template-item {
+  border: 1px solid var(--sf-host-line);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.sf-whatsapp-status {
+  background: #e7f6ed;
+  border: 1px solid #b9ddc7;
+  border-radius: 12px;
+  color: #1f5c43;
+  margin-top: 12px;
+  padding: 10px 12px;
+}
+
+.sf-whatsapp-integration-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.sf-whatsapp-card,
+.sf-whatsapp-empty,
+.sf-whatsapp-preview-card {
+  background: var(--sf-host-card);
+  border: 1px solid var(--sf-host-line);
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.sf-whatsapp-card h2 {
+  margin-top: 0;
+}
+
+.sf-whatsapp-inline-control {
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sf-whatsapp-inline-control select {
+  border: 1px solid var(--sf-host-line);
+  border-radius: 10px;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.sf-whatsapp-definition-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.sf-whatsapp-definition-grid dt {
+  color: var(--sf-host-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sf-whatsapp-definition-grid dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.sf-whatsapp-filters {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 2fr 1fr 1fr 1fr 0.8fr 0.8fr;
+  margin-top: 14px;
+}
+
+.sf-whatsapp-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.sf-whatsapp-filters input,
+.sf-whatsapp-filters select {
+  border: 1px solid var(--sf-host-line);
+  border-radius: 10px;
+  min-height: 42px;
+  padding: 8px 10px;
+}
+
+.sf-whatsapp-grid {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.9fr);
+  margin-top: 16px;
+}
+
+.sf-whatsapp-list,
+.sf-whatsapp-preview {
+  min-width: 0;
+}
+
+.sf-whatsapp-template-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  max-height: calc(100vh - 360px);
+  min-height: 220px;
+  overflow-y: auto;
+  padding-right: 3px;
+}
+
+.sf-whatsapp-template-item {
+  display: block;
+  padding: 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.sf-whatsapp-template-item.is-selected {
+  border-color: var(--sf-host-brand);
+  box-shadow: inset 0 0 0 1px var(--sf-host-brand);
+}
+
+.sf-whatsapp-template-title-row {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.sf-whatsapp-template-title-row h3 {
+  margin: 0;
+}
+
+.sf-whatsapp-template-item p {
+  color: var(--sf-host-muted);
+  margin: 6px 0 0;
+}
+
+.sf-whatsapp-template-badge {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 4px 10px;
+}
+
+.sf-whatsapp-template-badge.approved {
+  background: #e7f6ed;
+  color: #1f5c43;
+}
+
+.sf-whatsapp-template-badge.pending {
+  background: #f2f3f5;
+  color: #526170;
+}
+
+.sf-whatsapp-preview h2 {
+  margin-top: 0;
+}
+
+.sf-whatsapp-preview-card h3 {
+  margin-top: 0;
+}
+
+.sf-whatsapp-preview-card h4 {
+  margin: 12px 0 6px;
+}
+
+.sf-whatsapp-preview-card p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.sf-whatsapp-preview-card ul {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
+.sf-whatsapp-header-actions button:focus-visible,
+.sf-whatsapp-template-item:focus-visible,
+.sf-whatsapp-filters input:focus-visible,
+.sf-whatsapp-filters select:focus-visible,
+.sf-whatsapp-inline-control select:focus-visible {
+  outline: 3px solid rgba(15, 61, 62, 0.35);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1180px) {
+  .sf-whatsapp-integration-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sf-whatsapp-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sf-whatsapp-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sf-whatsapp-template-list {
+    max-height: 420px;
+  }
+}
+
+@media (max-width: 860px) {
+  .sf-whatsapp-header {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .sf-whatsapp-filters {
+    grid-template-columns: 1fr;
+  }
+}

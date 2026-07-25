@@ -8,6 +8,9 @@ namespace StayFlow.Api.Services;
 public sealed class WhatsAppConversationChannelSender(
     IWhatsAppCloudClient whatsAppCloudClient,
     IWhatsAppRepository whatsAppRepository,
+    IWhatsAppCredentialResolver credentialResolver,
+    IWhatsAppCustomerServiceWindowEvaluator customerServiceWindowEvaluator,
+    IHostEnvironment environment,
     IPhoneNumberNormalizer phoneNumberNormalizer,
     ILogger<WhatsAppConversationChannelSender> logger) : IConversationChannelSender
 {
@@ -26,6 +29,38 @@ public sealed class WhatsAppConversationChannelSender(
             return;
         }
 
+        if (!integration.IsProductionEnabled && !environment.IsDevelopment())
+        {
+            message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
+            message.FailedAt = DateTimeOffset.UtcNow;
+            message.FailureCode = "ProductionDisabled";
+            message.FailureReason = "WhatsApp sending is unavailable. Contact an administrator.";
+            return;
+        }
+
+        if (!message.IsTemplateMessage)
+        {
+            var window = await customerServiceWindowEvaluator.EvaluateAsync(conversation.CompanyId, conversation.Id, cancellationToken);
+            if (!window.IsOpen)
+            {
+                message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
+                message.FailedAt = DateTimeOffset.UtcNow;
+                message.FailureCode = "CustomerServiceWindowClosed";
+                message.FailureReason = "The WhatsApp customer-service window is closed. Send an approved template to restart the conversation.";
+                return;
+            }
+        }
+
+        var credentials = await credentialResolver.ResolveAsync(integration, cancellationToken);
+        if (!credentials.Success || string.IsNullOrWhiteSpace(credentials.AccessToken))
+        {
+            message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
+            message.FailedAt = DateTimeOffset.UtcNow;
+            message.FailureCode = "CredentialResolutionFailed";
+            message.FailureReason = credentials.FailureSummary ?? "WhatsApp sending is unavailable. Contact an administrator.";
+            return;
+        }
+
         if (!phoneNumberNormalizer.TryNormalize(conversation.ChannelIdentity, out var normalizedRecipient))
         {
             message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
@@ -38,6 +73,8 @@ public sealed class WhatsAppConversationChannelSender(
 
         var result = await whatsAppCloudClient.SendTextMessageAsync(new WhatsAppSendTextMessageRequest
         {
+            AccessToken = credentials.AccessToken,
+            GraphApiVersion = integration.GraphApiVersion,
             PhoneNumberId = integration.PhoneNumberId,
             To = normalizedRecipient,
             Body = message.Content,
@@ -68,8 +105,14 @@ public sealed class WhatsAppConversationChannelSender(
         message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
         message.FailedAt = DateTimeOffset.UtcNow;
         message.FailureCode = result.FailureCode;
+<<<<<<< HEAD
+        message.FailureReason = result.IsTransientFailure
+            ? "WhatsApp is temporarily unavailable. Try again."
+            : "WhatsApp could not deliver this message.";
+=======
         message.FailureReason = result.FailureReason;
         var mapped = WhatsAppFailureMapper.Map(result.FailureCode, result.FailureReason);
         message.FailureCategory = mapped.Category;
+>>>>>>> origin/main
     }
 }

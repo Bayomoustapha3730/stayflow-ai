@@ -14,9 +14,11 @@ public sealed class WhatsAppCloudOptions
     public string AccessToken { get; set; } = string.Empty;
     public string AppSecret { get; set; } = string.Empty;
     public string WebhookVerifyToken { get; set; } = string.Empty;
+    public string DefaultCredentialReference { get; set; } = "default";
     public int RequestTimeoutSeconds { get; set; } = 15;
     public int MaxRetryAttempts { get; set; } = 2;
     public bool DevelopmentMode { get; set; }
+    public int CustomerServiceWindowHours { get; set; } = 24;
 }
 
 public sealed class WhatsAppCloudOptionsValidator : IValidateOptions<WhatsAppCloudOptions>
@@ -72,6 +74,11 @@ public sealed class WhatsAppCloudOptionsValidator : IValidateOptions<WhatsAppClo
         if (options.MaxRetryAttempts is < 0 or > 10)
         {
             errors.Add("WhatsAppCloud:MaxRetryAttempts must be between 0 and 10.");
+        }
+
+        if (options.CustomerServiceWindowHours is < 1 or > 72)
+        {
+            errors.Add("WhatsAppCloud:CustomerServiceWindowHours must be between 1 and 72.");
         }
 
         return errors.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(errors);

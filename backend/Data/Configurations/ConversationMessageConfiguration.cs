@@ -32,6 +32,9 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
         builder.Property(message => message.FailureCategory).HasMaxLength(80);
         builder.Property(message => message.SendAttemptNumber).HasDefaultValue(1);
         builder.Property(message => message.EscalationReason).HasMaxLength(120);
+        builder.Property(message => message.TemplateName).HasMaxLength(120);
+        builder.Property(message => message.TemplateLanguageCode).HasMaxLength(20);
+        builder.Property(message => message.TemplateRenderedPreview).HasMaxLength(4000);
 
         builder.HasOne(message => message.Company)
             .WithMany(company => company.ConversationMessages)
@@ -58,6 +61,7 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
         builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.DeliveryStatus });
         builder.HasIndex(message => new { message.ConversationId, message.SentAt });
         builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.SentAt });
+        builder.HasIndex(message => new { message.CompanyId, message.WhatsAppTemplateId });
         builder.HasIndex(message => new { message.CompanyId, message.Provider, message.ExternalMessageId })
             .IsUnique()
             .HasFilter("\"ExternalMessageId\" IS NOT NULL");

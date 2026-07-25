@@ -955,10 +955,21 @@ public sealed class ConversationService(
             DeliveredAt = message.DeliveredAt,
             ReadAt = message.ReadAt,
             FailedAt = message.FailedAt,
+<<<<<<< HEAD
+            FailureCode = null,
+            FailureReason = null,
+            SafeFailureSummary = message.FailureReason,
+            IsTemplateMessage = message.IsTemplateMessage,
+            WhatsAppTemplateId = message.WhatsAppTemplateId,
+            TemplateName = message.TemplateName,
+            TemplateLanguageCode = message.TemplateLanguageCode,
+            TemplateRenderedPreview = message.TemplateRenderedPreview,
+=======
             SafeFailureSummary = safeFailureSummary,
             RetryOfMessageId = message.RetryOfMessageId,
             SendAttemptNumber = message.SendAttemptNumber,
             CanRetry = CanRetryMessage(message, conversation),
+>>>>>>> origin/main
             SentAt = message.SentAt
         };
     }
@@ -1094,8 +1105,12 @@ public sealed class ConversationService(
                     || !string.Equals(message.FailureCategory, mapped.Category, StringComparison.Ordinal);
                 message.FailedAt = occurredAt;
                 message.FailureCode = NormalizeIdentity(failureCode);
+<<<<<<< HEAD
+                message.FailureReason = NormalizeIdentity(MapSafeFailureSummary(failureCode, failureReason));
+=======
                 message.FailureReason = NormalizeIdentity(failureReason);
                 message.FailureCategory = mapped.Category;
+>>>>>>> origin/main
                 break;
             default:
                 break;
@@ -1117,6 +1132,34 @@ public sealed class ConversationService(
         };
     }
 
+<<<<<<< HEAD
+    private static string MapSafeFailureSummary(string? failureCode, string? failureReason)
+    {
+        var normalizedCode = NormalizeIdentity(failureCode)?.ToLowerInvariant();
+        var normalizedReason = NormalizeIdentity(failureReason)?.ToLowerInvariant() ?? string.Empty;
+
+        if (normalizedCode is "429" or "rate_limited" || normalizedReason.Contains("rate"))
+        {
+            return "WhatsApp is rate limited. Try again shortly.";
+        }
+
+        if (normalizedCode is "401" or "403" || normalizedReason.Contains("auth"))
+        {
+            return "WhatsApp sending is unavailable. Contact an administrator.";
+        }
+
+        if (normalizedCode is "404" or "invalid_recipient" || normalizedReason.Contains("recipient") || normalizedReason.Contains("destination"))
+        {
+            return "This WhatsApp recipient is unavailable.";
+        }
+
+        if (normalizedCode is "408" or "502" or "503" or "504" || normalizedReason.Contains("timeout") || normalizedReason.Contains("temporar"))
+        {
+            return "WhatsApp is temporarily unavailable. Try again.";
+        }
+
+        return "WhatsApp could not deliver this message.";
+=======
     private static bool CanRetryMessage(ConversationMessage message, Conversation? conversation)
     {
         if (message.IsInternal
@@ -1140,6 +1183,7 @@ public sealed class ConversationService(
         }
 
         return true;
+>>>>>>> origin/main
     }
 
     private static bool IsHostAttentionConversation(Conversation conversation)
