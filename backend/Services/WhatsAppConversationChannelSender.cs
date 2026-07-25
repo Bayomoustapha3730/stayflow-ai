@@ -22,6 +22,7 @@ public sealed class WhatsAppConversationChannelSender(
             message.FailedAt = DateTimeOffset.UtcNow;
             message.FailureCode = "MissingIntegration";
             message.FailureReason = "WhatsApp integration is not configured for this company.";
+            message.FailureCategory = "AuthenticationOrConfigurationIssue";
             return;
         }
 
@@ -31,6 +32,7 @@ public sealed class WhatsAppConversationChannelSender(
             message.FailedAt = DateTimeOffset.UtcNow;
             message.FailureCode = "InvalidRecipient";
             message.FailureReason = "Conversation channel identity is not a valid WhatsApp destination.";
+            message.FailureCategory = "InvalidDestination";
             return;
         }
 
@@ -52,6 +54,7 @@ public sealed class WhatsAppConversationChannelSender(
             message.FailedAt = null;
             message.FailureCode = null;
             message.FailureReason = null;
+            message.FailureCategory = null;
             return;
         }
 
@@ -66,5 +69,7 @@ public sealed class WhatsAppConversationChannelSender(
         message.FailedAt = DateTimeOffset.UtcNow;
         message.FailureCode = result.FailureCode;
         message.FailureReason = result.FailureReason;
+        var mapped = WhatsAppFailureMapper.Map(result.FailureCode, result.FailureReason);
+        message.FailureCategory = mapped.Category;
     }
 }

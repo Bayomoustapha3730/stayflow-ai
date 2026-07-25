@@ -22,6 +22,10 @@ public sealed class ConversationChannelDispatcher(
 
         await sender.SendAsync(conversation, message, cancellationToken);
         await conversationRepository.SaveChangesAsync(cancellationToken);
+        var safeFailureSummary = message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed
+            ? WhatsAppFailureMapper.Map(message.FailureCode, message.FailureReason).Summary
+            : null;
+
         await realtimePublisher.PublishMessageUpdatedAsync(conversation.CompanyId, conversation.Id, new
         {
             conversationId = conversation.Id,
@@ -38,11 +42,30 @@ public sealed class ConversationChannelDispatcher(
                 DeliveredAt = message.DeliveredAt,
                 ReadAt = message.ReadAt,
                 FailedAt = message.FailedAt,
-                FailureCode = message.FailureCode,
-                FailureReason = message.FailureReason,
+                SafeFailureSummary = safeFailureSummary,
+                RetryOfMessageId = message.RetryOfMessageId,
+                SendAttemptNumber = message.SendAttemptNumber,
+                CanRetry = message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed
+                    && !message.IsInternal
+                    && message.Provider == ConversationMessageProvider.WhatsAppCloud
+                    && message.SenderType is ConversationSenderType.Host or ConversationSenderType.AI,
                 SentAt = message.SentAt
             },
             timestamp = DateTimeOffset.UtcNow
         }, cancellationToken);
+
+        if (message.DeliveryStatus is not null)
+        {
+            await realtimePublisher.PublishMessageDeliveryUpdatedAsync(conversation.CompanyId, conversation.Id, new
+            {
+                conversationId = conversation.Id,
+                messageId = message.Id,
+                deliveryStatus = message.DeliveryStatus,
+                deliveredAt = message.DeliveredAt,
+                readAt = message.ReadAt,
+                failedAt = message.FailedAt,
+                safeFailureSummary
+            }, cancellationToken);
+        }
     }
 }

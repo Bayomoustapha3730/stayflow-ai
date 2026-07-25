@@ -72,7 +72,7 @@ export function HostConversationMessage({ message, onRetry }: HostConversationMe
         {message.deliveryStatus === ConversationMessageDeliveryStatus.Failed ? (
           <>
             <span className="sf-host-message-failed">Failed</span>
-            <span>{message.failureReason?.trim() || "Check the WhatsApp integration configuration and retry from the inbox."}</span>
+            <span>{message.safeFailureSummary?.trim() || "Check the WhatsApp integration configuration and retry from the inbox."}</span>
             {onRetry ? (
               <button type="button" className="sf-host-message-retry" onClick={() => onRetry(message.id)}>
                 Retry

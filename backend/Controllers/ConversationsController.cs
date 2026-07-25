@@ -74,6 +74,19 @@ public sealed class ConversationsController(IConversationService conversationSer
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
+    [HttpPost("{conversationId:guid}/messages/{messageId:guid}/retry")]
+    [RequiresPermission("conversations.reply")]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ConversationMessageResponse>>> RetryMessage(
+        Guid conversationId,
+        Guid messageId,
+        CancellationToken cancellationToken)
+    {
+        var response = await conversationService.RetryFailedMessageAsync(conversationId, messageId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
     [HttpPost("{conversationId:guid}/notes")]
     [RequiresPermission("conversations.notes")]
     [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status200OK)]

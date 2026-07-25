@@ -69,4 +69,13 @@ public sealed class ConversationRealtimePublisher(IHubContext<ConversationHub> h
         return hubContext.Clients.Group(ConversationHubChannels.HostCompanyGroup(companyId))
             .SendCoreAsync("ConversationUnreadCountChanged", [payload], cancellationToken);
     }
+
+    public async Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
+    {
+        await hubContext.Clients.Group(ConversationHubChannels.HostCompanyGroup(companyId))
+            .SendCoreAsync("ConversationMessageDeliveryUpdated", [payload], cancellationToken);
+
+        await hubContext.Clients.Group(ConversationHubChannels.ConversationGroup(conversationId))
+            .SendCoreAsync("ConversationMessageDeliveryUpdated", [payload], cancellationToken);
+    }
 }

@@ -86,6 +86,7 @@ function conversationRow(id = "c-1"): ConversationSummary {
     latestVisibleMessageTimestamp: "2026-07-22T10:00:00Z",
     totalVisibleMessageCount: 4,
     unreadMessageCount: 2,
+    hasFailedOutboundMessage: false,
     lastReadAt: null
   };
 }

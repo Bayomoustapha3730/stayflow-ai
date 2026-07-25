@@ -20,6 +20,8 @@ public sealed class ConversationMessage : AuditableEntity
     public string? ProviderRequestId { get; set; }
     public string? AIOutcome { get; set; }
     public string? FailureCategory { get; set; }
+    public Guid? RetryOfMessageId { get; set; }
+    public int SendAttemptNumber { get; set; } = 1;
     public string? EscalationReason { get; set; }
     public bool IsInternal { get; set; }
     public DateTimeOffset SentAt { get; set; }
@@ -29,4 +31,6 @@ public sealed class ConversationMessage : AuditableEntity
 
     public Company Company { get; set; } = null!;
     public Conversation Conversation { get; set; } = null!;
+    public ConversationMessage? RetryOfMessage { get; set; }
+    public ICollection<ConversationMessage> RetryAttempts { get; set; } = [];
 }
