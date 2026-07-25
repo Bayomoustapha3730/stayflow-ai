@@ -520,7 +520,7 @@ public sealed class AIOrchestratorTests
         var result = await provider.GenerateAsync(ProviderRequest([QuestionContextCategory.WiFi]), CancellationToken.None);
 
         Assert.Equal(AIProviderOutcome.Success, result.Outcome);
-        Assert.Contains("WiFi", result.ResponseText);
+        Assert.Contains("wi-fi", result.ResponseText, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

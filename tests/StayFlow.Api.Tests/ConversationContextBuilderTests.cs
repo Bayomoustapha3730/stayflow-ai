@@ -178,6 +178,32 @@ public sealed class ConversationContextBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_PreservesMeaningfulKnowledgeLineBreaks()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Title = "Guest Wi-Fi",
+            Content = "Network: StayFlowGuest\r\n\r\nPassword:\tDemoStay2026",
+            IsActive = true,
+            IsApproved = true,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
+
+        Assert.NotNull(context);
+        var content = Assert.Single(context!.ApprovedKnowledgeItems).Content;
+        Assert.Contains("Network: StayFlowGuest\n\nPassword: DemoStay2026", content);
+    }
+
+    [Fact]
     public async Task BuildAsync_ExcludesUnapprovedAndDeletedAndCrossPropertyKnowledge()
     {
         var fixture = new Fixture();

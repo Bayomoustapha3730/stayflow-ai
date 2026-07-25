@@ -12,6 +12,8 @@ import { useConversationCopilot } from "../hooks/useConversationCopilot";
 import { useHostConversations } from "../hooks/useHostConversations";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ConversationSenderType } from "../models/enums";
+import { HostConsoleNav } from "../components/host/HostConsoleNav";
+import { normalizePropertyId, resolvePropertyKnowledgePropertyId } from "../utils/propertyRouting";
 import "../styles/host-inbox.css";
 
 const notificationsPreferenceKey = "stayflow.host.notifications.enabled";
@@ -42,6 +44,14 @@ export function HostInboxPage() {
   const [copilotDraftVersion, setCopilotDraftVersion] = useState(0);
   const previousMessageTimestampsRef = useRef<Record<string, string | null>>({});
   const selectedConversationId = conversations.selectedConversationId;
+  const selectedConversation = conversations.response?.items.find((item) => item.conversationId === selectedConversationId) ?? null;
+  const selectedConversationPropertyId = normalizePropertyId(selectedConversation?.propertyId ?? null);
+  const configuredDemoPropertyId = normalizePropertyId(import.meta.env.VITE_DEMO_PROPERTY_ID);
+  const resolvedKnowledgePropertyId = resolvePropertyKnowledgePropertyId(
+    selectedConversationPropertyId,
+    configuredDemoPropertyId,
+    import.meta.env.DEV
+  );
   const copilot = useConversationCopilot({
     conversationId: selectedConversationId,
     accessToken: auth.accessToken,
@@ -150,6 +160,16 @@ export function HostInboxPage() {
           }}
         />
 
+        <HostConsoleNav
+          conversationsHref="/host/conversations"
+          propertyKnowledgeHref={resolvedKnowledgePropertyId ? `/host/properties/${resolvedKnowledgePropertyId}/knowledge` : null}
+          current="conversations"
+        />
+
+        {!resolvedKnowledgePropertyId ? (
+          <p className="sf-host-muted-note">Select a conversation with a property first.</p>
+        ) : null}
+
         {conversations.sessionExpired ? (
           <div className="sf-host-session-expired" role="alert">
             Your host session expired. Please sign in again.
@@ -227,6 +247,17 @@ export function HostInboxPage() {
               onUseDraft={(draft) => {
                 setCopilotDraft(draft);
                 setCopilotDraftVersion((current) => current + 1);
+              }}
+              selectedPropertyId={selectedConversation?.propertyId ?? null}
+              onViewKnowledge={(propertyId) => {
+                const targetPropertyId = resolvePropertyKnowledgePropertyId(
+                  propertyId ?? selectedConversation?.propertyId,
+                  configuredDemoPropertyId,
+                  import.meta.env.DEV
+                );
+                if (targetPropertyId) {
+                  window.location.href = `/host/properties/${targetPropertyId}/knowledge`;
+                }
               }}
             />
           ) : (

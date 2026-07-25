@@ -49,7 +49,7 @@ function conversationRow(id = "c-1"): ConversationSummary {
     conversationId: id,
     guestId: "g-1",
     reservationId: "r-1",
-    propertyId: "p-1",
+    propertyId: "22222222-2222-4222-8222-222222222222",
     status: ConversationStatus.AwaitingHost,
     channel: GuestChannel.Web,
     channelIdentity: null,
@@ -63,7 +63,7 @@ function conversationRow(id = "c-1"): ConversationSummary {
       email: "ada@example.com"
     },
     property: {
-      id: "p-1",
+      id: "22222222-2222-4222-8222-222222222222",
       name: "Westlands Apartment",
       city: "Nairobi"
     },
@@ -399,6 +399,7 @@ describe("HostInboxPage via App route", () => {
     sessionStorage.clear();
     vi.stubEnv("VITE_STAYFLOW_API_URL", "http://test.local");
     vi.stubEnv("VITE_DEMO_EMAIL", "host@example.com");
+    vi.stubEnv("VITE_DEMO_PROPERTY_ID", "22222222-2222-4222-8222-222222222222");
     Object.defineProperty(navigator, "clipboard", {
       value: {
         writeText: vi.fn().mockResolvedValue(undefined)
@@ -432,6 +433,48 @@ describe("HostInboxPage via App route", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: /timeline/i })).toBeInTheDocument(), {
       timeout: 3000
     });
+  });
+
+  it("property knowledge navigation uses selected conversation property ID", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock());
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => expect(screen.getByRole("link", { name: /property knowledge/i })).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /property knowledge/i })).toHaveAttribute(
+      "href",
+      "/host/properties/22222222-2222-4222-8222-222222222222/knowledge"
+    );
+  });
+
+  it("property knowledge navigation falls back to configured demo property when selection lacks a valid property ID", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubEnv("VITE_DEMO_PROPERTY_ID", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    vi.stubGlobal("fetch", createHostFetchMock([{ ...conversationRow(), propertyId: "" }]));
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => expect(screen.getByRole("link", { name: /property knowledge/i })).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /property knowledge/i })).toHaveAttribute(
+      "href",
+      "/host/properties/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/knowledge"
+    );
+  });
+
+  it("disables property knowledge navigation and shows guidance when no valid property ID is available", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubEnv("VITE_DEMO_PROPERTY_ID", "");
+    vi.stubGlobal("fetch", createHostFetchMock([{ ...conversationRow(), propertyId: "" }]));
+
+    render(<App />);
+    await signIn();
+
+    await waitFor(() => expect(screen.getByText(/select a conversation with a property first\./i)).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /property knowledge/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/^property knowledge$/i, { selector: "span" })).toHaveAttribute("aria-disabled", "true");
   });
 
   it("status filter changes request", async () => {
@@ -574,7 +617,7 @@ describe("HostInboxPage via App route", () => {
     const user = await signIn();
 
     await waitFor(() => expect(screen.getByRole("heading", { name: /host copilot/i })).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText(/guest services are temporarily unavailable/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/summary unavailable/i)).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /^retry$/i }));
 
     await waitFor(() => {
@@ -742,7 +785,7 @@ describe("HostInboxPage via App route", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /generate host reply draft/i })).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /generate host reply draft/i }));
 
-    await waitFor(() => expect(screen.getByText(/guest services are temporarily unavailable/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/generation unavailable/i)).toBeInTheDocument());
     expect(screen.getAllByText(/^error$/i).length).toBeGreaterThan(0);
   });
 

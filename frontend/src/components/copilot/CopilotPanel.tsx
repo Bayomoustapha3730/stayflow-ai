@@ -16,6 +16,8 @@ interface CopilotPanelProps {
   copilot: UseConversationCopilotResult;
   disabled?: boolean;
   onUseDraft: (draft: string) => void;
+  onViewKnowledge?: (propertyId?: string | null) => void;
+  selectedPropertyId?: string | null;
 }
 
 type CopilotSectionKey = "summary" | "sources" | "suggestions" | "generate" | "generated";
@@ -30,7 +32,14 @@ const defaultSectionsState: CopilotSectionsState = {
   generated: false
 };
 
-export function CopilotPanel({ conversationId, copilot, disabled = false, onUseDraft }: CopilotPanelProps) {
+export function CopilotPanel({
+  conversationId,
+  copilot,
+  disabled = false,
+  onUseDraft,
+  onViewKnowledge,
+  selectedPropertyId = null
+}: CopilotPanelProps) {
   const [sections, setSections] = useState<CopilotSectionsState>(defaultSectionsState);
   const [showAllSources, setShowAllSources] = useState(false);
   const [guidance, setGuidance] = useState("");
@@ -149,6 +158,15 @@ export function CopilotPanel({ conversationId, copilot, disabled = false, onUseD
                       <time dateTime={source.lastUpdated} className="sf-host-copilot-source-updated">
                         Updated {formatTimestamp(source.lastUpdated)}
                       </time>
+                    ) : null}
+                    {source.sourceType === "PropertyKnowledge" && onViewKnowledge ? (
+                      <button
+                        type="button"
+                        className="sf-host-copilot-link-button"
+                        onClick={() => onViewKnowledge(selectedPropertyId)}
+                      >
+                        View knowledge
+                      </button>
                     ) : null}
                   </li>
                 ))}

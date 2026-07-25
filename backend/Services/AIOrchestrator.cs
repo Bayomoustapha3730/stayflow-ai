@@ -129,6 +129,44 @@ public sealed class AIOrchestrator(
             });
 
             logger.LogInformation(
+                "AI reply trace (legacy): context ready. Categories={Categories} KnowledgeCount={KnowledgeCount} Knowledge={Knowledge}",
+                contextResult.QuestionCategories.Select(category => category.ToString()).ToArray(),
+                contextResult.Context.Knowledge.Articles.Count,
+                contextResult.Context.Knowledge.Articles
+                    .Select(article => new
+                    {
+                        article.Title,
+                        ContentPreview = article.Content.Length <= 50 ? article.Content : article.Content[..50]
+                    })
+                    .ToArray());
+
+            var selectedKnowledge = contextResult.Context.Knowledge.Articles
+                .Select((article, index) => new AIProviderKnowledgeItem
+                {
+                    SourceId = $"legacy-article-{index + 1}",
+                    Title = article.Title,
+                    Category = contextResult.QuestionCategories.FirstOrDefault().ToString(),
+                    Tags = [],
+                    Summary = null,
+                    Content = article.Content,
+                    Priority = 0,
+                    IsApproved = true
+                })
+                .ToList();
+
+            logger.LogInformation(
+                "AI reply trace (legacy): provider request. DetectedIntent={DetectedIntent} SelectedKnowledge={SelectedKnowledge}",
+                contextResult.QuestionCategories.FirstOrDefault().ToString(),
+                selectedKnowledge
+                    .Select(item => new
+                    {
+                        item.Title,
+                        item.Category,
+                        ContentPreview = item.Content.Length <= 50 ? item.Content : item.Content[..50]
+                    })
+                    .ToArray());
+
+            logger.LogInformation(
                 "AI provider selected. CorrelationId={CorrelationId} ProviderType={ProviderType}",
                 currentTenantContext.CorrelationId,
                 aiProvider.GetType().Name);
@@ -143,6 +181,8 @@ public sealed class AIOrchestrator(
                 RenderedMessages = promptPackage.RenderedMessages,
                 ResponseConstraints = promptPackage.ResponseConstraints,
                 QuestionCategories = contextResult.QuestionCategories,
+                SelectedKnowledgeItems = selectedKnowledge,
+                DetectedIntent = contextResult.QuestionCategories.FirstOrDefault().ToString(),
                 CorrelationId = currentTenantContext.CorrelationId
             }, cancellationToken);
 
@@ -191,7 +231,22 @@ public sealed class AIOrchestrator(
                 validationResult.Outcome,
                 validationResult.Violations.Select(violation => violation.ToString()).ToArray());
 
+            logger.LogInformation(
+                "AI reply trace (legacy): provider response and validator safe message. ProviderResponsePreview={ProviderResponsePreview} SafeMessagePreview={SafeMessagePreview}",
+                providerResult.ResponseText is null
+                    ? null
+                    : (providerResult.ResponseText.Length <= 200 ? providerResult.ResponseText : providerResult.ResponseText[..200]),
+                validationResult.SafeMessage is null
+                    ? null
+                    : (validationResult.SafeMessage.Length <= 200 ? validationResult.SafeMessage : validationResult.SafeMessage[..200]));
+
             var mapped = MapValidationResult(providerResult, validationResult, contextResult.QuestionCategories);
+
+            logger.LogInformation(
+                "AI reply trace (legacy): final result. Outcome={Outcome} FinalMessagePreview={FinalMessagePreview}",
+                mapped.Outcome,
+                mapped.GuestSafeMessage.Length <= 200 ? mapped.GuestSafeMessage : mapped.GuestSafeMessage[..200]);
+
             ApplyDevelopmentDiagnostics(mapped, contextResult, providerWasInvoked);
             await AuditAsync(mapped, contextResult, providerResult, validationResult, cancellationToken);
             return mapped;

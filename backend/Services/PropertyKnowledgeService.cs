@@ -60,6 +60,11 @@ public sealed class PropertyKnowledgeService(
             return ApiResponse<PropertyKnowledgeDetailResponse>.Fail(tenantError, [tenantError]);
         }
 
+        if (!TryGetUserId(out var userId, out var userError))
+        {
+            return ApiResponse<PropertyKnowledgeDetailResponse>.Fail(userError, [userError]);
+        }
+
         var property = await propertyKnowledgeRepository.GetPropertyAsync(companyId, propertyId, cancellationToken);
         if (property is null)
         {
@@ -85,8 +90,8 @@ public sealed class PropertyKnowledgeService(
             Priority = request.Priority,
             IsApproved = false,
             IsActive = request.IsActive,
-            CreatedByUserId = currentTenantContext.UserId,
-            UpdatedByUserId = currentTenantContext.UserId
+            CreatedByUserId = userId,
+            UpdatedByUserId = userId
         };
 
         await propertyKnowledgeRepository.AddAsync(article, cancellationToken);
@@ -249,6 +254,27 @@ public sealed class PropertyKnowledgeService(
         }
 
         companyId = tenantCompanyId;
+        error = string.Empty;
+        return true;
+    }
+
+    private bool TryGetUserId(out Guid userId, out string error)
+    {
+        if (!currentTenantContext.IsAuthenticated)
+        {
+            userId = Guid.Empty;
+            error = "Authenticated user context is required.";
+            return false;
+        }
+
+        if (currentTenantContext.UserId is not { } currentUserId || currentUserId == Guid.Empty)
+        {
+            userId = Guid.Empty;
+            error = "Authenticated user context is missing or invalid.";
+            return false;
+        }
+
+        userId = currentUserId;
         error = string.Empty;
         return true;
     }

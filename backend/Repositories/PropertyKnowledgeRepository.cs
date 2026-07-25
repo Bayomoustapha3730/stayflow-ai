@@ -12,7 +12,13 @@ public sealed class PropertyKnowledgeRepository(ApplicationDbContext dbContext) 
     {
         return dbContext.Properties
             .AsNoTracking()
-            .FirstOrDefaultAsync(property => property.Id == propertyId && property.CompanyId == companyId && !property.IsDeleted, cancellationToken);
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(
+                property => property.Id == propertyId
+                    && property.CompanyId == companyId
+                    && property.IsActive
+                    && !property.IsDeleted,
+                cancellationToken);
     }
 
     public async Task<PagedResult<PropertyKnowledgeArticle>> GetPagedAsync(Guid companyId, Guid propertyId, PropertyKnowledgeListQuery query, CancellationToken cancellationToken)

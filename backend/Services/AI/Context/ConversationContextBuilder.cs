@@ -247,7 +247,7 @@ public sealed class ConversationContextBuilder(
         foreach (var item in selected)
         {
             var title = NormalizeWhitespace(item.Title);
-            var content = NormalizeWhitespace(item.Content);
+            var content = NormalizeKnowledgeContent(item.Content);
             if (string.IsNullOrWhiteSpace(content))
             {
                 continue;
@@ -372,5 +372,31 @@ public sealed class ConversationContextBuilder(
     {
         return string.Join(' ', value
             .Split(['\r', '\n', '\t', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
+    private static string NormalizeKnowledgeContent(string value)
+    {
+        var lines = value
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n')
+            .Select(line => string.Join(' ', line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)))
+            .ToList();
+
+        var compact = new List<string>(lines.Count);
+        var previousBlank = false;
+        foreach (var line in lines)
+        {
+            var isBlank = string.IsNullOrWhiteSpace(line);
+            if (isBlank && previousBlank)
+            {
+                continue;
+            }
+
+            compact.Add(isBlank ? string.Empty : line);
+            previousBlank = isBlank;
+        }
+
+        return string.Join("\n", compact).Trim();
     }
 }

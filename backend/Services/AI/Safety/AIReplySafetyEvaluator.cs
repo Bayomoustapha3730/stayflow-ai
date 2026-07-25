@@ -1,5 +1,8 @@
 using System.Text.RegularExpressions;
+using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.Services.AI.Context;
+using StayFlow.Api.Services.AI.Grounding;
+using StayFlow.Api.Services.AI.Intent;
 using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Services.AI.Safety;
@@ -11,6 +14,8 @@ public sealed class AIReplySafetyEvaluator : IAIReplySafetyEvaluator
         string? output,
         IReadOnlyCollection<string> suggestions,
         ConversationContext context,
+        IReadOnlyCollection<ConversationContextKnowledgeItem> selectedKnowledgeItems,
+        GuestIntentResult? detectedIntent,
         int contextConfidence,
         bool fallbackUsed)
     {
@@ -30,10 +35,49 @@ public sealed class AIReplySafetyEvaluator : IAIReplySafetyEvaluator
             blockedReasons.Add("Fabricated approval claim.");
         }
 
-        if (ContainsAny(combined, ["door code", "lockbox code", "password", "access code"]) && Regex.IsMatch(combined, "\\b\\d{3,8}\\b"))
+        var selected = selectedKnowledgeItems
+            .Select(item => new AIProviderKnowledgeItem
+            {
+                SourceId = item.SourceId,
+                Title = item.Title,
+                Category = item.Category.ToString(),
+                Tags = item.Tags,
+                Summary = item.Summary,
+                Content = item.Content,
+                Priority = item.Priority,
+                IsApproved = item.IsApproved
+            })
+            .ToList();
+
+        var wifiGrounding = DeterministicGrounding.ExtractWiFi(selected);
+        var containsAccessCodeValue = ContainsAny(combined, ["door code", "lockbox code", "access code", "alarm code", "pin code"])
+            && Regex.IsMatch(combined, "\\b[A-Za-z0-9]{3,24}\\b", RegexOptions.CultureInvariant);
+
+        if (containsAccessCodeValue)
         {
             warnings.Add(new AIReplyOrchestrationWarning("FabricatedPassword", "Possible access credential disclosure detected."));
             blockedReasons.Add("Possible credential disclosure.");
+        }
+
+        var includesPasswordDisclosure = Regex.IsMatch(
+            combined,
+            "\\b(?:password|passcode)\\b\\s*(?:is|:|=)\\s*(?<value>[A-Za-z0-9!@#$%^&*()_+\\-={}[\\]|:;,.?/]{3,64})",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        if (includesPasswordDisclosure)
+        {
+            var supportedPassword = wifiGrounding.DistinctPasswords.Count == 1
+                ? wifiGrounding.DistinctPasswords.FirstOrDefault()
+                : null;
+            var containsSupportedPassword = !string.IsNullOrWhiteSpace(supportedPassword)
+                && combined.Contains(supportedPassword, StringComparison.OrdinalIgnoreCase);
+            var wifiIntent = detectedIntent?.Intent == GuestIntent.WiFi;
+
+            if (!wifiIntent || wifiGrounding.HasConflict || string.IsNullOrWhiteSpace(supportedPassword) || !containsSupportedPassword)
+            {
+                warnings.Add(new AIReplyOrchestrationWarning("FabricatedPassword", "Unsupported password disclosure detected."));
+                blockedReasons.Add("Unsupported credential disclosure.");
+            }
         }
 
         if (ContainsAny(combined, ["system prompt", "developer instruction", "hidden prompt"]))
