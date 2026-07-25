@@ -1,5 +1,5 @@
 import type { ConversationDetail } from "../../models/hostConversations";
-import { GuestChannel } from "../../models/enums";
+import { channelLabel } from "../../models/enums";
 import { formatReservationRange } from "../../utils/dateTime";
 
 interface HostConversationMetadataProps {
@@ -13,7 +13,7 @@ export function HostConversationMetadata({ conversation }: HostConversationMetad
     conversation.reservation?.checkOutDate
   );
   const assignedUser = conversation.assignedUser?.fullName?.trim() || "Unassigned";
-  const channel = GuestChannel[conversation.channel] ?? "Unknown";
+  const channel = channelLabel(conversation.channel);
 
   return (
     <section className="sf-host-detail-section" aria-label="Conversation metadata">

@@ -4,6 +4,7 @@ import { ApiError, HttpClient } from "../api/httpClient";
 import { useConversationRealtime } from "./useConversationRealtime";
 import { ConversationMessageType, ConversationSenderType, ConversationStatus } from "../models/enums";
 import type { ConversationDetail, ConversationMessage } from "../models/hostConversations";
+import { ConversationMessageDeliveryStatus } from "../models/messageDelivery";
 import { getConversationActionErrorMessage, getConversationLoadErrorMessage } from "../utils/conversationErrors";
 
 const maxMessageLength = 2000;
@@ -308,7 +309,6 @@ export function useHostConversationDetail({
         content: trimmed,
         isInternal: false,
         sentAt: new Date().toISOString(),
-        deliveryStatus: "sending",
         optimisticId
       };
 
@@ -340,7 +340,7 @@ export function useHostConversationDetail({
             item.id === optimisticId
               ? {
                   ...item,
-                  deliveryStatus: "failed"
+                  deliveryStatus: ConversationMessageDeliveryStatus.Failed
                 }
               : item
           )
@@ -380,7 +380,6 @@ export function useHostConversationDetail({
         isInternal: true,
         sentAt: new Date().toISOString(),
         authorDisplayName: conversation?.assignedUser?.fullName ?? null,
-        deliveryStatus: "sending",
         optimisticId
       };
 
@@ -411,7 +410,7 @@ export function useHostConversationDetail({
             item.id === optimisticId
               ? {
                   ...item,
-                  deliveryStatus: "failed"
+                  deliveryStatus: ConversationMessageDeliveryStatus.Failed
                 }
               : item
           )
@@ -426,7 +425,7 @@ export function useHostConversationDetail({
 
   const retryFailedMessage = useCallback(
     async (messageId: string) => {
-      const failed = messages.find((message) => message.id === messageId && message.deliveryStatus === "failed");
+      const failed = messages.find((message) => message.id === messageId && message.deliveryStatus === ConversationMessageDeliveryStatus.Failed);
       if (!failed) {
         return false;
       }
@@ -512,7 +511,7 @@ export function useHostConversationDetail({
         }
 
         const optimisticMatch = current.find((message) =>
-          message.deliveryStatus === "sending"
+          message.optimisticId
           && message.content === event.message.content
           && message.senderType === event.message.senderType
         );
@@ -527,6 +526,18 @@ export function useHostConversationDetail({
       });
 
       markReadIfVisible();
+      onConversationChanged?.();
+    },
+    onMessageUpdated: (event) => {
+      if (event.conversationId !== conversationId) {
+        return;
+      }
+
+      setMessages((current) =>
+        sortMessagesChronologically(
+          current.map((message) => (message.id === event.message.id ? { ...message, ...event.message, optimisticId: undefined } : message))
+        )
+      );
       onConversationChanged?.();
     },
     onTypingStarted: (event) => {

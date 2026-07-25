@@ -5,6 +5,21 @@ export enum GuestChannel {
   Email = 3
 }
 
+export function channelLabel(channel: GuestChannel): string {
+  switch (channel) {
+    case GuestChannel.WhatsApp:
+      return "WhatsApp";
+    case GuestChannel.Sms:
+      return "SMS";
+    case GuestChannel.Email:
+      return "Email";
+    case GuestChannel.Web:
+      return "Web";
+    default:
+      return "Unknown";
+  }
+}
+
 export enum ConversationStatus {
   Open = 0,
   AwaitingGuest = 1,

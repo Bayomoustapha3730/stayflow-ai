@@ -267,6 +267,13 @@ namespace backend.Data.Migrations
                     b.Property<Guid?>("DeletedBy")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("DeliveredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeliveryStatus")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<string>("EscalationReason")
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
@@ -275,9 +282,20 @@ namespace backend.Data.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
 
+                    b.Property<DateTimeOffset?>("FailedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("FailureCategory")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -286,6 +304,11 @@ namespace backend.Data.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<string>("MessageType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Provider")
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
@@ -301,6 +324,9 @@ namespace backend.Data.Migrations
                     b.Property<string>("ProviderRequestId")
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("SenderType")
                         .IsRequired()
@@ -327,13 +353,13 @@ namespace backend.Data.Migrations
 
                     b.HasIndex("SentAt");
 
-                    b.HasIndex("CompanyId", "ExternalMessageId")
-                        .IsUnique()
-                        .HasFilter("\"ExternalMessageId\" IS NOT NULL");
-
                     b.HasIndex("ConversationId", "SentAt");
 
                     b.HasIndex("CompanyId", "ConversationId", "SentAt");
+
+                    b.HasIndex("CompanyId", "Provider", "ExternalMessageId")
+                        .IsUnique()
+                        .HasFilter("\"ExternalMessageId\" IS NOT NULL");
 
                     b.ToTable("ConversationMessages", (string)null);
                 });
@@ -1404,6 +1430,58 @@ namespace backend.Data.Migrations
                     b.ToTable("UserRoles", (string)null);
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.WhatsAppIntegration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BusinessPhoneNumberMasked")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("PhoneNumberId")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("WhatsAppBusinessAccountId")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("PhoneNumberId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "IsActive");
+
+                    b.ToTable("WhatsAppIntegrations", (string)null);
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.Conversation", b =>
                 {
                     b.HasOne("StayFlow.Api.Models.User", "AssignedUser")
@@ -1808,6 +1886,17 @@ namespace backend.Data.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.WhatsAppIntegration", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("WhatsAppIntegrations")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.Company", b =>
                 {
                     b.Navigation("ConversationMessages");
@@ -1831,6 +1920,8 @@ namespace backend.Data.Migrations
                     b.Navigation("ServiceRequests");
 
                     b.Navigation("Users");
+
+                    b.Navigation("WhatsAppIntegrations");
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.Conversation", b =>

@@ -20,8 +20,21 @@ export interface RealtimeMessageEvent {
     messageType: number;
     content: string;
     isInternal: boolean;
+    provider?: number;
+    deliveryStatus?: number | null;
+    deliveredAt?: string | null;
+    readAt?: string | null;
+    failedAt?: string | null;
+    failureCode?: string | null;
+    failureReason?: string | null;
     sentAt: string;
   };
+}
+
+export interface ConversationMessageUpdatedEvent {
+  conversationId: string;
+  message: RealtimeMessageEvent["message"];
+  timestamp?: string;
 }
 
 export interface TypingEvent {
@@ -73,6 +86,7 @@ export interface ConversationStateChangedEvent {
 
 export type RealtimeEventMap = {
   ConversationMessageCreated: RealtimeMessageEvent;
+  ConversationMessageUpdated: ConversationMessageUpdatedEvent;
   TypingStarted: TypingEvent;
   TypingStopped: TypingEvent;
   ConversationUnreadCountChanged: ConversationUnreadCountChangedEvent;

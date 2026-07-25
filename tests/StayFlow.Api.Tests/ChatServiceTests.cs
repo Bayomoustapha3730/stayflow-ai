@@ -290,6 +290,7 @@ public sealed class ChatServiceTests
                 TenantContext,
                 new ConversationStatusTransitionPolicy(),
                 new NoOpConversationRealtimePublisher(),
+                new NoOpConversationChannelDispatcher(),
                 Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
             ReplyOrchestrator = new FakeAIReplyOrchestrator();
             ChatService = new ChatService(
@@ -453,9 +454,12 @@ public sealed class ChatServiceTests
         public Task<IReadOnlyCollection<ConversationParticipantReadState>> GetReadStatesForParticipantAsync(Guid requestedCompanyId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyCollection<ConversationParticipantReadState>>([]);
 
-        public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid requestedCompanyId, string externalMessageId, CancellationToken cancellationToken)
+        public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid requestedCompanyId, string externalMessageId, ConversationMessageProvider? provider, CancellationToken cancellationToken)
         {
-            return Task.FromResult(Messages.FirstOrDefault(message => message.CompanyId == requestedCompanyId && message.ExternalMessageId == externalMessageId));
+            return Task.FromResult(Messages.FirstOrDefault(message =>
+                message.CompanyId == requestedCompanyId
+                && message.ExternalMessageId == externalMessageId
+                && (provider is null || message.Provider == provider)));
         }
 
         public Task<Guest?> GetGuestAsync(Guid requestedCompanyId, Guid guestId, CancellationToken cancellationToken)
@@ -541,10 +545,16 @@ public sealed class ChatServiceTests
     private sealed class NoOpConversationRealtimePublisher : IConversationRealtimePublisher
     {
         public Task PublishMessageCreatedAsync(Guid companyId, Guid conversationId, object payload, bool internalOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishTypingStartedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishTypingStoppedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher
+    {
+        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

@@ -19,6 +19,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
     public DbSet<ConversationParticipantReadState> ConversationParticipantReadStates => Set<ConversationParticipantReadState>();
+    public DbSet<WhatsAppIntegration> WhatsAppIntegrations => Set<WhatsAppIntegration>();
     public DbSet<Models.ServiceProvider> ServiceProviders => Set<Models.ServiceProvider>();
     public DbSet<ServiceRequest> ServiceRequests => Set<ServiceRequest>();
     public DbSet<Payment> Payments => Set<Payment>();

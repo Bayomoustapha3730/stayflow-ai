@@ -1,4 +1,5 @@
 import type { ConversationSummary } from "../../models/hostConversations";
+import { channelLabel } from "../../models/enums";
 import { formatRelativeTime, formatReservationRange, formatSenderLabel } from "../../utils/dateTime";
 import { HostStatusBadge } from "./HostStatusBadge";
 
@@ -10,7 +11,7 @@ interface HostConversationListItemProps {
 
 export function HostConversationListItem({ item, isSelected, onSelect }: HostConversationListItemProps) {
   const guestName = item.guest?.fullName?.trim() || `${item.guest?.firstName ?? ""} ${item.guest?.lastName ?? ""}`.trim() || "Guest";
-  const guestEmail = item.guest?.email?.trim() || "Email unavailable";
+  const guestEmail = item.guest?.email?.trim() || item.guest?.maskedPhoneNumber || "Contact unavailable";
   const propertyName = item.property?.name?.trim() || "Property unavailable";
   const reservationNumber = item.reservation?.confirmationNumber?.trim() || "No reservation number";
   const assignedHost = item.assignedUser?.fullName?.trim();
@@ -37,6 +38,7 @@ export function HostConversationListItem({ item, isSelected, onSelect }: HostCon
       </div>
 
       <div className="sf-host-row-tags">
+        <span className="sf-host-pill">{channelLabel(item.channel)}</span>
         {item.requiresHostAttention ? <span className="sf-host-pill sf-host-pill-attention">Needs attention</span> : null}
         {item.humanTakeoverEnabled ? <span className="sf-host-pill sf-host-pill-human">Human takeover</span> : null}
         {assignedHost ? <span className="sf-host-pill">Assigned: {assignedHost}</span> : null}

@@ -1,5 +1,6 @@
 import { ConversationMessageType, ConversationSenderType } from "../../models/enums";
 import type { ConversationMessage } from "../../models/hostConversations";
+import { ConversationMessageDeliveryStatus, deliveryStatusLabel } from "../../models/messageDelivery";
 
 interface HostConversationMessageProps {
   message: ConversationMessage;
@@ -54,6 +55,8 @@ export function HostConversationMessage({ message, onRetry }: HostConversationMe
         hour: "numeric",
         minute: "2-digit"
       }).format(new Date(message.sentAt));
+  const deliveryLabel = deliveryStatusLabel(message.deliveryStatus);
+  const showDeliveryState = !message.isInternal && message.senderType !== ConversationSenderType.Guest && (Boolean(message.optimisticId) || deliveryLabel !== null);
 
   return (
     <li className={messageClassName(message)}>
@@ -64,10 +67,12 @@ export function HostConversationMessage({ message, onRetry }: HostConversationMe
           <span className="sf-host-message-staff-tag">Staff only</span>
         ) : null}
         <time dateTime={message.sentAt}>{timestamp}</time>
-        {message.deliveryStatus === "sending" ? <span>Sending...</span> : null}
-        {message.deliveryStatus === "failed" ? (
+        {message.optimisticId ? <span>Sending...</span> : null}
+        {showDeliveryState && !message.optimisticId && deliveryLabel ? <span>{deliveryLabel}</span> : null}
+        {message.deliveryStatus === ConversationMessageDeliveryStatus.Failed ? (
           <>
             <span className="sf-host-message-failed">Failed</span>
+            <span>{message.failureReason?.trim() || "Check the WhatsApp integration configuration and retry from the inbox."}</span>
             {onRetry ? (
               <button type="button" className="sf-host-message-retry" onClick={() => onRetry(message.id)}>
                 Retry

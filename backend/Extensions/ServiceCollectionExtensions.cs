@@ -6,6 +6,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddHttpContextAccessor();
         services.AddSignalR();
+        services.AddHttpClient();
         services.AddOptions<Services.ReservationContextOptions>()
             .Bind(configuration.GetSection(Services.ReservationContextOptions.SectionName))
             .Validate(options => options.PreArrivalWindowDays >= 0 && options.PreArrivalWindowDays <= 365, "Reservation context pre-arrival window must be between 0 and 365 days.")
@@ -52,7 +53,12 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.MaximumSelectedKnowledgeItems is >= 1 and <= 8, "AI reply orchestrator selected knowledge item limit must be between 1 and 8.")
             .Validate(options => options.MaximumSelectedKnowledgeCharacters is >= 1000 and <= 30000, "AI reply orchestrator selected knowledge character limit must be between 1000 and 30000.")
             .ValidateOnStart();
+        services.AddOptions<Services.WhatsAppCloudOptions>()
+            .Bind(configuration.GetSection(Services.WhatsAppCloudOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.WhatsAppCloudOptions>, Services.WhatsAppCloudOptionsValidator>();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.OpenAIOptions>, Services.OpenAIOptionsValidator>();
+        services.AddScoped<Services.ITenantExecutionContextAccessor, Services.TenantExecutionContextAccessor>();
         services.AddScoped<Services.ICurrentTenantContext, Services.CurrentTenantContext>();
         services.AddScoped<Repositories.ICompanyRepository, Repositories.CompanyRepository>();
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
@@ -63,6 +69,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Repositories.IGuestRepository, Repositories.GuestRepository>();
         services.AddScoped<Services.IGuestService, Services.GuestService>();
         services.AddScoped<Repositories.IConversationRepository, Repositories.ConversationRepository>();
+        services.AddScoped<Repositories.IWhatsAppRepository, Repositories.WhatsAppRepository>();
         services.AddScoped<Services.IConversationService, Services.ConversationService>();
         services.AddScoped<Repositories.IReservationRepository, Repositories.ReservationRepository>();
         services.AddSingleton<Services.IReservationStatusTransitionPolicy, Services.ReservationStatusTransitionPolicy>();
@@ -81,6 +88,24 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.AI.Orchestration.IAIReplyOrchestrator, Services.AI.Orchestration.AIReplyOrchestrator>();
         services.AddScoped<Services.ICopilotService, Services.CopilotService>();
         services.AddScoped<Services.IConversationRealtimePublisher, Services.ConversationRealtimePublisher>();
+        services.AddSingleton<Services.IWhatsAppDevelopmentMessageStore, Services.WhatsAppDevelopmentMessageStore>();
+        services.AddScoped<Services.IPhoneNumberNormalizer, Services.PhoneNumberNormalizer>();
+        services.AddScoped<Services.WhatsAppCloudClient>();
+        services.AddScoped<Services.DevelopmentWhatsAppCloudClient>();
+        services.AddScoped<Services.IWhatsAppCloudClient>(serviceProvider =>
+        {
+            var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.WhatsAppCloudOptions>>().Value;
+            return options.DevelopmentMode
+                ? serviceProvider.GetRequiredService<Services.DevelopmentWhatsAppCloudClient>()
+                : serviceProvider.GetRequiredService<Services.WhatsAppCloudClient>();
+        });
+        services.AddScoped<Services.IConversationChannelSender, Services.WebConversationChannelSender>();
+        services.AddScoped<Services.IConversationChannelSender, Services.WhatsAppConversationChannelSender>();
+        services.AddScoped<Services.IConversationChannelDispatcher, Services.ConversationChannelDispatcher>();
+        services.AddSingleton<Services.IWhatsAppWebhookQueue, Services.WhatsAppWebhookQueue>();
+        services.AddSingleton<Services.IWhatsAppWebhookSignatureVerifier, Services.WhatsAppWebhookSignatureVerifier>();
+        services.AddHostedService<Services.WhatsAppWebhookBackgroundService>();
+        services.AddScoped<Services.IWhatsAppWebhookProcessor, Services.WhatsAppWebhookProcessor>();
         services.AddScoped<Services.IChatService, Services.ChatService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();

@@ -20,12 +20,15 @@ public sealed class AddGuestMessageRequest
     public string Content { get; init; } = string.Empty;
     public string? ExternalMessageId { get; init; }
     public DateTimeOffset? SentAt { get; init; }
+    public ConversationMessageProvider Provider { get; init; } = ConversationMessageProvider.None;
+    public ConversationMessageDeliveryStatus? DeliveryStatus { get; init; }
 }
 
 public sealed class AddHostMessageRequest
 {
     public string Content { get; init; } = string.Empty;
     public DateTimeOffset? SentAt { get; init; }
+    public ConversationMessageProvider Provider { get; init; } = ConversationMessageProvider.None;
 }
 
 public sealed class AddInternalNoteRequest
@@ -123,6 +126,13 @@ public sealed class ConversationMessageResponse
     public ConversationMessageType MessageType { get; init; }
     public string Content { get; init; } = string.Empty;
     public bool IsInternal { get; init; }
+    public ConversationMessageProvider Provider { get; init; }
+    public ConversationMessageDeliveryStatus? DeliveryStatus { get; init; }
+    public DateTimeOffset? DeliveredAt { get; init; }
+    public DateTimeOffset? ReadAt { get; init; }
+    public DateTimeOffset? FailedAt { get; init; }
+    public string? FailureCode { get; init; }
+    public string? FailureReason { get; init; }
     public DateTimeOffset SentAt { get; init; }
 }
 
@@ -139,6 +149,7 @@ public sealed class ConversationGuestSummary
     public string LastName { get; init; } = string.Empty;
     public string FullName { get; init; } = string.Empty;
     public string? Email { get; init; }
+    public string? MaskedPhoneNumber { get; init; }
     public string PreferredLanguage { get; init; } = string.Empty;
 }
 

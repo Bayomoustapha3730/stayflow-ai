@@ -43,6 +43,8 @@ dotnet run
 - `GET /health` - health check endpoint
 - `GET /openapi/v1.json` - OpenAPI document in development
 - `GET /api/status` - lightweight backend status endpoint
+- `GET /webhooks/whatsapp` - Meta webhook verification endpoint
+- `POST /webhooks/whatsapp` - Meta webhook delivery/status callback endpoint
 - `GET /companies` - paginated company list with optional `search`
 - `GET /companies/{id}` - company details
 - `POST /companies` - create company
@@ -76,6 +78,8 @@ Apply migrations to the configured PostgreSQL database:
 ```bash
 dotnet tool run dotnet-ef database update --project backend/backend.csproj --startup-project backend/backend.csproj
 ```
+
+WhatsApp foundation configuration is documented in [`/docs/developer/WhatsAppCloudIntegration.md`](../docs/developer/WhatsAppCloudIntegration.md).
 
 Run tests:
 
