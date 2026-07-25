@@ -7,6 +7,8 @@ using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
+using StayFlow.Api.Services.AI.Intent;
+using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Tests;
 
@@ -22,9 +24,9 @@ public sealed class ChatServiceTests
         Assert.True(response.Success);
         Assert.Single(fixture.Repository.Conversations);
         Assert.Equal(2, fixture.Repository.Messages.Count);
-        Assert.True(fixture.Orchestrator.WasCalled);
+        Assert.True(fixture.ReplyOrchestrator.WasCalled);
         Assert.Equal(ConversationSenderType.AI, response.Data!.AssistantMessage!.SenderType);
-        Assert.Equal("DevelopmentAIProvider", response.Data.ProviderMetadata!.ProviderName);
+        Assert.Equal("Development", response.Data.ProviderMetadata!.ProviderName);
     }
 
     [Fact]
@@ -147,7 +149,7 @@ public sealed class ChatServiceTests
 
         Assert.False(response.Success);
         Assert.Equal("Conversation state does not allow this message.", response.Message);
-        Assert.False(fixture.Orchestrator.WasCalled);
+        Assert.False(fixture.ReplyOrchestrator.WasCalled);
     }
 
     [Fact]
@@ -160,7 +162,7 @@ public sealed class ChatServiceTests
         var response = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Hello") with { ConversationId = conversation.Id }, CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.False(fixture.Orchestrator.WasCalled);
+        Assert.False(fixture.ReplyOrchestrator.WasCalled);
         Assert.Contains(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest);
         Assert.True(response.Data!.RequiresHostAttention);
     }
@@ -171,13 +173,39 @@ public sealed class ChatServiceTests
         var fixture = new Fixture();
 
         var first = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Hello") with { ExternalMessageId = "web-1" }, CancellationToken.None);
-        fixture.Orchestrator.WasCalled = false;
+        fixture.ReplyOrchestrator.WasCalled = false;
         var second = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Again") with { ExternalMessageId = "web-1" }, CancellationToken.None);
 
         Assert.True(first.Success);
         Assert.True(second.Success);
-        Assert.False(fixture.Orchestrator.WasCalled);
+        Assert.False(fixture.ReplyOrchestrator.WasCalled);
         Assert.Single(fixture.Repository.Messages, message => message.ExternalMessageId == "web-1");
+    }
+
+    [Fact]
+    public async Task SendGuestMessageAsync_RequiresHumanReview_UsesSafeFallbackAndHostAttention()
+    {
+        var fixture = new Fixture();
+        fixture.ReplyOrchestrator.Result = new AIReplyOrchestrationResult
+        {
+            ConversationId = Guid.NewGuid(),
+            Operation = AIReplyOperation.GeneratedHostReply,
+            Output = "The guest Wi-Fi password is DifferentPassword.",
+            RequiresHumanReview = true,
+            Provider = "Development",
+            IsMock = true,
+            GeneratedAt = DateTimeOffset.UtcNow,
+            CompletedStages = [AIReplyOrchestrationStage.ResultAssembled],
+            DurationMilliseconds = 3,
+            DetectedIntent = new GuestIntentResult(GuestIntent.WiFi, 0.91, ["wifi"], false, "test")
+        };
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("What is the Wi-Fi password?"), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(ConversationStatus.AwaitingHost, response.Data!.ConversationStatus);
+        Assert.True(response.Data.HumanTakeoverEnabled);
+        Assert.Equal("I need a host or support team member to help with this request.", response.Data.AssistantMessage!.Content);
     }
 
     [Fact]
@@ -263,11 +291,11 @@ public sealed class ChatServiceTests
                 new ConversationStatusTransitionPolicy(),
                 new NoOpConversationRealtimePublisher(),
                 Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
-            Orchestrator = new FakeAIOrchestrator();
+            ReplyOrchestrator = new FakeAIReplyOrchestrator();
             ChatService = new ChatService(
                 Repository,
                 ConversationService,
-                Orchestrator,
+                ReplyOrchestrator,
                 TenantContext,
                 Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
         }
@@ -278,7 +306,7 @@ public sealed class ChatServiceTests
         public FakeConversationRepository Repository { get; }
         public FakeCurrentTenantContext TenantContext { get; }
         public ConversationService ConversationService { get; }
-        public FakeAIOrchestrator Orchestrator { get; }
+        public FakeAIReplyOrchestrator ReplyOrchestrator { get; }
         public ChatService ChatService { get; }
 
         public SendChatMessageRequest Request(string message)
@@ -293,20 +321,45 @@ public sealed class ChatServiceTests
         }
     }
 
-    private sealed class FakeAIOrchestrator : IAIOrchestrator
+    private sealed class FakeAIReplyOrchestrator : IAIReplyOrchestrator
     {
         public bool WasCalled { get; set; }
-        public AIOrchestrationResult Result { get; set; } = new()
+        public AIReplyOrchestrationResult Result { get; set; } = new()
         {
-            Outcome = AIOrchestrationOutcome.Responded,
-            GuestSafeMessage = "Here is a safe answer.",
-            ProviderMetadata = new AIProviderMetadata { ProviderName = "DevelopmentAIProvider", ModelName = "development", RequestId = "dev-1" }
+            ConversationId = Guid.NewGuid(),
+            Operation = AIReplyOperation.GeneratedHostReply,
+            Output = "Here is a safe answer.",
+            Provider = "Development",
+            IsMock = true,
+            GeneratedAt = DateTimeOffset.UtcNow,
+            CompletedStages = [AIReplyOrchestrationStage.ResultAssembled],
+            DurationMilliseconds = 4,
+            DetectedIntent = new GuestIntentResult(GuestIntent.GeneralQuestion, 0.7, ["question"], false, "test")
         };
 
-        public Task<AIOrchestrationResult> ProcessAsync(AIOrchestrationRequest request, CancellationToken cancellationToken)
+        public Task<AIReplyOrchestrationResult?> OrchestrateAsync(Guid companyId, AIReplyOrchestrationRequest request, CancellationToken cancellationToken)
         {
             WasCalled = true;
-            return Task.FromResult(Result);
+            return Task.FromResult<AIReplyOrchestrationResult?>(new AIReplyOrchestrationResult
+            {
+                ConversationId = request.ConversationId,
+                Operation = request.Operation,
+                Output = Result.Output,
+                Suggestions = Result.Suggestions,
+                ContextMessageCount = Result.ContextMessageCount,
+                Confidence = Result.Confidence,
+                Sources = Result.Sources,
+                Warnings = Result.Warnings,
+                DetectedIntent = Result.DetectedIntent,
+                Provider = Result.Provider,
+                IsMock = Result.IsMock,
+                GeneratedAt = Result.GeneratedAt,
+                ContextTruncated = Result.ContextTruncated,
+                FallbackUsed = Result.FallbackUsed,
+                CompletedStages = Result.CompletedStages,
+                DurationMilliseconds = Result.DurationMilliseconds,
+                RequiresHumanReview = Result.RequiresHumanReview
+            });
         }
     }
 

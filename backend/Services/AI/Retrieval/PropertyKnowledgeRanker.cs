@@ -1,4 +1,5 @@
 using System.Text;
+using StayFlow.Api.Models;
 using StayFlow.Api.Services.AI.Context;
 using StayFlow.Api.Services.AI.Intent;
 
@@ -74,6 +75,7 @@ public sealed class PropertyKnowledgeRanker : IPropertyKnowledgeRanker
         var normalizedGuest = Normalize(latestGuestMessage);
         var normalizedTitle = Normalize(item.Title);
         var normalizedContent = Normalize(item.Content);
+        var normalizedTags = item.Tags.Select(Normalize).Where(tag => !string.IsNullOrWhiteSpace(tag)).ToList();
 
         if (CategoryMatchesIntent(item.Category, intent.Intent))
         {
@@ -95,6 +97,12 @@ public sealed class PropertyKnowledgeRanker : IPropertyKnowledgeRanker
                 score += 10;
                 reasons.Add($"Content matched '{term}'.");
             }
+
+            if (normalizedTags.Any(tag => tag.Contains(term, StringComparison.Ordinal)))
+            {
+                score += 12;
+                reasons.Add($"Tag matched '{term}'.");
+            }
         }
 
         foreach (var phrase in ExtractPhrases(normalizedGuest))
@@ -108,6 +116,12 @@ public sealed class PropertyKnowledgeRanker : IPropertyKnowledgeRanker
             {
                 score += 6;
                 reasons.Add($"Matched phrase overlap '{phrase}'.");
+            }
+
+            if (normalizedTags.Any(tag => tag.Contains(phrase, StringComparison.Ordinal)))
+            {
+                score += 8;
+                reasons.Add($"Tag overlap matched '{phrase}'.");
             }
         }
 
@@ -150,6 +164,8 @@ public sealed class PropertyKnowledgeRanker : IPropertyKnowledgeRanker
             (PropertyKnowledgeCategory.Trash, GuestIntent.Trash) => true,
             (PropertyKnowledgeCategory.Emergency, GuestIntent.Emergency or GuestIntent.Maintenance) => true,
             (PropertyKnowledgeCategory.Accessibility, GuestIntent.Accessibility) => true,
+            (PropertyKnowledgeCategory.LocalRecommendations, GuestIntent.GeneralQuestion) => true,
+            (PropertyKnowledgeCategory.Maintenance, GuestIntent.Maintenance) => true,
             _ => false
         };
     }

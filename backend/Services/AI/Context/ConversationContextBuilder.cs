@@ -7,6 +7,7 @@ namespace StayFlow.Api.Services.AI.Context;
 
 public sealed class ConversationContextBuilder(
     IConversationRepository conversationRepository,
+    IPropertyKnowledgeRepository propertyKnowledgeRepository,
     IOptions<ConversationContextLimits> limitsOptions,
     ILogger<ConversationContextBuilder> logger) : IConversationContextBuilder
 {
@@ -32,7 +33,8 @@ public sealed class ConversationContextBuilder(
         var warnings = new HashSet<ConversationContextWarning>();
 
         var visibleMessages = BuildVisibleMessages(history.Items, limits, warnings, out var messageChars, out var messagesTruncated);
-        var knowledgeItems = BuildKnowledgeItems(conversation.Property, limits, warnings, out var knowledgeChars, out var knowledgeTruncated);
+        var approvedKnowledge = await LoadApprovedKnowledgeAsync(companyId, conversation.PropertyId, cancellationToken);
+        var knowledgeItems = BuildKnowledgeItems(approvedKnowledge, limits, warnings, out var knowledgeChars, out var knowledgeTruncated);
 
         var totalContextChars = messageChars + knowledgeChars;
         var totalCharsTruncated = false;
@@ -89,11 +91,11 @@ public sealed class ConversationContextBuilder(
         {
             sourceMetadata.Add(new ConversationContextSource(
                 ConversationContextSourceType.PropertyKnowledge,
-                null,
+                item.SourceId,
                 item.Title,
                 item.Category.ToString(),
                 item.LastUpdated,
-                "Approved property knowledge relevant for guest responses.",
+                "Approved property knowledge available for AI grounding.",
                 item.IsApproved));
         }
 
@@ -214,7 +216,7 @@ public sealed class ConversationContextBuilder(
     }
 
     private static List<ConversationContextKnowledgeItem> BuildKnowledgeItems(
-        Property? property,
+        IReadOnlyCollection<PropertyKnowledgeArticle> knowledgeArticles,
         ConversationContextLimits limits,
         HashSet<ConversationContextWarning> warnings,
         out int charCount,
@@ -223,19 +225,19 @@ public sealed class ConversationContextBuilder(
         charCount = 0;
         truncated = false;
 
-        if (property is null)
+        if (knowledgeArticles.Count == 0)
         {
             return [];
         }
 
-        var approved = property.PropertyKnowledgeArticles
-            .Where(article => article.IsActive && article.CompanyId == property.CompanyId && article.PropertyId == property.Id)
-            .OrderBy(article => article.Title)
+        var ordered = knowledgeArticles
+            .OrderByDescending(article => article.Priority)
             .ThenByDescending(article => article.UpdatedAt)
+            .ThenBy(article => article.Title)
             .ToList();
 
-        var selected = approved.Take(limits.MaxKnowledgeItems).ToList();
-        if (approved.Count > selected.Count)
+        var selected = ordered.Take(limits.MaxKnowledgeItems).ToList();
+        if (ordered.Count > selected.Count)
         {
             truncated = true;
             warnings.Add(ConversationContextWarning.ContextTruncated);
@@ -245,7 +247,12 @@ public sealed class ConversationContextBuilder(
         foreach (var item in selected)
         {
             var title = NormalizeWhitespace(item.Title);
-            var content = NormalizeWhitespace(item.Content);
+            var content = NormalizeKnowledgeContent(item.Content);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                continue;
+            }
+
             if (content.Length > limits.MaxKnowledgeItemCharacters)
             {
                 content = content[..limits.MaxKnowledgeItemCharacters];
@@ -255,15 +262,45 @@ public sealed class ConversationContextBuilder(
 
             charCount += content.Length;
             mapped.Add(new ConversationContextKnowledgeItem(
+                item.Id.ToString("N"),
                 title,
                 content,
-                MapCategory(title, content),
-                item.UpdatedAt,
-                0,
-                true));
+                item.Category,
+                item.UpdatedAt.ToUniversalTime(),
+                item.Priority,
+                item.IsApproved,
+                NormalizeTags(item.Tags),
+                NormalizeOptional(item.Summary)));
         }
 
         return mapped;
+    }
+
+    private async Task<IReadOnlyCollection<PropertyKnowledgeArticle>> LoadApprovedKnowledgeAsync(
+        Guid companyId,
+        Guid? propertyId,
+        CancellationToken cancellationToken)
+    {
+        if (propertyId is not { } resolvedPropertyId)
+        {
+            return [];
+        }
+
+        var items = await propertyKnowledgeRepository.GetApprovedActiveForPropertyAsync(
+            companyId,
+            resolvedPropertyId,
+            cancellationToken);
+
+        return items
+            .Where(item => item.CompanyId == companyId
+                && item.PropertyId == resolvedPropertyId
+                && item.IsApproved
+                && item.IsActive
+                && !item.IsDeleted)
+            .OrderByDescending(item => item.Priority)
+            .ThenByDescending(item => item.UpdatedAt)
+            .ThenBy(item => item.Title)
+            .ToList();
     }
 
     private static void TrimForTotalCharacterLimit(
@@ -315,29 +352,51 @@ public sealed class ConversationContextBuilder(
             : $"Reservation {reservation.ConfirmationNumber.Trim()}";
     }
 
-    private static PropertyKnowledgeCategory MapCategory(string title, string content)
+    private static IReadOnlyCollection<string> NormalizeTags(string? tags)
     {
-        var text = $"{title} {content}".ToLowerInvariant();
+        return string.IsNullOrWhiteSpace(tags)
+            ? []
+            : tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(NormalizeWhitespace)
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+    }
 
-        if (text.Contains("wifi") || text.Contains("wi-fi") || text.Contains("internet")) return PropertyKnowledgeCategory.WiFi;
-        if (text.Contains("parking") || text.Contains("garage")) return PropertyKnowledgeCategory.Parking;
-        if (text.Contains("check in") || text.Contains("check-in") || text.Contains("arrival")) return PropertyKnowledgeCategory.CheckIn;
-        if (text.Contains("check out") || text.Contains("check-out") || text.Contains("departure")) return PropertyKnowledgeCategory.Checkout;
-        if (text.Contains("house rule") || text.Contains("quiet") || text.Contains("smoking")) return PropertyKnowledgeCategory.HouseRules;
-        if (text.Contains("amenity") || text.Contains("pool") || text.Contains("gym")) return PropertyKnowledgeCategory.Amenities;
-        if (text.Contains("laundry") || text.Contains("washer") || text.Contains("dryer")) return PropertyKnowledgeCategory.Laundry;
-        if (text.Contains("thermostat") || text.Contains("temperature") || text.Contains("ac") || text.Contains("heating")) return PropertyKnowledgeCategory.Thermostat;
-        if (text.Contains("trash") || text.Contains("waste") || text.Contains("garbage")) return PropertyKnowledgeCategory.Trash;
-        if (text.Contains("emergency") || text.Contains("ambulance") || text.Contains("police") || text.Contains("fire")) return PropertyKnowledgeCategory.Emergency;
-        if (text.Contains("accessibility") || text.Contains("wheelchair") || text.Contains("elevator")) return PropertyKnowledgeCategory.Accessibility;
-        if (text.Contains("faq") || text.Contains("frequently asked")) return PropertyKnowledgeCategory.FAQ;
-
-        return PropertyKnowledgeCategory.Other;
+    private static string? NormalizeOptional(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : NormalizeWhitespace(value);
     }
 
     private static string NormalizeWhitespace(string value)
     {
         return string.Join(' ', value
             .Split(['\r', '\n', '\t', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
+    private static string NormalizeKnowledgeContent(string value)
+    {
+        var lines = value
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n')
+            .Select(line => string.Join(' ', line.Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)))
+            .ToList();
+
+        var compact = new List<string>(lines.Count);
+        var previousBlank = false;
+        foreach (var line in lines)
+        {
+            var isBlank = string.IsNullOrWhiteSpace(line);
+            if (isBlank && previousBlank)
+            {
+                continue;
+            }
+
+            compact.Add(isBlank ? string.Empty : line);
+            previousBlank = isBlank;
+        }
+
+        return string.Join("\n", compact).Trim();
     }
 }

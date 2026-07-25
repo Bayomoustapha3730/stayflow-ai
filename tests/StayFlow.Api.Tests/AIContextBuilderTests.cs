@@ -266,7 +266,8 @@ public sealed class AIContextBuilderTests
             PropertyId = fixture.PropertyId,
             Title = "WiFi B",
             Content = "Tenant B WiFi.",
-            IsActive = true
+            IsActive = true,
+            IsApproved = true
         });
 
         var result = await fixture.BuildAsync("What is the wifi?");
@@ -351,7 +352,8 @@ public sealed class AIContextBuilderTests
             PropertyId = fixture.PropertyId,
             Title = title,
             Content = content,
-            IsActive = isActive
+            IsActive = isActive,
+            IsApproved = true
         };
     }
 

@@ -163,6 +163,61 @@ describe("useHostConversationDetail", () => {
     await waitFor(() => expect(onUnauthorized).toHaveBeenCalled());
   });
 
+  it("renders a conversation-specific message when the conversation is missing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({
+        success: false,
+        message: "",
+        errors: [],
+        correlationId: "cid"
+      })
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const onUnauthorized = vi.fn();
+
+    const { result } = renderHook(() =>
+      useHostConversationDetail({
+        conversationId: "c-1",
+        accessToken: "host-token",
+        onUnauthorized
+      })
+    );
+
+    await waitFor(() => expect(result.current.error).toBe("This conversation is no longer available."));
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("uses the normal fallback for non-404 failures", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({
+        success: false,
+        message: "",
+        errors: [],
+        correlationId: "cid"
+      })
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const onUnauthorized = vi.fn();
+
+    const { result } = renderHook(() =>
+      useHostConversationDetail({
+        conversationId: "c-1",
+        accessToken: "host-token",
+        onUnauthorized
+      })
+    );
+
+    await waitFor(() => expect(result.current.error).toBe("Unable to load this conversation."));
+  });
+
   it("sends host reply and refreshes detail + inbox", async () => {
     const fetchMock = vi.fn().mockImplementation((url: string) => {
       if (url.includes("/messages/host")) {

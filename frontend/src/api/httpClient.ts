@@ -1,4 +1,5 @@
 import type { ApiResponse } from "../models/chat";
+import { extractSafeBackendErrorMessage, getGenericHttpErrorMessage } from "../utils/httpErrorMessages";
 
 export class ApiError extends Error {
   constructor(
@@ -16,6 +17,11 @@ export interface HttpClientOptions {
   timeoutMs?: number;
 }
 
+export interface HttpRequestOptions {
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+}
+
 export class HttpClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
@@ -25,36 +31,54 @@ export class HttpClient {
     this.timeoutMs = options.timeoutMs ?? 20000;
   }
 
-  async get<T>(path: string): Promise<T> {
-    return this.request<T>(path, { method: "GET" });
+  async get<T>(path: string, options?: HttpRequestOptions): Promise<T> {
+    return this.request<T>(path, { method: "GET" }, options);
   }
 
-  async post<T>(path: string, body?: unknown): Promise<T> {
+  async post<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
     return this.request<T>(path, {
       method: "POST",
       body: body === undefined ? undefined : JSON.stringify(body)
-    });
+    }, options);
   }
 
-  private async request<T>(path: string, init: RequestInit): Promise<T> {
+  async put<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
+    return this.request<T>(path, {
+      method: "PUT",
+      body: body === undefined ? undefined : JSON.stringify(body)
+    }, options);
+  }
+
+  async delete<T>(path: string, options?: HttpRequestOptions): Promise<T> {
+    return this.request<T>(path, { method: "DELETE" }, options);
+  }
+
+  private async request<T>(path: string, init: RequestInit, options?: HttpRequestOptions): Promise<T> {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), this.timeoutMs);
     const token = this.options.getAccessToken?.();
+    const signal = options?.signal ?? controller.signal;
 
     try {
       const response = await fetch(`${this.baseUrl}${path}`, {
         ...init,
-        signal: controller.signal,
+        signal,
         headers: {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(options?.headers ?? {}),
           ...init.headers
         }
       });
 
       const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
       if (!response.ok || !payload?.success) {
-        throw new ApiError(safeErrorMessage(response.status, payload?.message), response.status, payload?.errors ?? []);
+        const safeMessage = extractSafeBackendErrorMessage(payload?.message, payload?.errors);
+        const message = response.status === 401
+          ? getGenericHttpErrorMessage(response.status)
+          : safeMessage ?? getGenericHttpErrorMessage(response.status);
+
+        throw new ApiError(message, response.status, payload?.errors ?? []);
       }
 
       if (payload.data === undefined) {
@@ -71,18 +95,9 @@ export class HttpClient {
         throw new ApiError("The request timed out. Please try again.", 408);
       }
 
-      throw new ApiError("Guest services are temporarily unavailable.", 0);
+      throw new ApiError(getGenericHttpErrorMessage(0), 0);
     } finally {
       window.clearTimeout(timeout);
     }
   }
-}
-
-function safeErrorMessage(status: number, serverMessage?: string): string {
-  if (status === 401) return "Your session has expired. Please sign in again.";
-  if (status === 403) return "You do not have permission to use chat.";
-  if (status === 404) return "This conversation is no longer available.";
-  if (status === 409) return "This conversation changed. Please refresh and try again.";
-  if (status >= 500) return "Guest services are temporarily unavailable.";
-  return serverMessage || "We could not complete the request. Please try again.";
 }

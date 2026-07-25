@@ -4,6 +4,7 @@ import { ApiError, HttpClient } from "../api/httpClient";
 import { useConversationRealtime } from "./useConversationRealtime";
 import { ConversationMessageType, ConversationSenderType, ConversationStatus } from "../models/enums";
 import type { ConversationDetail, ConversationMessage } from "../models/hostConversations";
+import { getConversationActionErrorMessage, getConversationLoadErrorMessage } from "../utils/conversationErrors";
 
 const maxMessageLength = 2000;
 
@@ -185,8 +186,7 @@ export function useHostConversationDetail({
           return false;
         }
 
-        const message = failure instanceof Error ? failure.message : "Unable to load this conversation.";
-        setError(message);
+        setError(getConversationLoadErrorMessage(failure));
         return false;
       } finally {
         if (version === requestVersion.current) {
@@ -273,8 +273,7 @@ export function useHostConversationDetail({
           return false;
         }
 
-        const message = failure instanceof Error ? failure.message : "The action could not be completed.";
-        setActionError(message);
+        setActionError(getConversationActionErrorMessage(failure));
         return false;
       } finally {
         setBusy(false);
@@ -335,8 +334,7 @@ export function useHostConversationDetail({
           return false;
         }
 
-        const message = failure instanceof Error ? failure.message : "The action could not be completed.";
-        setActionError(message);
+        setActionError(getConversationActionErrorMessage(failure));
         setMessages((current) =>
           current.map((item) =>
             item.id === optimisticId
@@ -407,8 +405,7 @@ export function useHostConversationDetail({
           return false;
         }
 
-        const message = failure instanceof Error ? failure.message : "The action could not be completed.";
-        setActionError(message);
+        setActionError(getConversationActionErrorMessage(failure));
         setMessages((current) =>
           current.map((item) =>
             item.id === optimisticId

@@ -58,6 +58,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
         services.AddScoped<Repositories.IPropertyRepository, Repositories.PropertyRepository>();
         services.AddScoped<Services.IPropertyService, Services.PropertyService>();
+        services.AddScoped<Repositories.IPropertyKnowledgeRepository, Repositories.PropertyKnowledgeRepository>();
+        services.AddScoped<Services.IPropertyKnowledgeService, Services.PropertyKnowledgeService>();
         services.AddScoped<Repositories.IGuestRepository, Repositories.GuestRepository>();
         services.AddScoped<Services.IGuestService, Services.GuestService>();
         services.AddScoped<Repositories.IConversationRepository, Repositories.ConversationRepository>();

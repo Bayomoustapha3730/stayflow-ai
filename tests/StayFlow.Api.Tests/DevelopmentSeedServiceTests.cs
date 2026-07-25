@@ -88,7 +88,16 @@ public sealed class DevelopmentSeedServiceTests
         var role = userRole.Role;
         Assert.NotNull(role);
 
-        var requiredPermissions = new[] { "auth.me", "guests.read", "reservations.read", "ai.orchestrate" };
+        var requiredPermissions = new[]
+        {
+            "auth.me",
+            "properties.read",
+            "properties.manage",
+            "properties.approve",
+            "guests.read",
+            "reservations.read",
+            "ai.orchestrate"
+        };
         var rolePermissionNames = role.RolePermissions.Select(rp => rp.Permission.Name).ToList();
 
         foreach (var permission in requiredPermissions)

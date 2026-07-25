@@ -182,6 +182,7 @@ public sealed class CopilotServiceTests
             Service = new CopilotService(
                 new ConversationContextBuilder(
                     Repository,
+                    new FakePropertyKnowledgeRepository(),
                     Options.Create(new ConversationContextLimits()),
                     NullLogger<ConversationContextBuilder>.Instance),
                 new ContextConfidenceEvaluator(),
@@ -250,6 +251,30 @@ public sealed class CopilotServiceTests
                 RequiresHumanReview = false
             });
         }
+    }
+
+    private sealed class FakePropertyKnowledgeRepository : IPropertyKnowledgeRepository
+    {
+        public Task<Property?> GetPropertyAsync(Guid companyId, Guid propertyId, CancellationToken cancellationToken)
+            => Task.FromResult<Property?>(null);
+
+        public Task<PagedResult<PropertyKnowledgeArticle>> GetPagedAsync(Guid companyId, Guid propertyId, StayFlow.Api.DTOs.PropertyKnowledge.PropertyKnowledgeListQuery query, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<PropertyKnowledgeArticle?> GetByIdAsync(Guid companyId, Guid propertyId, Guid knowledgeId, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyCollection<PropertyKnowledgeArticle>> GetApprovedActiveForPropertyAsync(Guid companyId, Guid propertyId, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyCollection<PropertyKnowledgeArticle>>([]);
+
+        public Task AddAsync(PropertyKnowledgeArticle article, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task AddAuditLogAsync(AuditLog auditLog, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task SaveChangesAsync(CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 
     private sealed class FakeConversationRepository(Guid companyId) : IConversationRepository

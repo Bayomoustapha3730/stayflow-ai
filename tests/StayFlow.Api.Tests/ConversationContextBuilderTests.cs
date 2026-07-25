@@ -32,14 +32,16 @@ public sealed class ConversationContextBuilderTests
         conversation.ReservationId = fixture.Reservation.Id;
         fixture.Repository.Conversations.Add(conversation);
 
-        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
         {
             Id = Guid.NewGuid(),
             CompanyId = fixture.CompanyId,
             PropertyId = fixture.Property.Id,
             Title = "Wi-Fi Information",
             Content = "Network StayFlow, password 12345678",
-            IsActive = true
+            IsActive = true,
+            IsApproved = true,
+            UpdatedAt = DateTimeOffset.UtcNow
         });
 
         var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
@@ -77,23 +79,27 @@ public sealed class ConversationContextBuilderTests
         var conversation = fixture.Repository.NewConversation();
         fixture.Repository.Conversations.Add(conversation);
 
-        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
         {
             Id = Guid.NewGuid(),
             CompanyId = fixture.CompanyId,
             PropertyId = fixture.Property.Id,
             Title = "House Rules",
             Content = "No smoking",
-            IsActive = true
+            IsActive = true,
+            IsApproved = true,
+            UpdatedAt = DateTimeOffset.UtcNow
         });
-        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
         {
             Id = Guid.NewGuid(),
             CompanyId = fixture.CompanyId,
             PropertyId = fixture.Property.Id,
             Title = "Draft Note",
             Content = "Not approved",
-            IsActive = false
+            IsActive = false,
+            IsApproved = true,
+            UpdatedAt = DateTimeOffset.UtcNow
         });
 
         var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
@@ -125,23 +131,27 @@ public sealed class ConversationContextBuilderTests
             fixture.Repository.NewMessage(conversation, "Guest follow up with long text", ConversationSenderType.Guest, sentAt: DateTimeOffset.UtcNow.AddMinutes(2))
         ]);
 
-        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
         {
             Id = Guid.NewGuid(),
             CompanyId = fixture.CompanyId,
             PropertyId = fixture.Property.Id,
             Title = "Wi-Fi",
             Content = "Very long wifi instructions",
-            IsActive = true
+            IsActive = true,
+            IsApproved = true,
+            UpdatedAt = DateTimeOffset.UtcNow
         });
-        fixture.Property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
         {
             Id = Guid.NewGuid(),
             CompanyId = fixture.CompanyId,
             PropertyId = fixture.Property.Id,
             Title = "Parking",
             Content = "Very long parking instructions",
-            IsActive = true
+            IsActive = true,
+            IsApproved = true,
+            UpdatedAt = DateTimeOffset.UtcNow
         });
 
         var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
@@ -168,6 +178,165 @@ public sealed class ConversationContextBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_PreservesMeaningfulKnowledgeLineBreaks()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Title = "Guest Wi-Fi",
+            Content = "Network: StayFlowGuest\r\n\r\nPassword:\tDemoStay2026",
+            IsActive = true,
+            IsApproved = true,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
+
+        Assert.NotNull(context);
+        var content = Assert.Single(context!.ApprovedKnowledgeItems).Content;
+        Assert.Contains("Network: StayFlowGuest\n\nPassword: DemoStay2026", content);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ExcludesUnapprovedAndDeletedAndCrossPropertyKnowledge()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        fixture.KnowledgeRepository.KnowledgeItems.AddRange(
+        [
+            new PropertyKnowledgeArticle
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = fixture.CompanyId,
+                PropertyId = fixture.Property.Id,
+                Title = "Approved item",
+                Content = "Eligible content",
+                IsActive = true,
+                IsApproved = true,
+                UpdatedAt = DateTimeOffset.UtcNow
+            },
+            new PropertyKnowledgeArticle
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = fixture.CompanyId,
+                PropertyId = fixture.Property.Id,
+                Title = "Unapproved item",
+                Content = "Should be excluded",
+                IsActive = true,
+                IsApproved = false,
+                UpdatedAt = DateTimeOffset.UtcNow
+            },
+            new PropertyKnowledgeArticle
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = fixture.CompanyId,
+                PropertyId = fixture.Property.Id,
+                Title = "Deleted item",
+                Content = "Should be excluded",
+                IsActive = true,
+                IsApproved = true,
+                IsDeleted = true,
+                UpdatedAt = DateTimeOffset.UtcNow
+            },
+            new PropertyKnowledgeArticle
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = fixture.CompanyId,
+                PropertyId = Guid.NewGuid(),
+                Title = "Other property item",
+                Content = "Should be excluded",
+                IsActive = true,
+                IsApproved = true,
+                UpdatedAt = DateTimeOffset.UtcNow
+            }
+        ]);
+
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
+
+        Assert.NotNull(context);
+        Assert.Single(context!.ApprovedKnowledgeItems);
+        Assert.Equal("Approved item", context.ApprovedKnowledgeItems.Single().Title);
+        Assert.DoesNotContain(ConversationContextWarning.NoApprovedKnowledge, context.Warnings);
+    }
+
+    [Fact]
+    public async Task BuildAsync_AddsKnowledgeSourceMetadata()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Category = PropertyKnowledgeCategory.WiFi,
+            Title = "Wi-Fi Source",
+            Content = "SSID StayFlowGuest",
+            IsActive = true,
+            IsApproved = true,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var context = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
+
+        Assert.NotNull(context);
+        var source = Assert.Single(context!.Sources, source => source.SourceType == ConversationContextSourceType.PropertyKnowledge);
+        Assert.Equal("Wi-Fi Source", source.Title);
+        Assert.Equal(PropertyKnowledgeCategory.WiFi.ToString(), source.Category);
+        Assert.Equal("11111111111111111111111111111111", source.SourceId);
+    }
+
+    [Fact]
+    public async Task BuildAsync_NoApprovedKnowledgeWarningOnlyWhenNoEligibleKnowledgeRemains()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Title = "Draft",
+            Content = "Still unapproved",
+            IsActive = true,
+            IsApproved = false,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var noEligible = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
+        Assert.NotNull(noEligible);
+        Assert.Contains(ConversationContextWarning.NoApprovedKnowledge, noEligible!.Warnings);
+
+        fixture.KnowledgeRepository.KnowledgeItems.Add(new PropertyKnowledgeArticle
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            Title = "Approved",
+            Content = "Eligible",
+            IsActive = true,
+            IsApproved = true,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var withEligible = await fixture.Builder.BuildAsync(fixture.CompanyId, conversation.Id, CancellationToken.None);
+        Assert.NotNull(withEligible);
+        Assert.DoesNotContain(ConversationContextWarning.NoApprovedKnowledge, withEligible!.Warnings);
+    }
+
+    [Fact]
     public async Task BuildAsync_RespectsCancellationToken()
     {
         var fixture = new Fixture();
@@ -185,6 +354,7 @@ public sealed class ConversationContextBuilderTests
         public Fixture(ConversationContextLimits? limits = null)
         {
             Repository = new FakeConversationRepository(CompanyId);
+            KnowledgeRepository = new FakePropertyKnowledgeRepository();
             Guest = new Guest
             {
                 Id = Guid.NewGuid(),
@@ -225,6 +395,7 @@ public sealed class ConversationContextBuilderTests
 
             Builder = new ConversationContextBuilder(
                 Repository,
+                KnowledgeRepository,
                 Options.Create(limits ?? new ConversationContextLimits()),
                 NullLogger<ConversationContextBuilder>.Instance);
         }
@@ -234,7 +405,47 @@ public sealed class ConversationContextBuilderTests
         public Property Property { get; }
         public Reservation Reservation { get; }
         public FakeConversationRepository Repository { get; }
+        public FakePropertyKnowledgeRepository KnowledgeRepository { get; }
         public ConversationContextBuilder Builder { get; }
+    }
+
+    private sealed class FakePropertyKnowledgeRepository : IPropertyKnowledgeRepository
+    {
+        public List<PropertyKnowledgeArticle> KnowledgeItems { get; } = [];
+
+        public Task<Property?> GetPropertyAsync(Guid requestedCompanyId, Guid propertyId, CancellationToken cancellationToken)
+            => Task.FromResult<Property?>(null);
+
+        public Task<PagedResult<PropertyKnowledgeArticle>> GetPagedAsync(Guid requestedCompanyId, Guid propertyId, StayFlow.Api.DTOs.PropertyKnowledge.PropertyKnowledgeListQuery query, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<PropertyKnowledgeArticle?> GetByIdAsync(Guid requestedCompanyId, Guid propertyId, Guid knowledgeId, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyCollection<PropertyKnowledgeArticle>> GetApprovedActiveForPropertyAsync(Guid requestedCompanyId, Guid propertyId, CancellationToken cancellationToken)
+        {
+            IReadOnlyCollection<PropertyKnowledgeArticle> items = KnowledgeItems
+                .Where(item => item.CompanyId == requestedCompanyId
+                    && item.PropertyId == propertyId
+                    && item.IsApproved
+                    && item.IsActive
+                    && !item.IsDeleted)
+                .OrderByDescending(item => item.Priority)
+                .ThenByDescending(item => item.UpdatedAt)
+                .ThenBy(item => item.Title)
+                .ToList();
+
+            return Task.FromResult(items);
+        }
+
+        public Task AddAsync(PropertyKnowledgeArticle article, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task AddAuditLogAsync(AuditLog auditLog, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task SaveChangesAsync(CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 
     private sealed class FakeConversationRepository(Guid companyId) : IConversationRepository

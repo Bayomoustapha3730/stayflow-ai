@@ -151,6 +151,7 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             .Include(conversation => conversation.Guest)
             .Include(conversation => conversation.Reservation)
             .Include(conversation => conversation.Property)
+            .ThenInclude(property => property.PropertyKnowledgeArticles)
             .Include(conversation => conversation.AssignedUser)
             .FirstOrDefaultAsync(conversation => conversation.CompanyId == companyId && conversation.Id == conversationId, cancellationToken);
     }

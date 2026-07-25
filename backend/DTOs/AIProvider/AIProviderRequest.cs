@@ -9,5 +9,8 @@ public sealed class AIProviderRequest
     public IReadOnlyCollection<AIPromptMessage> RenderedMessages { get; init; } = [];
     public AIResponseConstraints ResponseConstraints { get; init; } = new();
     public IReadOnlyCollection<QuestionContextCategory> QuestionCategories { get; init; } = [];
+    public IReadOnlyCollection<AIProviderKnowledgeItem> SelectedKnowledgeItems { get; init; } = [];
+    public string? DetectedIntent { get; init; }
+    public string? RequestedTone { get; init; }
     public string? CorrelationId { get; init; }
 }

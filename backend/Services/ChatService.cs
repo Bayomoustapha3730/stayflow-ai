@@ -8,13 +8,14 @@ using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
+using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Services;
 
 public sealed class ChatService(
     IConversationRepository conversationRepository,
     IConversationService conversationService,
-    IAIOrchestrator aiOrchestrator,
+    IAIReplyOrchestrator aiReplyOrchestrator,
     ICurrentTenantContext currentTenantContext,
     IOptions<ConversationOptions> options) : IChatService
 {
@@ -122,17 +123,19 @@ public sealed class ChatService(
             return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, guestMessage.Data, assistant.Data, null, [], []), "Chat message received.");
         }
 
-        var orchestration = await aiOrchestrator.ProcessAsync(new AIOrchestrationRequest
+        var replyResult = await aiReplyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
         {
-            GuestMessage = request.Message.Trim(),
-            GuestId = request.GuestId,
             ConversationId = conversation.Id,
-            Channel = request.Channel.ToString(),
-            ChannelIdentity = request.ChannelIdentity,
-            ExplicitReservationReference = request.ExplicitReservationReference,
-            ExplicitPropertyName = request.ExplicitPropertyName,
-            CurrentTimestamp = sentAt
+            Operation = AIReplyOperation.GeneratedHostReply,
+            CorrelationId = currentTenantContext.CorrelationId
         }, cancellationToken);
+
+        if (replyResult is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail("Conversation was not found.");
+        }
+
+        var orchestration = MapGuestOrchestrationResult(replyResult);
 
         UpdateConversationStatusFromAI(conversation, orchestration);
         var aiMessage = await conversationService.AddAIMessageAsync(conversation.Id, orchestration.GuestSafeMessage, orchestration, cancellationToken);
@@ -324,6 +327,56 @@ public sealed class ChatService(
                 conversation.Status = ConversationStatus.AwaitingHost;
                 break;
         }
+    }
+
+    private static AIOrchestrationResult MapGuestOrchestrationResult(AIReplyOrchestrationResult replyResult)
+    {
+        var requiresReview = replyResult.RequiresHumanReview;
+        var fallbackMessage = AIOrchestrationSafeMessages.HostAssistanceRequired;
+        var responseMessage = string.IsNullOrWhiteSpace(replyResult.Output)
+            ? AIOrchestrationSafeMessages.GeneralResponseUnavailable
+            : replyResult.Output!;
+
+        var outcome = requiresReview
+            ? AIOrchestrationOutcome.EscalationRequired
+            : AIOrchestrationOutcome.Responded;
+
+        return new AIOrchestrationResult
+        {
+            Outcome = outcome,
+            GuestSafeMessage = requiresReview ? fallbackMessage : responseMessage,
+            QuestionCategories = MapQuestionCategories(replyResult.DetectedIntent?.Intent),
+            ProviderMetadata = new AIProviderMetadata
+            {
+                ProviderName = replyResult.Provider,
+                ModelName = replyResult.IsMock ? "deterministic" : null,
+                RequestId = null,
+                DurationMs = replyResult.DurationMilliseconds
+            },
+            EscalationReason = requiresReview ? "RequiresHumanReview" : null
+        };
+    }
+
+    private static IReadOnlyCollection<QuestionContextCategory> MapQuestionCategories(Services.AI.Intent.GuestIntent? intent)
+    {
+        if (intent is null)
+        {
+            return [QuestionContextCategory.General];
+        }
+
+        return intent.Value switch
+        {
+            Services.AI.Intent.GuestIntent.WiFi => [QuestionContextCategory.WiFi],
+            Services.AI.Intent.GuestIntent.CheckIn or Services.AI.Intent.GuestIntent.EarlyCheckIn or Services.AI.Intent.GuestIntent.LateArrival => [QuestionContextCategory.CheckIn],
+            Services.AI.Intent.GuestIntent.Checkout => [QuestionContextCategory.CheckOut],
+            Services.AI.Intent.GuestIntent.Parking => [QuestionContextCategory.Parking],
+            Services.AI.Intent.GuestIntent.HouseRules or Services.AI.Intent.GuestIntent.Noise => [QuestionContextCategory.HouseRules],
+            Services.AI.Intent.GuestIntent.Amenities => [QuestionContextCategory.Amenities],
+            Services.AI.Intent.GuestIntent.Laundry => [QuestionContextCategory.Laundry],
+            Services.AI.Intent.GuestIntent.Emergency or Services.AI.Intent.GuestIntent.Maintenance => [QuestionContextCategory.Emergency],
+            Services.AI.Intent.GuestIntent.GeneralQuestion => [QuestionContextCategory.General],
+            _ => [QuestionContextCategory.General]
+        };
     }
 
     private ChatMessageResponse ToChatMessageResponse(

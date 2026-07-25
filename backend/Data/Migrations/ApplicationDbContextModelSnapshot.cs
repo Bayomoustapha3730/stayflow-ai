@@ -878,21 +878,62 @@ namespace backend.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<Guid>("CompanyId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Content")
                         .IsRequired()
-                        .HasColumnType("text");
+                        .HasMaxLength(6000)
+                        .HasColumnType("character varying(6000)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsApproved")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Priority")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<Guid>("PropertyId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(280)
+                        .HasColumnType("character varying(280)");
+
+                    b.Property<string>("Tags")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -902,13 +943,32 @@ namespace backend.Data.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("ApprovedByUserId");
+
+                    b.HasIndex("Category");
 
                     b.HasIndex("CompanyId");
 
-                    b.HasIndex("CreatedAt");
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("DeletedByUserId");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("IsApproved");
 
                     b.HasIndex("PropertyId");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.HasIndex("UpdatedByUserId");
+
+                    b.HasIndex("CompanyId", "PropertyId", "IsApproved", "IsActive");
 
                     b.ToTable("PropertyKnowledgeArticles", (string)null);
                 });
@@ -1553,11 +1613,26 @@ namespace backend.Data.Migrations
 
             modelBuilder.Entity("StayFlow.Api.Models.PropertyKnowledgeArticle", b =>
                 {
+                    b.HasOne("StayFlow.Api.Models.User", "ApprovedByUser")
+                        .WithMany("ApprovedKnowledgeArticles")
+                        .HasForeignKey("ApprovedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("StayFlow.Api.Models.Company", "Company")
                         .WithMany("PropertyKnowledgeArticles")
                         .HasForeignKey("CompanyId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.User", "CreatedByUser")
+                        .WithMany("CreatedKnowledgeArticles")
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("StayFlow.Api.Models.User", "DeletedByUser")
+                        .WithMany("DeletedKnowledgeArticles")
+                        .HasForeignKey("DeletedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("StayFlow.Api.Models.Property", "Property")
                         .WithMany("PropertyKnowledgeArticles")
@@ -1565,9 +1640,22 @@ namespace backend.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("StayFlow.Api.Models.User", "UpdatedByUser")
+                        .WithMany("UpdatedKnowledgeArticles")
+                        .HasForeignKey("UpdatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ApprovedByUser");
+
                     b.Navigation("Company");
 
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("DeletedByUser");
+
                     b.Navigation("Property");
+
+                    b.Navigation("UpdatedByUser");
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.PropertyRecommendation", b =>
@@ -1813,13 +1901,21 @@ namespace backend.Data.Migrations
 
             modelBuilder.Entity("StayFlow.Api.Models.User", b =>
                 {
+                    b.Navigation("ApprovedKnowledgeArticles");
+
                     b.Navigation("AssignedConversations");
+
+                    b.Navigation("CreatedKnowledgeArticles");
+
+                    b.Navigation("DeletedKnowledgeArticles");
 
                     b.Navigation("EmailVerificationTokens");
 
                     b.Navigation("PasswordResetTokens");
 
                     b.Navigation("RefreshTokens");
+
+                    b.Navigation("UpdatedKnowledgeArticles");
 
                     b.Navigation("UserRoles");
                 });
