@@ -3,7 +3,9 @@ using StayFlow.Api.Middleware;
 
 namespace StayFlow.Api.Services;
 
-public sealed class CurrentTenantContext(IHttpContextAccessor httpContextAccessor) : ICurrentTenantContext
+public sealed class CurrentTenantContext(
+    IHttpContextAccessor httpContextAccessor,
+    ITenantExecutionContextAccessor tenantExecutionContextAccessor) : ICurrentTenantContext
 {
     private const string CompanyIdClaimType = "company_id";
 
@@ -15,6 +17,11 @@ public sealed class CurrentTenantContext(IHttpContextAccessor httpContextAccesso
     {
         get
         {
+            if (tenantExecutionContextAccessor.IsAuthenticated)
+            {
+                return tenantExecutionContextAccessor.CorrelationId;
+            }
+
             var httpContext = httpContextAccessor.HttpContext;
             if (httpContext is null)
             {
@@ -27,10 +34,19 @@ public sealed class CurrentTenantContext(IHttpContextAccessor httpContextAccesso
         }
     }
 
-    public bool IsAuthenticated => httpContextAccessor.HttpContext?.User.Identity?.IsAuthenticated == true;
+    public bool IsAuthenticated => tenantExecutionContextAccessor.IsAuthenticated || httpContextAccessor.HttpContext?.User.Identity?.IsAuthenticated == true;
 
     private Guid? TryGetGuidClaim(string claimType)
     {
+        if (tenantExecutionContextAccessor.IsAuthenticated)
+        {
+            return claimType == CompanyIdClaimType
+                ? tenantExecutionContextAccessor.CompanyId
+                : claimType == ClaimTypes.NameIdentifier
+                    ? tenantExecutionContextAccessor.UserId
+                    : null;
+        }
+
         var user = httpContextAccessor.HttpContext?.User;
         if (user?.Identity?.IsAuthenticated != true)
         {

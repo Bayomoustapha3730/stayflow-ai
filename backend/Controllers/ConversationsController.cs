@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Conversations;
+using StayFlow.Api.DTOs.WhatsApp;
 using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Controllers;
@@ -14,8 +15,25 @@ namespace StayFlow.Api.Controllers;
 [Route("conversations")]
 [Produces("application/json")]
 [Authorize]
-public sealed class ConversationsController(IConversationService conversationService) : ControllerBase
+public sealed class ConversationsController(
+    IConversationService conversationService,
+    IWhatsAppTemplateService whatsAppTemplateService) : ControllerBase
 {
+<<<<<<< HEAD
+=======
+    [HttpGet]
+    [RequiresPermission("conversations.read")]
+    [ProducesResponseType(typeof(ApiResponse<ConversationListResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationListResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ConversationListResponse>>> GetConversations(
+        [FromQuery] ConversationListQueryParameters query,
+        CancellationToken cancellationToken)
+    {
+        var response = await conversationService.GetConversationsAsync(query, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+>>>>>>> origin/main
     [HttpPost]
     [RequiresPermission("conversations.create")]
     [ProducesResponseType(typeof(ApiResponse<ConversationDetailResponse>), StatusCodes.Status200OK)]
@@ -59,6 +77,45 @@ public sealed class ConversationsController(IConversationService conversationSer
         CancellationToken cancellationToken)
     {
         var response = await conversationService.AddHostMessageAsync(conversationId, request, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpGet("{conversationId:guid}/whatsapp/window")]
+    [RequiresPermission("conversations.read")]
+    [ProducesResponseType(typeof(ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>>> GetWhatsAppWindow(
+        Guid conversationId,
+        CancellationToken cancellationToken)
+    {
+        var response = await whatsAppTemplateService.GetCustomerServiceWindowStatusAsync(conversationId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("{conversationId:guid}/whatsapp/templates/{templateId:guid}/send")]
+    [RequiresPermission("conversations.reply")]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ConversationMessageResponse>>> SendWhatsAppTemplate(
+        Guid conversationId,
+        Guid templateId,
+        SendWhatsAppTemplateMessageRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await whatsAppTemplateService.SendTemplateMessageAsync(conversationId, templateId, request, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("{conversationId:guid}/messages/{messageId:guid}/retry")]
+    [RequiresPermission("conversations.reply")]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ConversationMessageResponse>>> RetryMessage(
+        Guid conversationId,
+        Guid messageId,
+        CancellationToken cancellationToken)
+    {
+        var response = await conversationService.RetryFailedMessageAsync(conversationId, messageId, cancellationToken);
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
@@ -120,6 +177,7 @@ public sealed class ConversationsController(IConversationService conversationSer
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
+<<<<<<< HEAD
     /// <summary>
     /// Gets tenant-scoped conversations for the host inbox.
     /// </summary>
@@ -133,6 +191,42 @@ public sealed class ConversationsController(IConversationService conversationSer
     {
         var response = await conversationService.GetConversationsAsync(query, cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
+=======
+    [HttpPost("{conversationId:guid}/assign-me")]
+    [RequiresPermission("conversations.manage")]
+    public async Task<ActionResult<ApiResponse<ConversationDetailResponse>>> AssignToMe(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var response = await conversationService.AssignConversationToCurrentUserAsync(conversationId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("{conversationId:guid}/unassign")]
+    [RequiresPermission("conversations.manage")]
+    public async Task<ActionResult<ApiResponse<ConversationDetailResponse>>> Unassign(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var response = await conversationService.UnassignConversationAsync(conversationId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("{conversationId:guid}/read")]
+    [RequiresPermission("conversations.read")]
+    public async Task<ActionResult<ApiResponse<bool>>> MarkRead(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var response = await conversationService.MarkConversationReadForCurrentUserAsync(conversationId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpGet("feedback/analytics")]
+    [RequiresPermission("conversations.read")]
+    [ProducesResponseType(typeof(ApiResponse<ConversationFeedbackAnalyticsResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationFeedbackAnalyticsResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ConversationFeedbackAnalyticsResponse>>> GetFeedbackAnalytics(
+        [FromQuery] ConversationFeedbackAnalyticsQuery query,
+        CancellationToken cancellationToken)
+    {
+        var response = await conversationService.GetFeedbackAnalyticsAsync(query, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+>>>>>>> origin/main
     }
 
     private ActionResult<ApiResponse<T>> ToFailureResult<T>(ApiResponse<T> response)

@@ -5,4 +5,6 @@ namespace StayFlow.Api.Services;
 public interface IAIPromptBuilder
 {
     AIPromptPackage Build(AIPromptBuildRequest request);
+
+    AIPromptPackage BuildReply(AIReplyPromptBuildRequest request);
 }

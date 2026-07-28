@@ -7,6 +7,8 @@ using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
+using StayFlow.Api.Services.AI.Intent;
+using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Tests;
 
@@ -22,9 +24,9 @@ public sealed class ChatServiceTests
         Assert.True(response.Success);
         Assert.Single(fixture.Repository.Conversations);
         Assert.Equal(2, fixture.Repository.Messages.Count);
-        Assert.True(fixture.Orchestrator.WasCalled);
+        Assert.True(fixture.ReplyOrchestrator.WasCalled);
         Assert.Equal(ConversationSenderType.AI, response.Data!.AssistantMessage!.SenderType);
-        Assert.Equal("DevelopmentAIProvider", response.Data.ProviderMetadata!.ProviderName);
+        Assert.Equal("Development", response.Data.ProviderMetadata!.ProviderName);
     }
 
     [Fact]
@@ -147,7 +149,7 @@ public sealed class ChatServiceTests
 
         Assert.False(response.Success);
         Assert.Equal("Conversation state does not allow this message.", response.Message);
-        Assert.False(fixture.Orchestrator.WasCalled);
+        Assert.False(fixture.ReplyOrchestrator.WasCalled);
     }
 
     [Fact]
@@ -160,7 +162,7 @@ public sealed class ChatServiceTests
         var response = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Hello") with { ConversationId = conversation.Id }, CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.False(fixture.Orchestrator.WasCalled);
+        Assert.False(fixture.ReplyOrchestrator.WasCalled);
         Assert.Contains(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest);
         Assert.True(response.Data!.RequiresHostAttention);
     }
@@ -171,13 +173,94 @@ public sealed class ChatServiceTests
         var fixture = new Fixture();
 
         var first = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Hello") with { ExternalMessageId = "web-1" }, CancellationToken.None);
-        fixture.Orchestrator.WasCalled = false;
+        fixture.ReplyOrchestrator.WasCalled = false;
         var second = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Again") with { ExternalMessageId = "web-1" }, CancellationToken.None);
 
         Assert.True(first.Success);
         Assert.True(second.Success);
-        Assert.False(fixture.Orchestrator.WasCalled);
+        Assert.False(fixture.ReplyOrchestrator.WasCalled);
         Assert.Single(fixture.Repository.Messages, message => message.ExternalMessageId == "web-1");
+    }
+
+    [Fact]
+    public async Task SendGuestMessageAsync_RequiresHumanReview_UsesSafeFallbackAndHostAttention()
+    {
+        var fixture = new Fixture();
+        fixture.ReplyOrchestrator.Result = new AIReplyOrchestrationResult
+        {
+            ConversationId = Guid.NewGuid(),
+            Operation = AIReplyOperation.GeneratedHostReply,
+            Output = "The guest Wi-Fi password is DifferentPassword.",
+            RequiresHumanReview = true,
+            Provider = "Development",
+            IsMock = true,
+            GeneratedAt = DateTimeOffset.UtcNow,
+            CompletedStages = [AIReplyOrchestrationStage.ResultAssembled],
+            DurationMilliseconds = 3,
+            DetectedIntent = new GuestIntentResult(GuestIntent.WiFi, 0.91, ["wifi"], false, "test")
+        };
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("What is the Wi-Fi password?"), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(ConversationStatus.AwaitingHost, response.Data!.ConversationStatus);
+        Assert.False(response.Data.HumanTakeoverEnabled);
+        Assert.True(response.Data.RequiresHostAttention);
+        Assert.Equal("I need a host or support team member to help with this request.", response.Data.AssistantMessage!.Content);
+    }
+
+    [Fact]
+    public async Task SendGuestMessageAsync_AwaitingHostFromAutoReview_DoesNotBypassGroundedAI()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.AwaitingHost, humanTakeover: true);
+        conversation.EscalationReason = "RequiresHumanReview";
+        conversation.AssignedUserId = null;
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("What is the Wi-Fi password?") with { ConversationId = conversation.Id }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.True(fixture.ReplyOrchestrator.WasCalled);
+        Assert.Equal(ConversationSenderType.AI, response.Data!.AssistantMessage!.SenderType);
+        Assert.Equal(ConversationStatus.Open, response.Data.ConversationStatus);
+        Assert.False(response.Data.HumanTakeoverEnabled);
+    }
+
+    [Fact]
+    public async Task EscalateGuestConversationAsync_AlreadyEscalatedReturnsSuccessWithoutDuplicateHostMessage()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.AwaitingHost, humanTakeover: false);
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.ChatService.EscalateGuestConversationAsync(
+            conversation.Id,
+            new EscalateChatRequest { GuestId = fixture.Guest.Id, Reason = "Help" },
+            CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal("A host has already been notified.", response.Message);
+        Assert.Equal(ConversationStatus.AwaitingHost, response.Data!.Status);
+        Assert.False(response.Data.HumanTakeoverEnabled);
+        Assert.Equal("A host has already been notified.", response.Data.GuestSafeMessage);
+        Assert.Empty(fixture.Repository.Messages);
+    }
+
+    [Fact]
+    public async Task EscalateGuestConversationAsync_ClosedConversationRejectsMessage()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.Closed);
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.ChatService.EscalateGuestConversationAsync(
+            conversation.Id,
+            new EscalateChatRequest { GuestId = fixture.Guest.Id, Reason = "Help" },
+            CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Conversation state does not allow this message.", response.Message);
     }
 
     [Fact]
@@ -261,12 +344,14 @@ public sealed class ChatServiceTests
                 Repository,
                 TenantContext,
                 new ConversationStatusTransitionPolicy(),
+                new NoOpConversationRealtimePublisher(),
+                new NoOpConversationChannelDispatcher(),
                 Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
-            Orchestrator = new FakeAIOrchestrator();
+            ReplyOrchestrator = new FakeAIReplyOrchestrator();
             ChatService = new ChatService(
                 Repository,
                 ConversationService,
-                Orchestrator,
+                ReplyOrchestrator,
                 TenantContext,
                 Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
         }
@@ -277,7 +362,7 @@ public sealed class ChatServiceTests
         public FakeConversationRepository Repository { get; }
         public FakeCurrentTenantContext TenantContext { get; }
         public ConversationService ConversationService { get; }
-        public FakeAIOrchestrator Orchestrator { get; }
+        public FakeAIReplyOrchestrator ReplyOrchestrator { get; }
         public ChatService ChatService { get; }
 
         public SendChatMessageRequest Request(string message)
@@ -292,20 +377,45 @@ public sealed class ChatServiceTests
         }
     }
 
-    private sealed class FakeAIOrchestrator : IAIOrchestrator
+    private sealed class FakeAIReplyOrchestrator : IAIReplyOrchestrator
     {
         public bool WasCalled { get; set; }
-        public AIOrchestrationResult Result { get; set; } = new()
+        public AIReplyOrchestrationResult Result { get; set; } = new()
         {
-            Outcome = AIOrchestrationOutcome.Responded,
-            GuestSafeMessage = "Here is a safe answer.",
-            ProviderMetadata = new AIProviderMetadata { ProviderName = "DevelopmentAIProvider", ModelName = "development", RequestId = "dev-1" }
+            ConversationId = Guid.NewGuid(),
+            Operation = AIReplyOperation.GeneratedHostReply,
+            Output = "Here is a safe answer.",
+            Provider = "Development",
+            IsMock = true,
+            GeneratedAt = DateTimeOffset.UtcNow,
+            CompletedStages = [AIReplyOrchestrationStage.ResultAssembled],
+            DurationMilliseconds = 4,
+            DetectedIntent = new GuestIntentResult(GuestIntent.GeneralQuestion, 0.7, ["question"], false, "test")
         };
 
-        public Task<AIOrchestrationResult> ProcessAsync(AIOrchestrationRequest request, CancellationToken cancellationToken)
+        public Task<AIReplyOrchestrationResult?> OrchestrateAsync(Guid companyId, AIReplyOrchestrationRequest request, CancellationToken cancellationToken)
         {
             WasCalled = true;
-            return Task.FromResult(Result);
+            return Task.FromResult<AIReplyOrchestrationResult?>(new AIReplyOrchestrationResult
+            {
+                ConversationId = request.ConversationId,
+                Operation = request.Operation,
+                Output = Result.Output,
+                Suggestions = Result.Suggestions,
+                ContextMessageCount = Result.ContextMessageCount,
+                Confidence = Result.Confidence,
+                Sources = Result.Sources,
+                Warnings = Result.Warnings,
+                DetectedIntent = Result.DetectedIntent,
+                Provider = Result.Provider,
+                IsMock = Result.IsMock,
+                GeneratedAt = Result.GeneratedAt,
+                ContextTruncated = Result.ContextTruncated,
+                FallbackUsed = Result.FallbackUsed,
+                CompletedStages = Result.CompletedStages,
+                DurationMilliseconds = Result.DurationMilliseconds,
+                RequiresHumanReview = Result.RequiresHumanReview
+            });
         }
     }
 
@@ -329,9 +439,30 @@ public sealed class ChatServiceTests
         public List<User> Users { get; } = [];
         public List<AuditLog> AuditLogs { get; } = [];
 
+        public Task<PagedResult<ConversationSummaryResponse>> ListConversationsAsync(Guid requestedCompanyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new PagedResult<ConversationSummaryResponse>
+            {
+                Items = [],
+                PageNumber = query.Page,
+                PageSize = query.NormalizedPageSize,
+                TotalCount = 0
+            });
+        }
+
         public Task<Conversation?> GetByIdForCompanyAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
         {
             return Task.FromResult(Conversations.FirstOrDefault(conversation => conversation.CompanyId == requestedCompanyId && conversation.Id == conversationId));
+        }
+
+        public Task<ConversationMessage?> GetMessageForConversationAsync(Guid requestedCompanyId, Guid conversationId, Guid messageId, CancellationToken cancellationToken)
+        {
+            var message = Messages.FirstOrDefault(item =>
+                item.CompanyId == requestedCompanyId
+                && item.ConversationId == conversationId
+                && item.Id == messageId);
+
+            return Task.FromResult(message);
         }
 
         public Task<Conversation?> GetOpenConversationAsync(Guid requestedCompanyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
@@ -362,12 +493,45 @@ public sealed class ChatServiceTests
             });
         }
 
+<<<<<<< HEAD
         public Task<PagedResult<ConversationSummaryResponse>> GetInboxAsync(Guid requestedCompanyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
             => Task.FromResult(new PagedResult<ConversationSummaryResponse> { Items = [], PageNumber = 1, PageSize = 20, TotalCount = 0 });
 
         public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid requestedCompanyId, string externalMessageId, CancellationToken cancellationToken)
+=======
+        public Task<ConversationMessage?> GetLatestVisibleMessageAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
+>>>>>>> origin/main
         {
-            return Task.FromResult(Messages.FirstOrDefault(message => message.CompanyId == requestedCompanyId && message.ExternalMessageId == externalMessageId));
+            var message = Messages
+                .Where(item => item.CompanyId == requestedCompanyId && item.ConversationId == conversationId && !item.IsInternal && !item.IsDeleted)
+                .OrderByDescending(item => item.SentAt)
+                .ThenByDescending(item => item.CreatedAt)
+                .FirstOrDefault();
+
+            return Task.FromResult(message);
+        }
+
+        public Task<int> GetTotalUnreadCountForHostAsync(Guid requestedCompanyId, Guid hostUserId, CancellationToken cancellationToken)
+            => Task.FromResult(0);
+
+        public Task<Dictionary<Guid, int>> GetUnreadMessageCountsForHostAsync(Guid requestedCompanyId, Guid hostUserId, IReadOnlyCollection<Guid> conversationIds, CancellationToken cancellationToken)
+            => Task.FromResult(new Dictionary<Guid, int>());
+
+        public Task<int> GetUnreadHostMessageCountForGuestAsync(Guid requestedCompanyId, Guid guestId, Guid conversationId, CancellationToken cancellationToken)
+            => Task.FromResult(0);
+
+        public Task<ConversationParticipantReadState?> GetReadStateAsync(Guid requestedCompanyId, Guid conversationId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken)
+            => Task.FromResult<ConversationParticipantReadState?>(null);
+
+        public Task<IReadOnlyCollection<ConversationParticipantReadState>> GetReadStatesForParticipantAsync(Guid requestedCompanyId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyCollection<ConversationParticipantReadState>>([]);
+
+        public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid requestedCompanyId, string externalMessageId, ConversationMessageProvider? provider, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(Messages.FirstOrDefault(message =>
+                message.CompanyId == requestedCompanyId
+                && message.ExternalMessageId == externalMessageId
+                && (provider is null || message.Provider == provider)));
         }
 
         public Task<Guest?> GetGuestAsync(Guid requestedCompanyId, Guid guestId, CancellationToken cancellationToken)
@@ -393,6 +557,9 @@ public sealed class ChatServiceTests
             Messages.Add(message);
             return Task.CompletedTask;
         }
+
+        public Task AddReadStateAsync(ConversationParticipantReadState state, CancellationToken cancellationToken)
+            => Task.CompletedTask;
 
         public Task AddAuditLogAsync(AuditLog auditLog, CancellationToken cancellationToken)
         {
@@ -445,5 +612,22 @@ public sealed class ChatServiceTests
                 UpdatedAt = DateTimeOffset.UtcNow
             };
         }
+    }
+
+    private sealed class NoOpConversationRealtimePublisher : IConversationRealtimePublisher
+    {
+        public Task PublishMessageCreatedAsync(Guid companyId, Guid conversationId, object payload, bool internalOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishTypingStartedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishTypingStoppedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher
+    {
+        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

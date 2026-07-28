@@ -4,18 +4,183 @@ using StayFlow.Api.Common;
 using StayFlow.Api.Controllers;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
+<<<<<<< HEAD
 using StayFlow.Api.Extensions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+=======
+using StayFlow.Api.Models;
+using StayFlow.Api.Repositories;
+using StayFlow.Api.Services;
+>>>>>>> origin/main
 
 namespace StayFlow.Api.Tests;
 
 public sealed class ConversationServiceTests
 {
     [Fact]
+<<<<<<< HEAD
+=======
+    public async Task GetConversationsAsync_ReturnsTenantScopedConversationsOnly()
+    {
+        var fixture = new Fixture();
+        var tenantConversation = fixture.Repository.NewConversation();
+        var crossTenantConversation = fixture.Repository.NewConversation(overrideCompanyId: Guid.NewGuid());
+        fixture.Repository.Conversations.AddRange([tenantConversation, crossTenantConversation]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(tenantConversation.Id, response.Data.Items.Single().ConversationId);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_OrdersHostAttentionConversationsFirstThenLastActivity()
+    {
+        var fixture = new Fixture();
+        var oldAttention = fixture.Repository.NewConversation(status: ConversationStatus.Escalated, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-2));
+        var newestOpen = fixture.Repository.NewConversation(status: ConversationStatus.Open, lastActivityAt: DateTimeOffset.UtcNow);
+        var newerAttention = fixture.Repository.NewConversation(status: ConversationStatus.HumanManaged, humanTakeover: true, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-1));
+        fixture.Repository.Conversations.AddRange([oldAttention, newestOpen, newerAttention]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal([newerAttention.Id, oldAttention.Id, newestOpen.Id], response.Data!.Items.Select(item => item.ConversationId).ToList());
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_FiltersByStatus()
+    {
+        var fixture = new Fixture();
+        var escalated = fixture.Repository.NewConversation(status: ConversationStatus.Escalated);
+        fixture.Repository.Conversations.AddRange([fixture.Repository.NewConversation(status: ConversationStatus.Open), escalated]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Status = ConversationStatus.Escalated }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(escalated.Id, response.Data.Items.Single().ConversationId);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_FiltersByProperty()
+    {
+        var fixture = new Fixture();
+        var otherProperty = new Property { Id = Guid.NewGuid(), CompanyId = fixture.CompanyId, Name = "Lavington Villa", City = "Nairobi", CountryCode = "KE", AddressLine1 = "Lane", TimeZone = "Africa/Nairobi", IsActive = true };
+        fixture.Repository.Properties.Add(otherProperty);
+        var target = fixture.Repository.NewConversation(property: otherProperty);
+        fixture.Repository.Conversations.AddRange([fixture.Repository.NewConversation(), target]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { PropertyId = otherProperty.Id }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(target.Id, response.Data.Items.Single().ConversationId);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_FiltersByRequiresHostAttention()
+    {
+        var fixture = new Fixture();
+        var attention = fixture.Repository.NewConversation(status: ConversationStatus.AwaitingHost);
+        fixture.Repository.Conversations.AddRange([fixture.Repository.NewConversation(status: ConversationStatus.Open), attention]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { RequiresHostAttention = true }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(attention.Id, response.Data.Items.Single().ConversationId);
+        Assert.True(response.Data.Items.Single().RequiresHostAttention);
+    }
+
+    [Theory]
+    [InlineData("demo guest")]
+    [InlineData("demo.guest@example.com")]
+    [InlineData("Westlands")]
+    [InlineData("CONF-001")]
+    public async Task GetConversationsAsync_SearchesSupportedFields(string search)
+    {
+        var fixture = new Fixture();
+        fixture.Guest.Email = "demo.guest@example.com";
+        fixture.Property.Name = "Westlands Apartment";
+        fixture.Reservation.ConfirmationNumber = "CONF-001";
+        var conversation = fixture.Repository.NewConversation(reservation: fixture.Reservation, subject: "Arrival help");
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Search = search }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(response.Data!.Items);
+        Assert.Equal(conversation.Id, response.Data.Items.Single().ConversationId);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_ExcludesInternalNotesFromPreviewAndVisibleCount()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        fixture.Repository.Messages.AddRange(
+        [
+            fixture.Repository.NewMessage(conversation, "Visible guest message", ConversationSenderType.Guest, isInternal: false, sentAt: DateTimeOffset.UtcNow.AddMinutes(-2)),
+            fixture.Repository.NewMessage(conversation, "Host-only internal note", ConversationSenderType.System, ConversationMessageType.InternalNote, isInternal: true, sentAt: DateTimeOffset.UtcNow)
+        ]);
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
+
+        Assert.True(response.Success);
+        var item = response.Data!.Items.Single();
+        Assert.Equal("Visible guest message", item.LatestVisibleMessagePreview);
+        Assert.Equal(ConversationSenderType.Guest, item.LatestVisibleMessageSenderType);
+        Assert.Equal(1, item.TotalVisibleMessageCount);
+    }
+
+    [Fact]
+    public async Task GetConversationsAsync_ReturnsPaginationMetadata()
+    {
+        var fixture = new Fixture();
+        fixture.Repository.Conversations.AddRange(Enumerable.Range(0, 3).Select(index => fixture.Repository.NewConversation(subject: $"Conversation {index}")));
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Page = 2, PageSize = 2 }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(3, response.Data!.TotalCount);
+        Assert.Equal(2, response.Data.Page);
+        Assert.Equal(2, response.Data.PageSize);
+        Assert.Equal(2, response.Data.TotalPages);
+        Assert.Single(response.Data.Items);
+    }
+
+    [Theory]
+    [InlineData(0, 25, "Page must be greater than or equal to 1.")]
+    [InlineData(1, 101, "PageSize must be 100 or fewer.")]
+    public async Task GetConversationsAsync_RejectsInvalidPagination(int page, int pageSize, string expectedError)
+    {
+        var fixture = new Fixture();
+
+        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Page = page, PageSize = pageSize }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Conversation list query validation failed.", response.Message);
+        Assert.Contains(expectedError, response.Errors);
+    }
+
+    [Fact]
+    public void GetConversations_RequiresConversationsReadPermission()
+    {
+        var method = typeof(ConversationsController).GetMethod(nameof(ConversationsController.GetConversations));
+        var attribute = Assert.Single(method!.GetCustomAttributes(typeof(RequiresPermissionAttribute), inherit: false).Cast<RequiresPermissionAttribute>());
+
+        Assert.Equal("conversations.read", attribute.Permission);
+    }
+
+    [Fact]
+>>>>>>> origin/main
     public async Task CreateOrGetConversationAsync_WithValidTenantGuest_CreatesConversation()
     {
         var fixture = new Fixture();
@@ -196,6 +361,171 @@ public sealed class ConversationServiceTests
     }
 
     [Fact]
+    public async Task AddAIMessageAsync_PersistsKnowledgeSources()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var articleOne = Guid.NewGuid();
+        var articleTwo = Guid.NewGuid();
+        var response = await fixture.Service.AddAIMessageAsync(conversation.Id, "Here is the answer.", new DTOs.AIOrchestration.AIOrchestrationResult
+        {
+            Outcome = DTOs.AIOrchestration.AIOrchestrationOutcome.Responded,
+            KnowledgeSources =
+            [
+                new DTOs.AIOrchestration.AIKnowledgeSourceReference { PropertyKnowledgeArticleId = articleOne, Rank = 2, IsPrimary = false, RelevanceReason = "Matches check-in question" },
+                new DTOs.AIOrchestration.AIKnowledgeSourceReference { PropertyKnowledgeArticleId = articleTwo, Rank = 1, IsPrimary = true, RelevanceReason = "Contains entry steps" },
+                new DTOs.AIOrchestration.AIKnowledgeSourceReference { PropertyKnowledgeArticleId = articleOne, Rank = 3, IsPrimary = false, RelevanceReason = "duplicate" }
+            ]
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(2, fixture.Repository.MessageKnowledgeSources.Count);
+
+        var first = fixture.Repository.MessageKnowledgeSources.OrderBy(item => item.Rank).First();
+        var second = fixture.Repository.MessageKnowledgeSources.OrderBy(item => item.Rank).Last();
+
+        Assert.Equal(articleTwo, first.PropertyKnowledgeArticleId);
+        Assert.True(first.IsPrimary);
+        Assert.Equal("Contains entry steps", first.RelevanceReason);
+
+        Assert.Equal(articleOne, second.PropertyKnowledgeArticleId);
+        Assert.False(second.IsPrimary);
+        Assert.Equal("Matches check-in question", second.RelevanceReason);
+    }
+
+    [Fact]
+    public async Task AddAIMessageAsync_WithoutKnowledgeSources_DoesNotPersistProvenance()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.AddAIMessageAsync(conversation.Id, "Fallback response.", new DTOs.AIOrchestration.AIOrchestrationResult
+        {
+            Outcome = DTOs.AIOrchestration.AIOrchestrationOutcome.Responded
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Empty(fixture.Repository.MessageKnowledgeSources);
+    }
+
+    [Fact]
+    public async Task AddGuestMessageFeedbackAsync_PersistsAndUpdatesFeedback()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var aiMessage = await fixture.Service.AddAIMessageAsync(conversation.Id, "AI response", new DTOs.AIOrchestration.AIOrchestrationResult
+        {
+            Outcome = DTOs.AIOrchestration.AIOrchestrationOutcome.Responded
+        }, CancellationToken.None);
+
+        Assert.True(aiMessage.Success);
+
+        var first = await fixture.Service.AddGuestMessageFeedbackAsync(conversation.Id, aiMessage.Data!.Id, new DTOs.Chat.AddChatMessageFeedbackRequest
+        {
+            GuestId = fixture.Guest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.Helpful,
+            Comment = "Clear answer"
+        }, CancellationToken.None);
+
+        Assert.True(first.Success);
+        Assert.Single(fixture.Repository.MessageFeedback);
+        Assert.Equal(ConversationMessageFeedbackValue.Helpful, fixture.Repository.MessageFeedback[0].FeedbackValue);
+
+        var second = await fixture.Service.AddGuestMessageFeedbackAsync(conversation.Id, aiMessage.Data.Id, new DTOs.Chat.AddChatMessageFeedbackRequest
+        {
+            GuestId = fixture.Guest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.NotHelpful,
+            Comment = "Need more detail"
+        }, CancellationToken.None);
+
+        Assert.True(second.Success);
+        Assert.Single(fixture.Repository.MessageFeedback);
+        Assert.Equal(ConversationMessageFeedbackValue.NotHelpful, fixture.Repository.MessageFeedback[0].FeedbackValue);
+        Assert.Equal("Need more detail", fixture.Repository.MessageFeedback[0].Comment);
+    }
+
+    [Fact]
+    public async Task AddGuestMessageFeedbackAsync_RejectsNonAiMessages()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var guestMessage = await fixture.Service.AddGuestMessageAsync(conversation.Id, new AddGuestMessageRequest
+        {
+            Content = "Hi"
+        }, CancellationToken.None);
+
+        var response = await fixture.Service.AddGuestMessageFeedbackAsync(conversation.Id, guestMessage.Data!.Id, new DTOs.Chat.AddChatMessageFeedbackRequest
+        {
+            GuestId = fixture.Guest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.Helpful
+        }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Feedback can only be submitted for AI responses.", response.Message);
+    }
+
+    [Fact]
+    public async Task GetFeedbackAnalyticsAsync_ReturnsCountsAndRate()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var aiMessage = await fixture.Service.AddAIMessageAsync(conversation.Id, "AI response", new DTOs.AIOrchestration.AIOrchestrationResult
+        {
+            Outcome = DTOs.AIOrchestration.AIOrchestrationOutcome.Responded
+        }, CancellationToken.None);
+
+        Assert.True(aiMessage.Success);
+
+        await fixture.Service.AddGuestMessageFeedbackAsync(conversation.Id, aiMessage.Data!.Id, new DTOs.Chat.AddChatMessageFeedbackRequest
+        {
+            GuestId = fixture.Guest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.Helpful
+        }, CancellationToken.None);
+
+        var secondGuest = new Guest
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            FirstName = "Second",
+            LastName = "Guest",
+            Email = "second@guest.local",
+            PreferredLanguage = "en",
+            CountryCode = "KE",
+            IsActive = true
+        };
+        fixture.Repository.Guests.Add(secondGuest);
+
+        fixture.Repository.MessageFeedback.Add(new ConversationMessageFeedback
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            ConversationId = conversation.Id,
+            ConversationMessageId = aiMessage.Data.Id,
+            GuestId = secondGuest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.NotHelpful,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var analytics = await fixture.Service.GetFeedbackAnalyticsAsync(new ConversationFeedbackAnalyticsQuery(), CancellationToken.None);
+
+        Assert.True(analytics.Success);
+        Assert.Equal(2, analytics.Data!.TotalFeedbackCount);
+        Assert.Equal(1, analytics.Data.HelpfulCount);
+        Assert.Equal(1, analytics.Data.NotHelpfulCount);
+        Assert.Equal(0.5d, analytics.Data.HelpfulRate);
+    }
+
+    [Fact]
     public async Task CloseConversationAsync_BlocksNewMessages()
     {
         var fixture = new Fixture();
@@ -220,6 +550,7 @@ public sealed class ConversationServiceTests
 
         Assert.False(response.Success);
         Assert.Equal("Conversation was not found.", response.Message);
+<<<<<<< HEAD
     }
 
     [Fact]
@@ -236,12 +567,15 @@ public sealed class ConversationServiceTests
         Assert.Single(response.Data!.Items);
         Assert.Equal(tenantConversation.ConversationId, response.Data.Items.Single().ConversationId);
         Assert.Equal(fixture.CompanyId, fixture.Repository.LastCompanyId);
+=======
+>>>>>>> origin/main
     }
 
     [Fact]
-    public async Task GetConversationsAsync_OrdersHostAttentionConversationsBeforeOpenConversations()
+    public async Task EnableHumanTakeoverAsync_AssignsCurrentUser()
     {
         var fixture = new Fixture();
+<<<<<<< HEAD
         var oldAttention = fixture.Repository.NewInboxConversation(status: ConversationStatus.Escalated, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-2));
         var newestOpen = fixture.Repository.NewInboxConversation(status: ConversationStatus.Open, lastActivityAt: DateTimeOffset.UtcNow);
         var newerAttention = fixture.Repository.NewInboxConversation(status: ConversationStatus.HumanManaged, lastActivityAt: DateTimeOffset.UtcNow.AddHours(-1));
@@ -315,101 +649,177 @@ public sealed class ConversationServiceTests
             confirmationNumber: "CONF-001",
             subject: "Arrival help");
         fixture.Repository.InboxConversations.Add(conversation);
+=======
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.Open);
+        fixture.Repository.Conversations.Add(conversation);
+>>>>>>> origin/main
 
-        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Search = $"  {search}  " }, CancellationToken.None);
+        var response = await fixture.Service.EnableHumanTakeoverAsync(conversation.Id, CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Single(response.Data!.Items);
-        Assert.Equal(conversation.ConversationId, response.Data.Items.Single().ConversationId);
-        Assert.Equal(search.Trim(), fixture.Repository.LastQuery!.Search);
+        Assert.NotNull(response.Data);
+        Assert.Equal(fixture.User.Id, conversation.AssignedUserId);
+        Assert.True(response.Data!.HumanTakeoverEnabled);
     }
 
     [Fact]
-    public async Task GetConversationsAsync_InternalNotesAreExcludedFromPreviewAndVisibleCount()
+    public async Task ReturnToAIModeAsync_KeepsAssignedUserForAuditHistory()
     {
         var fixture = new Fixture();
+<<<<<<< HEAD
         var conversation = fixture.Repository.NewInboxConversation(
             latestVisibleMessagePreview: "Visible guest message",
             latestVisibleMessageSenderType: ConversationSenderType.Guest,
             totalVisibleMessageCount: 1);
         fixture.Repository.InboxConversations.Add(conversation);
+=======
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.HumanManaged, humanTakeover: true);
+        conversation.AssignedUserId = fixture.User.Id;
+        conversation.EscalationReason = "RequiresHumanReview";
+        fixture.Repository.Conversations.Add(conversation);
+>>>>>>> origin/main
 
-        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters(), CancellationToken.None);
+        var response = await fixture.Service.ReturnToAIModeAsync(conversation.Id, CancellationToken.None);
 
         Assert.True(response.Success);
-        var item = response.Data!.Items.Single();
-        Assert.Equal("Visible guest message", item.LatestVisibleMessagePreview);
-        Assert.Equal(ConversationSenderType.Guest, item.LatestVisibleMessageSenderType);
-        Assert.Equal(1, item.TotalVisibleMessageCount);
+        Assert.Equal(ConversationStatus.Open, conversation.Status);
+        Assert.False(response.Data!.HumanTakeoverEnabled);
+        Assert.Null(response.Data.EscalationReason);
+        Assert.Null(conversation.EscalationReason);
+        Assert.Equal(fixture.User.Id, conversation.AssignedUserId);
     }
 
     [Fact]
-    public async Task GetConversationsAsync_ReturnsPaginationMetadata()
+    public async Task ReturnToAIModeAsync_AlreadyAiManagedIsIdempotent()
     {
         var fixture = new Fixture();
+<<<<<<< HEAD
         fixture.Repository.InboxConversations.AddRange(Enumerable.Range(0, 3).Select(index => fixture.Repository.NewInboxConversation(subject: $"Conversation {index}")));
+=======
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.Open, humanTakeover: false);
+        conversation.AssignedUserId = fixture.User.Id;
+        fixture.Repository.Conversations.Add(conversation);
+>>>>>>> origin/main
 
-        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Page = 2, PageSize = 2 }, CancellationToken.None);
+        var response = await fixture.Service.ReturnToAIModeAsync(conversation.Id, CancellationToken.None);
 
         Assert.True(response.Success);
-        Assert.Equal(3, response.Data!.TotalCount);
-        Assert.Equal(2, response.Data.Page);
-        Assert.Equal(2, response.Data.PageSize);
-        Assert.Equal(2, response.Data.TotalPages);
-        Assert.Single(response.Data.Items);
+        Assert.Equal("Conversation is already managed by AI.", response.Message);
+        Assert.Equal(ConversationStatus.Open, response.Data!.Status);
+        Assert.False(response.Data.HumanTakeoverEnabled);
+        Assert.Equal(fixture.User.Id, conversation.AssignedUserId);
     }
 
-    [Theory]
-    [InlineData(0, 25, "Page must be greater than or equal to 1.")]
-    [InlineData(1, 101, "PageSize must be 100 or fewer.")]
-    public async Task GetConversationsAsync_RejectsInvalidPagination(int page, int pageSize, string expectedError)
+    [Fact]
+    public async Task ReturnToAIModeAsync_DeletedConversationIsRejected()
     {
         var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.HumanManaged, humanTakeover: true);
+        conversation.IsDeleted = true;
+        fixture.Repository.Conversations.Add(conversation);
 
-        var response = await fixture.Service.GetConversationsAsync(new ConversationListQueryParameters { Page = page, PageSize = pageSize }, CancellationToken.None);
+        var response = await fixture.Service.ReturnToAIModeAsync(conversation.Id, CancellationToken.None);
 
         Assert.False(response.Success);
-        Assert.Equal("Conversation list query validation failed.", response.Message);
-        Assert.Contains(expectedError, response.Errors);
+        Assert.Equal("Conversation was not found.", response.Message);
     }
 
     [Fact]
-    public void GetConversations_RequiresConversationsReadPermission()
+    public async Task MarkConversationReadForCurrentUserAsync_PersistsReadState()
     {
-        var method = typeof(ConversationsController).GetMethod(nameof(ConversationsController.GetConversations));
-        var attribute = Assert.Single(method!.GetCustomAttributes(typeof(RequiresPermissionAttribute), inherit: false).Cast<RequiresPermissionAttribute>());
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        await fixture.Service.AddGuestMessageAsync(conversation.Id, new AddGuestMessageRequest { Content = "Unread" }, CancellationToken.None);
 
-        Assert.Equal("conversations.read", attribute.Permission);
+        var response = await fixture.Service.MarkConversationReadForCurrentUserAsync(conversation.Id, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var readState = Assert.Single(fixture.Repository.ReadStates);
+        Assert.Equal(conversation.Id, readState.ConversationId);
+        Assert.Equal(ConversationParticipantKind.HostUser, readState.ParticipantKind);
+        Assert.Equal(fixture.User.Id, readState.ParticipantId);
     }
 
     [Fact]
-    public void AddApplicationServices_RegistersConversationInboxDependencies()
+    public async Task GetMessageForConversationAsync_ReturnsMessageOnlyWhenCompanyConversationAndMessageMatch()
     {
-        var services = new ServiceCollection();
-        var configuration = new ConfigurationBuilder().Build();
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        var message = fixture.Repository.NewMessage(conversation, "Failed outbound", ConversationSenderType.Host);
+        fixture.Repository.Messages.Add(message);
 
-        services.AddApplicationServices(configuration);
+        var found = await fixture.Repository.GetMessageForConversationAsync(fixture.CompanyId, conversation.Id, message.Id, CancellationToken.None);
+        var wrongCompany = await fixture.Repository.GetMessageForConversationAsync(Guid.NewGuid(), conversation.Id, message.Id, CancellationToken.None);
+        var wrongConversation = await fixture.Repository.GetMessageForConversationAsync(fixture.CompanyId, Guid.NewGuid(), message.Id, CancellationToken.None);
+        var wrongMessage = await fixture.Repository.GetMessageForConversationAsync(fixture.CompanyId, conversation.Id, Guid.NewGuid(), CancellationToken.None);
 
+<<<<<<< HEAD
         Assert.Contains(services, service => service.ServiceType == typeof(IConversationRepository) && service.ImplementationType == typeof(ConversationRepository));
         Assert.Contains(services, service => service.ServiceType == typeof(IConversationService) && service.ImplementationType == typeof(ConversationService));
+=======
+        Assert.NotNull(found);
+        Assert.Equal(message.Id, found!.Id);
+        Assert.Null(wrongCompany);
+        Assert.Null(wrongConversation);
+        Assert.Null(wrongMessage);
+    }
+
+    [Fact]
+    public async Task UpdateMessageDeliveryStatusAsync_PublishesDeliveryRealtimeEvent()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(humanTakeover: true);
+        conversation.Channel = GuestChannel.WhatsApp;
+        fixture.Repository.Conversations.Add(conversation);
+        var message = fixture.Repository.NewMessage(conversation, "Host reply", ConversationSenderType.Host);
+        message.Provider = ConversationMessageProvider.WhatsAppCloud;
+        message.DeliveryStatus = ConversationMessageDeliveryStatus.Pending;
+        fixture.Repository.Messages.Add(message);
+
+        var response = await fixture.Service.UpdateMessageDeliveryStatusAsync(
+            conversation.Id,
+            message.Id,
+            ConversationMessageDeliveryStatus.Sent,
+            DateTimeOffset.UtcNow,
+            failureCode: null,
+            failureReason: null,
+            CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Single(fixture.RealtimePublisher.DeliveryUpdates);
+        var deliveryEvent = fixture.RealtimePublisher.DeliveryUpdates.Single();
+        Assert.Equal(fixture.CompanyId, deliveryEvent.CompanyId);
+        Assert.Equal(conversation.Id, deliveryEvent.ConversationId);
+        Assert.NotNull(deliveryEvent.Payload);
+>>>>>>> origin/main
     }
 
     private sealed class Fixture
     {
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/main
         public Fixture(int maxMessageCharacters = 2000)
         {
             Repository = new FakeConversationRepository(CompanyId);
+            RealtimePublisher = new RecordingConversationRealtimePublisher();
             Guest = new Guest { Id = Guid.NewGuid(), CompanyId = CompanyId, FirstName = "Demo", LastName = "Guest", PreferredLanguage = "en", CountryCode = "KE", IsActive = true };
             Property = new Property { Id = Guid.NewGuid(), CompanyId = CompanyId, Name = "Demo", City = "Nairobi", CountryCode = "KE", AddressLine1 = "Road", TimeZone = "Africa/Nairobi", IsActive = true };
             Reservation = new Reservation { Id = Guid.NewGuid(), CompanyId = CompanyId, PropertyId = Property.Id, PrimaryGuestId = Guest.Id, Property = Property, PrimaryGuest = Guest, CheckInDate = new DateOnly(2026, 8, 1), CheckOutDate = new DateOnly(2026, 8, 4), IsActive = true };
             Repository.Guests.Add(Guest);
             Repository.Properties.Add(Property);
             Repository.Reservations.Add(Reservation);
+            User = new User { Id = Guid.NewGuid(), CompanyId = CompanyId, FullName = "Host User", Email = "host@stayflow.local", PhoneNumber = "+254700000001", Role = "Host", PasswordHash = "hash", IsActive = true };
+            Repository.Users.Add(User);
             Service = new ConversationService(
                 Repository,
-                new FakeCurrentTenantContext(CompanyId),
+                new FakeCurrentTenantContext(CompanyId, User.Id),
                 new ConversationStatusTransitionPolicy(),
+                RealtimePublisher,
+                new NoOpConversationChannelDispatcher(),
                 Options.Create(new ConversationOptions { MaxMessageCharacters = maxMessageCharacters, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
         }
 
@@ -417,36 +827,113 @@ public sealed class ConversationServiceTests
         public Guest Guest { get; }
         public Property Property { get; }
         public Reservation Reservation { get; }
+        public User User { get; }
         public FakeConversationRepository Repository { get; }
+        public RecordingConversationRealtimePublisher RealtimePublisher { get; }
         public ConversationService Service { get; }
     }
 
+<<<<<<< HEAD
 
     private sealed class FakeCurrentTenantContext(Guid companyId) : ICurrentTenantContext
+=======
+    private sealed class FakeCurrentTenantContext(Guid companyId, Guid userId) : ICurrentTenantContext
+>>>>>>> origin/main
     {
         public Guid? CompanyId { get; } = companyId;
-        public Guid? UserId { get; } = Guid.NewGuid();
+        public Guid? UserId { get; } = userId;
         public string? CorrelationId { get; } = "conversation-test";
         public bool IsAuthenticated { get; } = true;
     }
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> origin/main
     private sealed class FakeConversationRepository(Guid companyId) : IConversationRepository
     {
         public List<Conversation> Conversations { get; } = [];
         public List<ConversationMessage> Messages { get; } = [];
+        public List<ConversationMessageKnowledgeSource> MessageKnowledgeSources { get; } = [];
+        public List<ConversationMessageFeedback> MessageFeedback { get; } = [];
         public List<Guest> Guests { get; } = [];
         public List<Property> Properties { get; } = [];
         public List<Reservation> Reservations { get; } = [];
         public List<User> Users { get; } = [];
         public List<AuditLog> AuditLogs { get; } = [];
+<<<<<<< HEAD
         public List<FakeConversation> InboxConversations { get; } = [];
         public Guid? LastCompanyId { get; private set; }
         public ConversationListQueryParameters? LastQuery { get; private set; }
+=======
+        public List<ConversationParticipantReadState> ReadStates { get; } = [];
+
+        public Task<PagedResult<ConversationSummaryResponse>> ListConversationsAsync(Guid requestedCompanyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
+        {
+            var conversations = Conversations
+                .Where(conversation => conversation.CompanyId == requestedCompanyId && !conversation.IsDeleted);
+
+            if (query.Status is { } status)
+            {
+                conversations = conversations.Where(conversation => conversation.Status == status);
+            }
+
+            if (query.PropertyId is { } propertyId)
+            {
+                conversations = conversations.Where(conversation => conversation.PropertyId == propertyId);
+            }
+
+            if (query.RequiresHostAttention is { } requiresHostAttention)
+            {
+                conversations = conversations.Where(conversation => IsHostAttentionConversation(conversation) == requiresHostAttention);
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var search = query.Search.Trim();
+                conversations = conversations.Where(conversation =>
+                    $"{conversation.Guest?.FirstName} {conversation.Guest?.LastName}".Contains(search, StringComparison.OrdinalIgnoreCase)
+                    || (conversation.Guest?.Email?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (conversation.Property?.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (conversation.Reservation?.ConfirmationNumber?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+                    || (conversation.Subject?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+
+            var ordered = conversations
+                .OrderByDescending(IsHostAttentionConversation)
+                .ThenByDescending(conversation => conversation.LastActivityAt)
+                .ToList();
+            var page = query.Page < 1 ? 1 : query.Page;
+            var pageSize = query.NormalizedPageSize;
+            var items = ordered
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(MapSummary)
+                .ToList();
+
+            return Task.FromResult(new PagedResult<ConversationSummaryResponse>
+            {
+                Items = items,
+                PageNumber = page,
+                PageSize = pageSize,
+                TotalCount = ordered.Count
+            });
+        }
+>>>>>>> origin/main
 
         public Task<Conversation?> GetByIdForCompanyAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
         {
             return Task.FromResult(Conversations.FirstOrDefault(conversation => conversation.CompanyId == requestedCompanyId && conversation.Id == conversationId));
+        }
+
+        public Task<ConversationMessage?> GetMessageForConversationAsync(Guid requestedCompanyId, Guid conversationId, Guid messageId, CancellationToken cancellationToken)
+        {
+            var message = Messages.FirstOrDefault(item =>
+                item.CompanyId == requestedCompanyId
+                && item.ConversationId == conversationId
+                && item.Id == messageId);
+
+            return Task.FromResult(message);
         }
 
         public Task<Conversation?> GetOpenConversationAsync(Guid requestedCompanyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
@@ -477,6 +964,7 @@ public sealed class ConversationServiceTests
             });
         }
 
+<<<<<<< HEAD
         public Task<PagedResult<ConversationSummaryResponse>> GetInboxAsync(
             Guid requestedCompanyId,
             ConversationListQueryParameters query,
@@ -534,8 +1022,73 @@ public sealed class ConversationServiceTests
         }
 
         public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid requestedCompanyId, string externalMessageId, CancellationToken cancellationToken)
+=======
+        public Task<ConversationMessage?> GetLatestVisibleMessageAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
+>>>>>>> origin/main
         {
-            return Task.FromResult(Messages.FirstOrDefault(message => message.CompanyId == requestedCompanyId && message.ExternalMessageId == externalMessageId));
+            var message = Messages
+                .Where(item => item.CompanyId == requestedCompanyId && item.ConversationId == conversationId && !item.IsInternal && !item.IsDeleted)
+                .OrderByDescending(item => item.SentAt)
+                .ThenByDescending(item => item.CreatedAt)
+                .FirstOrDefault();
+
+            return Task.FromResult(message);
+        }
+
+        public Task<int> GetTotalUnreadCountForHostAsync(Guid requestedCompanyId, Guid hostUserId, CancellationToken cancellationToken)
+        {
+            var unread = Messages.Count(message =>
+                message.CompanyId == requestedCompanyId
+                && message.SenderType == ConversationSenderType.Guest
+                && !message.IsInternal
+                && !message.IsDeleted
+                && (ReadStates.FirstOrDefault(state => state.CompanyId == requestedCompanyId
+                    && state.ConversationId == message.ConversationId
+                    && state.ParticipantKind == ConversationParticipantKind.HostUser
+                    && state.ParticipantId == hostUserId)?.LastReadAt is not { } readAt || message.SentAt > readAt));
+
+            return Task.FromResult(unread);
+        }
+
+        public Task<Dictionary<Guid, int>> GetUnreadMessageCountsForHostAsync(Guid requestedCompanyId, Guid hostUserId, IReadOnlyCollection<Guid> conversationIds, CancellationToken cancellationToken)
+        {
+            var ids = conversationIds.ToHashSet();
+            var result = Messages
+                .Where(message => message.CompanyId == requestedCompanyId
+                    && ids.Contains(message.ConversationId)
+                    && message.SenderType == ConversationSenderType.Guest
+                    && !message.IsInternal
+                    && !message.IsDeleted)
+                .GroupBy(message => message.ConversationId)
+                .ToDictionary(
+                    group => group.Key,
+                    group =>
+                    {
+                        var readAt = ReadStates.FirstOrDefault(state => state.CompanyId == requestedCompanyId
+                            && state.ConversationId == group.Key
+                            && state.ParticipantKind == ConversationParticipantKind.HostUser
+                            && state.ParticipantId == hostUserId)?.LastReadAt;
+                        return group.Count(message => !readAt.HasValue || message.SentAt > readAt.Value);
+                    });
+
+            return Task.FromResult(result);
+        }
+
+        public Task<int> GetUnreadHostMessageCountForGuestAsync(Guid requestedCompanyId, Guid guestId, Guid conversationId, CancellationToken cancellationToken)
+            => Task.FromResult(0);
+
+        public Task<ConversationParticipantReadState?> GetReadStateAsync(Guid requestedCompanyId, Guid conversationId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken)
+            => Task.FromResult(ReadStates.FirstOrDefault(state => state.CompanyId == requestedCompanyId && state.ConversationId == conversationId && state.ParticipantKind == participantKind && state.ParticipantId == participantId));
+
+        public Task<IReadOnlyCollection<ConversationParticipantReadState>> GetReadStatesForParticipantAsync(Guid requestedCompanyId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyCollection<ConversationParticipantReadState>>(ReadStates.Where(state => state.CompanyId == requestedCompanyId && state.ParticipantKind == participantKind && state.ParticipantId == participantId).ToList());
+
+        public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid requestedCompanyId, string externalMessageId, ConversationMessageProvider? provider, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(Messages.FirstOrDefault(message =>
+                message.CompanyId == requestedCompanyId
+                && message.ExternalMessageId == externalMessageId
+                && (provider is null || message.Provider == provider)));
         }
 
         public Task<Guest?> GetGuestAsync(Guid requestedCompanyId, Guid guestId, CancellationToken cancellationToken)
@@ -570,6 +1123,55 @@ public sealed class ConversationServiceTests
             return Task.CompletedTask;
         }
 
+        public Task AddMessageKnowledgeSourceAsync(ConversationMessageKnowledgeSource source, CancellationToken cancellationToken)
+        {
+            MessageKnowledgeSources.Add(source);
+            return Task.CompletedTask;
+        }
+
+        public Task<ConversationMessageFeedback?> GetMessageFeedbackAsync(Guid requestedCompanyId, Guid conversationId, Guid messageId, Guid guestId, CancellationToken cancellationToken)
+        {
+            var feedback = MessageFeedback.FirstOrDefault(item =>
+                item.CompanyId == requestedCompanyId
+                && item.ConversationId == conversationId
+                && item.ConversationMessageId == messageId
+                && item.GuestId == guestId);
+
+            return Task.FromResult(feedback);
+        }
+
+        public Task AddMessageFeedbackAsync(ConversationMessageFeedback feedback, CancellationToken cancellationToken)
+        {
+            MessageFeedback.Add(feedback);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyCollection<ConversationMessageFeedback>> ListMessageFeedbackAsync(Guid requestedCompanyId, DateTimeOffset sinceUtc, DateTimeOffset untilUtc, Guid? propertyId, CancellationToken cancellationToken)
+        {
+            var query = MessageFeedback
+                .Where(item => item.CompanyId == requestedCompanyId
+                    && item.CreatedAt >= sinceUtc
+                    && item.CreatedAt <= untilUtc)
+                .ToList();
+
+            if (propertyId is { } requestedPropertyId)
+            {
+                var conversationIds = Conversations
+                    .Where(item => item.CompanyId == requestedCompanyId && item.PropertyId == requestedPropertyId)
+                    .Select(item => item.Id)
+                    .ToHashSet();
+                query = query.Where(item => conversationIds.Contains(item.ConversationId)).ToList();
+            }
+
+            return Task.FromResult<IReadOnlyCollection<ConversationMessageFeedback>>(query);
+        }
+
+        public Task AddReadStateAsync(ConversationParticipantReadState state, CancellationToken cancellationToken)
+        {
+            ReadStates.Add(state);
+            return Task.CompletedTask;
+        }
+
         public Task AddAuditLogAsync(AuditLog auditLog, CancellationToken cancellationToken)
         {
             AuditLogs.Add(auditLog);
@@ -591,13 +1193,26 @@ public sealed class ConversationServiceTests
                 message.UpdatedAt = now;
             }
 
+            foreach (var feedback in MessageFeedback.Where(feedback => feedback.CreatedAt == default))
+            {
+                feedback.CreatedAt = now;
+                feedback.UpdatedAt = now;
+            }
+
             return Task.CompletedTask;
         }
 
-        public Conversation NewConversation(Guid? overrideCompanyId = null, ConversationStatus status = ConversationStatus.Open, bool humanTakeover = false)
+        public Conversation NewConversation(
+            Guid? overrideCompanyId = null,
+            ConversationStatus status = ConversationStatus.Open,
+            bool humanTakeover = false,
+            DateTimeOffset? lastActivityAt = null,
+            Property? property = null,
+            Reservation? reservation = null,
+            string? subject = null)
         {
             var guest = Guests.Single();
-            var property = Properties.Single();
+            property ??= Properties.First();
             return new Conversation
             {
                 Id = Guid.NewGuid(),
@@ -606,17 +1221,21 @@ public sealed class ConversationServiceTests
                 Guest = guest,
                 PropertyId = property.Id,
                 Property = property,
+                ReservationId = reservation?.Id,
+                Reservation = reservation,
                 Channel = GuestChannel.Web,
                 ChannelIdentity = null,
                 Status = status,
+                Subject = subject,
                 HumanTakeoverEnabled = humanTakeover,
                 StartedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
-                LastActivityAt = DateTimeOffset.UtcNow,
+                LastActivityAt = lastActivityAt ?? DateTimeOffset.UtcNow,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
         }
 
+<<<<<<< HEAD
         public FakeConversation NewInboxConversation(
             Guid? overrideCompanyId = null,
             Guid? propertyId = null,
@@ -631,62 +1250,123 @@ public sealed class ConversationServiceTests
             string? latestVisibleMessagePreview = null,
             ConversationSenderType? latestVisibleMessageSenderType = null,
             int totalVisibleMessageCount = 0)
+=======
+        public ConversationMessage NewMessage(
+            Conversation conversation,
+            string content,
+            ConversationSenderType senderType,
+            ConversationMessageType messageType = ConversationMessageType.Text,
+            bool isInternal = false,
+            DateTimeOffset? sentAt = null)
+>>>>>>> origin/main
         {
-            var resolvedPropertyId = propertyId ?? Guid.NewGuid();
-            return new FakeConversation
+            return new ConversationMessage
             {
+<<<<<<< HEAD
                 CompanyId = overrideCompanyId ?? companyId,
                 ConversationId = Guid.NewGuid(),
                 Status = status,
                 Channel = "WhatsApp",
                 Subject = subject,
+=======
+                Id = Guid.NewGuid(),
+                CompanyId = conversation.CompanyId,
+                ConversationId = conversation.Id,
+                Conversation = conversation,
+                SenderType = senderType,
+                MessageType = messageType,
+                Content = content,
+                IsInternal = isInternal,
+                SentAt = sentAt ?? DateTimeOffset.UtcNow,
+                CreatedAt = sentAt ?? DateTimeOffset.UtcNow,
+                UpdatedAt = sentAt ?? DateTimeOffset.UtcNow
+            };
+        }
+
+        private ConversationSummaryResponse MapSummary(Conversation conversation)
+        {
+            var visibleMessages = Messages
+                .Where(message => message.CompanyId == conversation.CompanyId && message.ConversationId == conversation.Id && !message.IsInternal && !message.IsDeleted)
+                .OrderByDescending(message => message.SentAt)
+                .ThenByDescending(message => message.CreatedAt)
+                .ToList();
+            var latest = visibleMessages.FirstOrDefault();
+
+            return new ConversationSummaryResponse
+            {
+                Id = conversation.Id,
+                ConversationId = conversation.Id,
+                GuestId = conversation.GuestId,
+                ReservationId = conversation.ReservationId,
+                PropertyId = conversation.PropertyId,
+                Channel = conversation.Channel,
+                Status = conversation.Status,
+                Subject = conversation.Subject,
+                HumanTakeoverEnabled = conversation.HumanTakeoverEnabled,
+                RequiresHostAttention = IsHostAttentionConversation(conversation),
+                EscalationReason = conversation.EscalationReason,
+                StartedAt = conversation.StartedAt,
+                LastActivityAt = conversation.LastActivityAt,
+                ClosedAt = conversation.ClosedAt,
+>>>>>>> origin/main
                 Guest = new ConversationGuestSummary
                 {
-                    GuestId = Guid.NewGuid(),
-                    FirstName = guestFirstName,
-                    LastName = guestLastName,
-                    Email = guestEmail
+                    Id = conversation.GuestId,
+                    FirstName = conversation.Guest?.FirstName ?? string.Empty,
+                    LastName = conversation.Guest?.LastName ?? string.Empty,
+                    FullName = conversation.Guest is null ? string.Empty : $"{conversation.Guest.FirstName} {conversation.Guest.LastName}".Trim(),
+                    Email = conversation.Guest?.Email,
+                    PreferredLanguage = conversation.Guest?.PreferredLanguage ?? string.Empty
                 },
-                Property = new ConversationPropertySummary
-                {
-                    PropertyId = resolvedPropertyId,
-                    Name = propertyName
-                },
-                Reservation = confirmationNumber is null
+                Property = conversation.Property is null
+                    ? null
+                    : new ConversationPropertySummary
+                    {
+                        Id = conversation.Property.Id,
+                        Name = conversation.Property.Name,
+                        City = conversation.Property.City
+                    },
+                Reservation = conversation.Reservation is null
                     ? null
                     : new ConversationReservationSummary
                     {
-                        ReservationId = Guid.NewGuid(),
-                        ConfirmationNumber = confirmationNumber
+                        Id = conversation.Reservation.Id,
+                        ConfirmationNumber = conversation.Reservation.ConfirmationNumber,
+                        CheckInDate = conversation.Reservation.CheckInDate,
+                        CheckOutDate = conversation.Reservation.CheckOutDate,
+                        Status = conversation.Reservation.Status
                     },
-                StartedAt = DateTimeOffset.UtcNow.AddHours(-3),
-                LastActivityAt = lastActivityAt ?? DateTimeOffset.UtcNow,
-                LatestVisibleMessagePreview = latestVisibleMessagePreview,
-                LatestVisibleMessageSenderType = latestVisibleMessageSenderType,
-                TotalVisibleMessageCount = totalVisibleMessageCount
+                LatestVisibleMessagePreview = latest?.Content,
+                LatestVisibleMessageSenderType = latest?.SenderType,
+                LatestVisibleMessageTimestamp = latest?.SentAt,
+                TotalVisibleMessageCount = visibleMessages.Count
             };
+        }
+
+        private static bool IsHostAttentionConversation(Conversation conversation)
+        {
+            return conversation.HumanTakeoverEnabled
+                || conversation.Status == ConversationStatus.AwaitingHost
+                || conversation.Status == ConversationStatus.Escalated
+                || conversation.Status == ConversationStatus.HumanManaged;
         }
     }
 
-    private sealed class FakeConversation
+    private sealed class RecordingConversationRealtimePublisher : IConversationRealtimePublisher
     {
-        public Guid CompanyId { get; init; }
-        public Guid ConversationId { get; init; }
-        public ConversationStatus Status { get; init; }
-        public string Channel { get; init; } = string.Empty;
-        public string? Subject { get; init; }
-        public ConversationGuestSummary? Guest { get; init; }
-        public ConversationPropertySummary? Property { get; init; }
-        public ConversationReservationSummary? Reservation { get; init; }
-        public DateTimeOffset StartedAt { get; init; }
-        public DateTimeOffset LastActivityAt { get; init; }
-        public string? LatestVisibleMessagePreview { get; init; }
-        public ConversationSenderType? LatestVisibleMessageSenderType { get; init; }
-        public int TotalVisibleMessageCount { get; init; }
-        public bool RequiresHostAttention => Status is ConversationStatus.AwaitingHost or ConversationStatus.Escalated or ConversationStatus.HumanManaged;
+        public List<(Guid CompanyId, Guid ConversationId, object Payload)> DeliveryUpdates { get; } = [];
 
-        public ConversationSummaryResponse ToResponse()
+        public Task PublishMessageCreatedAsync(Guid companyId, Guid conversationId, object payload, bool internalOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishTypingStartedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishTypingStoppedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
         {
+<<<<<<< HEAD
             return new ConversationSummaryResponse
             {
                 ConversationId = ConversationId,
@@ -708,6 +1388,15 @@ public sealed class ConversationServiceTests
                 LatestVisibleMessageTimestamp = LatestVisibleMessagePreview is null ? null : LastActivityAt,
                 TotalVisibleMessageCount = TotalVisibleMessageCount
             };
+=======
+            DeliveryUpdates.Add((companyId, conversationId, payload));
+            return Task.CompletedTask;
+>>>>>>> origin/main
         }
+    }
+
+    private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher
+    {
+        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

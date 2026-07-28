@@ -21,12 +21,20 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
         builder.Property(message => message.Content).HasMaxLength(4000).IsRequired();
         builder.Property(message => message.MessageType).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(message => message.ExternalMessageId).HasMaxLength(160);
+        builder.Property(message => message.Provider).HasConversion<string>().HasMaxLength(40).IsRequired();
+        builder.Property(message => message.DeliveryStatus).HasConversion<string>().HasMaxLength(40);
+        builder.Property(message => message.FailureCode).HasMaxLength(80);
+        builder.Property(message => message.FailureReason).HasMaxLength(240);
         builder.Property(message => message.ProviderName).HasMaxLength(80);
         builder.Property(message => message.ProviderModel).HasMaxLength(120);
         builder.Property(message => message.ProviderRequestId).HasMaxLength(160);
         builder.Property(message => message.AIOutcome).HasMaxLength(80);
         builder.Property(message => message.FailureCategory).HasMaxLength(80);
+        builder.Property(message => message.SendAttemptNumber).HasDefaultValue(1);
         builder.Property(message => message.EscalationReason).HasMaxLength(120);
+        builder.Property(message => message.TemplateName).HasMaxLength(120);
+        builder.Property(message => message.TemplateLanguageCode).HasMaxLength(20);
+        builder.Property(message => message.TemplateRenderedPreview).HasMaxLength(4000);
 
         builder.HasOne(message => message.Company)
             .WithMany(company => company.ConversationMessages)
@@ -38,15 +46,23 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
             .HasForeignKey(message => message.ConversationId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        builder.HasOne(message => message.RetryOfMessage)
+            .WithMany(message => message.RetryAttempts)
+            .HasForeignKey(message => message.RetryOfMessageId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasIndex(message => message.CompanyId);
         builder.HasIndex(message => message.ConversationId);
         builder.HasIndex(message => message.SentAt);
         builder.HasIndex(message => message.CreatedAt);
         builder.HasIndex(message => message.ExternalMessageId);
         builder.HasIndex(message => message.IsDeleted);
+        builder.HasIndex(message => message.RetryOfMessageId);
+        builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.DeliveryStatus });
         builder.HasIndex(message => new { message.ConversationId, message.SentAt });
         builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.SentAt });
-        builder.HasIndex(message => new { message.CompanyId, message.ExternalMessageId })
+        builder.HasIndex(message => new { message.CompanyId, message.WhatsAppTemplateId });
+        builder.HasIndex(message => new { message.CompanyId, message.Provider, message.ExternalMessageId })
             .IsUnique()
             .HasFilter("\"ExternalMessageId\" IS NOT NULL");
     }

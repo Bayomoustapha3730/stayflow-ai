@@ -294,11 +294,13 @@ public sealed class AIContextBuilder(
     private AIKnowledgeContext BuildKnowledgeContext(Property property, IReadOnlyCollection<QuestionContextCategory> categories, bool requiresAccessAuthorization)
     {
         var articles = property.PropertyKnowledgeArticles
-            .Where(article => article.IsActive && article.CompanyId == property.CompanyId && article.PropertyId == property.Id)
+            .Where(article => article.IsActive && article.IsApproved && !article.IsDeleted && article.CompanyId == property.CompanyId && article.PropertyId == property.Id)
             .Where(article => IsRelevant(article.Title, article.Content, categories))
             .Where(article => !IsSensitiveAccessContent(article.Title, article.Content))
             .Where(article => !requiresAccessAuthorization || !IsRelevant(article.Title, article.Content, [QuestionContextCategory.PropertyAccess]))
-            .OrderBy(article => article.Title)
+            .OrderByDescending(article => article.Priority)
+            .ThenByDescending(article => article.UpdatedAt)
+            .ThenBy(article => article.Title)
             .Take(options.Value.MaxKnowledgeArticles)
             .Select(article => new AIKnowledgeArticleContext { Title = article.Title, Content = article.Content })
             .ToList();

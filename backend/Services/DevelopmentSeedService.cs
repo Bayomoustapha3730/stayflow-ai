@@ -19,6 +19,12 @@ public sealed class DevelopmentSeedService(
     private static readonly Guid DemoDemoGuestId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid DemoDemoReservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid DemoDemoRoleId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+    private static readonly Guid DemoWhatsAppIntegrationId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+    private static readonly Guid DemoTemplateWelcomeGuestId = Guid.Parse("88888888-8888-4888-8888-888888888881");
+    private static readonly Guid DemoTemplateBookingConfirmationId = Guid.Parse("88888888-8888-4888-8888-888888888882");
+    private static readonly Guid DemoTemplateLateCheckoutId = Guid.Parse("88888888-8888-4888-8888-888888888883");
+    private static readonly Guid DemoTemplateCheckinInstructionsId = Guid.Parse("88888888-8888-4888-8888-888888888884");
+    private static readonly Guid DemoTemplateCheckoutReminderId = Guid.Parse("88888888-8888-4888-8888-888888888885");
 
     private const string DemoUserEmail = "demo.user@stayflow.local";
     private const string DemoUserFullName = "Demo User";
@@ -39,6 +45,9 @@ public sealed class DevelopmentSeedService(
 
         var currentDate = DateOnly.FromDateTime(DateTime.UtcNow);
         await EnsureDemoReservationAsync(currentDate, cancellationToken);
+        await EnsureDemoPropertyKnowledgeAsync(cancellationToken);
+        await EnsureDemoWhatsAppIntegrationAsync(cancellationToken);
+        await EnsureDemoWhatsAppTemplatesAsync(cancellationToken);
         await EnsureDemoUserRoleAsync(demoUser.Id, role.Id, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -140,6 +149,197 @@ public sealed class DevelopmentSeedService(
         }
     }
 
+    private async Task EnsureDemoPropertyKnowledgeAsync(CancellationToken cancellationToken)
+    {
+        var items = new[]
+        {
+            (Title: "Guest Wi-Fi", Category: PropertyKnowledgeCategory.WiFi, Summary: "Demo Wi-Fi details for guests.", Content: "SSID: StayFlowGuest. Password: DemoStay2026.", Tags: "wifi,internet,network", Priority: 10),
+            (Title: "Check-in details", Category: PropertyKnowledgeCategory.CheckIn, Summary: "Standard arrival guidance.", Content: "Standard check-in time is 3:00 PM. Access instructions are sent on arrival day.", Tags: "check-in,arrival,access", Priority: 9),
+            (Title: "Checkout details", Category: PropertyKnowledgeCategory.Checkout, Summary: "Standard departure guidance.", Content: "Standard checkout time is 11:00 AM. Please message the host if you need clarification.", Tags: "checkout,departure", Priority: 8),
+            (Title: "Parking", Category: PropertyKnowledgeCategory.Parking, Summary: "Parking rules for the demo property.", Content: "One designated parking space is available. Additional vehicles require host confirmation.", Tags: "parking,car,garage", Priority: 8),
+            (Title: "House rules", Category: PropertyKnowledgeCategory.HouseRules, Summary: "Core guest house rules.", Content: "Quiet hours begin at 10:00 PM. No smoking is permitted inside the property.", Tags: "house-rules,quiet-hours", Priority: 7),
+            (Title: "Emergency guidance", Category: PropertyKnowledgeCategory.Emergency, Summary: "Basic demo emergency instructions.", Content: "For urgent safety emergencies, contact local emergency services first and then notify the host through StayFlow.", Tags: "emergency,safety", Priority: 10),
+            (Title: "Local recommendations", Category: PropertyKnowledgeCategory.LocalRecommendations, Summary: "Nearby demo recommendations.", Content: "Nearby options include demo cafes, grocery stores, and casual dining within a short drive.", Tags: "local,recommendations,food", Priority: 4)
+        };
+
+        foreach (var item in items)
+        {
+            var existing = await dbContext.PropertyKnowledgeArticles
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(article => article.CompanyId == SeedData.DemoCompanyId
+                    && article.PropertyId == SeedData.DemoPropertyId
+                    && article.Title == item.Title,
+                    cancellationToken);
+
+            if (existing is null)
+            {
+                existing = new PropertyKnowledgeArticle { Id = Guid.NewGuid() };
+                dbContext.PropertyKnowledgeArticles.Add(existing);
+            }
+
+            existing.CompanyId = SeedData.DemoCompanyId;
+            existing.PropertyId = SeedData.DemoPropertyId;
+            existing.Category = item.Category;
+            existing.Title = item.Title;
+            existing.Summary = item.Summary;
+            existing.Content = item.Content;
+            existing.Tags = item.Tags;
+            existing.Priority = item.Priority;
+            existing.IsApproved = true;
+            existing.IsActive = true;
+            existing.IsDeleted = false;
+            existing.DeletedAt = null;
+            existing.DeletedByUserId = null;
+            existing.ApprovedAt = DateTimeOffset.UtcNow;
+            existing.ApprovedByUserId = DemoDemoUserId;
+            existing.CreatedByUserId = DemoDemoUserId;
+            existing.UpdatedByUserId = DemoDemoUserId;
+        }
+    }
+
+    private async Task EnsureDemoWhatsAppIntegrationAsync(CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsRelational())
+        {
+            var pendingMigrations = await dbContext.Database.GetPendingMigrationsAsync(cancellationToken);
+            if (pendingMigrations.Any(migration => migration.Contains("AddWhatsAppMessagingFoundation", StringComparison.Ordinal)))
+            {
+                return;
+            }
+        }
+
+        var integration = await dbContext.WhatsAppIntegrations
+            .FirstOrDefaultAsync(item => item.Id == DemoWhatsAppIntegrationId, cancellationToken);
+
+        if (integration is null)
+        {
+            integration = new WhatsAppIntegration { Id = DemoWhatsAppIntegrationId };
+            dbContext.WhatsAppIntegrations.Add(integration);
+        }
+
+        integration.CompanyId = SeedData.DemoCompanyId;
+        integration.DisplayName = "Demo WhatsApp Concierge";
+        integration.PhoneNumberId = "demo-phone-number-id";
+        integration.WhatsAppBusinessAccountId = "demo-waba-id";
+        integration.BusinessPhoneNumberMasked = "+1******0002";
+        integration.IsActive = true;
+    }
+
+    private async Task EnsureDemoWhatsAppTemplatesAsync(CancellationToken cancellationToken)
+    {
+        if (dbContext.Database.IsRelational())
+        {
+            var pendingMigrations = await dbContext.Database.GetPendingMigrationsAsync(cancellationToken);
+            if (pendingMigrations.Any(migration => migration.Contains("AddWhatsAppProductionTemplates", StringComparison.Ordinal)))
+            {
+                return;
+            }
+        }
+
+        var seededTemplates = new[]
+        {
+            new
+            {
+                Id = DemoTemplateWelcomeGuestId,
+                Name = "welcome_guest",
+                LanguageCode = "en",
+                Category = "UTILITY",
+                Status = "APPROVED",
+                HeaderType = "TEXT",
+                BodyText = "Hello {{1}}, welcome to StayFlow. Your stay starts on {{2}}.",
+                FooterText = "StayFlow Concierge",
+                VariableCount = 2
+            },
+            new
+            {
+                Id = DemoTemplateBookingConfirmationId,
+                Name = "booking_confirmation",
+                LanguageCode = "fr",
+                Category = "UTILITY",
+                Status = "APPROVED",
+                HeaderType = "TEXT",
+                BodyText = "Bonjour {{1}}, votre reservation {{2}} est confirmee.",
+                FooterText = "StayFlow Concierge",
+                VariableCount = 2
+            },
+            new
+            {
+                Id = DemoTemplateLateCheckoutId,
+                Name = "late_checkout",
+                LanguageCode = "en",
+                Category = "MARKETING",
+                Status = "PENDING",
+                HeaderType = (string?)null,
+                BodyText = "Late checkout request for {{1}} is under review.",
+                FooterText = (string?)null,
+                VariableCount = 1
+            },
+            new
+            {
+                Id = DemoTemplateCheckinInstructionsId,
+                Name = "checkin_instructions",
+                LanguageCode = "es",
+                Category = "AUTHENTICATION",
+                Status = "APPROVED",
+                HeaderType = "TEXT",
+                BodyText = "Hola {{1}}, usa el codigo {{2}} para el check-in.",
+                FooterText = "StayFlow Concierge",
+                VariableCount = 2
+            },
+            new
+            {
+                Id = DemoTemplateCheckoutReminderId,
+                Name = "checkout_reminder",
+                LanguageCode = "en",
+                Category = "UTILITY",
+                Status = "REJECTED",
+                HeaderType = (string?)null,
+                BodyText = "Reminder: checkout is at {{1}}.",
+                FooterText = (string?)null,
+                VariableCount = 1
+            }
+        };
+
+        foreach (var item in seededTemplates)
+        {
+            // Upsert by tenant + integration + template identity so reruns are deterministic and duplicate-safe.
+            var template = await dbContext.WhatsAppTemplates
+                .FirstOrDefaultAsync(t =>
+                    t.CompanyId == SeedData.DemoCompanyId
+                    && t.WhatsAppIntegrationId == DemoWhatsAppIntegrationId
+                    && t.Name == item.Name
+                    && t.LanguageCode == item.LanguageCode,
+                    cancellationToken);
+
+            if (template is null)
+            {
+                template = await dbContext.WhatsAppTemplates
+                    .FirstOrDefaultAsync(t => t.Id == item.Id, cancellationToken);
+            }
+
+            if (template is null)
+            {
+                template = new WhatsAppTemplate { Id = item.Id };
+                dbContext.WhatsAppTemplates.Add(template);
+            }
+
+            template.CompanyId = SeedData.DemoCompanyId;
+            template.WhatsAppIntegrationId = DemoWhatsAppIntegrationId;
+            template.ExternalTemplateId = $"dev-seeded-{item.Name}-{item.LanguageCode}";
+            template.Name = item.Name;
+            template.LanguageCode = item.LanguageCode;
+            template.Category = item.Category;
+            template.Status = item.Status;
+            template.HeaderType = item.HeaderType;
+            template.BodyText = item.BodyText;
+            template.FooterText = item.FooterText;
+            template.VariableCount = item.VariableCount;
+            template.ComponentsJson = "{\"source\":\"development-seed\"}";
+            template.LastSyncedAt = DateTimeOffset.UtcNow;
+            template.IsActive = true;
+        }
+    }
+
     private async Task<Role> GetOrCreateDemoRoleAsync(CancellationToken cancellationToken)
     {
         var existingRole = await dbContext.Roles
@@ -226,6 +426,9 @@ public sealed class DevelopmentSeedService(
         return
         [
             "auth.me",
+            "properties.read",
+            "properties.manage",
+            "properties.approve",
             "guests.read",
             "reservations.read",
             "ai.orchestrate",

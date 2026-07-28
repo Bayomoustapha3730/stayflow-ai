@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIContext;
@@ -8,17 +10,21 @@ using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
+using StayFlow.Api.Services.AI.Context;
+using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Services;
 
 public sealed class ChatService(
     IConversationRepository conversationRepository,
     IConversationService conversationService,
-    IAIOrchestrator aiOrchestrator,
+    IAIReplyOrchestrator aiReplyOrchestrator,
     ICurrentTenantContext currentTenantContext,
-    IOptions<ConversationOptions> options) : IChatService
+    IOptions<ConversationOptions> options,
+    ILogger<ChatService>? logger = null) : IChatService
 {
     private const string HostWillRespondMessage = "Thanks, your message has been received. A host or support team member will respond shortly.";
+    private readonly ILogger<ChatService> logger = logger ?? NullLogger<ChatService>.Instance;
 
     public async Task<ApiResponse<ChatMessageResponse>> SendGuestMessageAsync(SendChatMessageRequest request, CancellationToken cancellationToken)
     {
@@ -47,7 +53,11 @@ public sealed class ChatService(
 
         if (!string.IsNullOrWhiteSpace(request.ExternalMessageId))
         {
-            var duplicate = await conversationRepository.FindByExternalMessageIdAsync(companyId, request.ExternalMessageId.Trim(), cancellationToken);
+            var duplicate = await conversationRepository.FindByExternalMessageIdAsync(
+                companyId,
+                request.ExternalMessageId.Trim(),
+                request.Channel == GuestChannel.WhatsApp ? ConversationMessageProvider.WhatsAppCloud : null,
+                cancellationToken);
             if (duplicate is not null)
             {
                 await AuditAsync(companyId, duplicate.ConversationId, request.GuestId, "DuplicateExternalMessageIgnored", request.Channel, null, null, cancellationToken);
@@ -107,7 +117,20 @@ public sealed class ChatService(
         await AuditAsync(companyId, conversation.Id, request.GuestId, "ChatGuestMessageReceived", request.Channel, null, null, cancellationToken);
 
         conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversation.Id, cancellationToken) ?? conversation;
-        if (conversation.HumanTakeoverEnabled || conversation.Status is ConversationStatus.HumanManaged or ConversationStatus.AwaitingHost or ConversationStatus.Escalated)
+
+        var explicitHumanTakeover = IsExplicitHumanTakeover(conversation);
+        logger.LogInformation(
+            "Chat routing decision. ConversationId={ConversationId} CompanyId={CompanyId} PropertyId={PropertyId} ReservationId={ReservationId} Status={Status} HumanTakeoverEnabled={HumanTakeoverEnabled} RequiresHostAttention={RequiresHostAttention} ExplicitHumanTakeover={ExplicitHumanTakeover}",
+            conversation.Id,
+            companyId,
+            conversation.PropertyId,
+            conversation.ReservationId,
+            conversation.Status,
+            conversation.HumanTakeoverEnabled,
+            RequiresHostAttention(conversation.Status, conversation.HumanTakeoverEnabled),
+            explicitHumanTakeover);
+
+        if (explicitHumanTakeover)
         {
             conversation.Status = conversation.Status == ConversationStatus.HumanManaged
                 ? ConversationStatus.HumanManaged
@@ -122,17 +145,19 @@ public sealed class ChatService(
             return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, guestMessage.Data, assistant.Data, null, [], []), "Chat message received.");
         }
 
-        var orchestration = await aiOrchestrator.ProcessAsync(new AIOrchestrationRequest
+        var replyResult = await aiReplyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
         {
-            GuestMessage = request.Message.Trim(),
-            GuestId = request.GuestId,
             ConversationId = conversation.Id,
-            Channel = request.Channel.ToString(),
-            ChannelIdentity = request.ChannelIdentity,
-            ExplicitReservationReference = request.ExplicitReservationReference,
-            ExplicitPropertyName = request.ExplicitPropertyName,
-            CurrentTimestamp = sentAt
+            Operation = AIReplyOperation.GeneratedHostReply,
+            CorrelationId = currentTenantContext.CorrelationId
         }, cancellationToken);
+
+        if (replyResult is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail("Conversation was not found.");
+        }
+
+        var orchestration = MapGuestOrchestrationResult(replyResult);
 
         UpdateConversationStatusFromAI(conversation, orchestration);
         var aiMessage = await conversationService.AddAIMessageAsync(conversation.Id, orchestration.GuestSafeMessage, orchestration, cancellationToken);
@@ -186,6 +211,17 @@ public sealed class ChatService(
         if (!validation.Success || validation.Data is null)
         {
             return ApiResponse<ChatStatusResponse>.Fail(validation.Message, validation.Errors);
+        }
+
+        var conversation = validation.Data;
+        if (conversation.Status == ConversationStatus.Closed)
+        {
+            return ApiResponse<ChatStatusResponse>.Fail("Conversation state does not allow this message.");
+        }
+
+        if (RequiresHostAttention(conversation.Status, conversation.HumanTakeoverEnabled))
+        {
+            return ApiResponse<ChatStatusResponse>.Ok(MapStatus(conversation, "A host has already been notified."), "A host has already been notified.");
         }
 
         var escalation = await conversationService.EscalateConversationAsync(conversationId, new EscalateConversationRequest
@@ -305,18 +341,25 @@ public sealed class ChatService(
 
     private void UpdateConversationStatusFromAI(Conversation conversation, AIOrchestrationResult result)
     {
+        var explicitHumanTakeover = IsExplicitHumanTakeover(conversation);
+
         switch (result.Outcome)
         {
             case AIOrchestrationOutcome.Responded:
                 conversation.Status = ConversationStatus.Open;
+                conversation.HumanTakeoverEnabled = explicitHumanTakeover;
+                conversation.EscalationReason = null;
                 break;
             case AIOrchestrationOutcome.ClarificationRequired:
                 conversation.Status = ConversationStatus.AwaitingGuest;
+                conversation.HumanTakeoverEnabled = explicitHumanTakeover;
+                conversation.EscalationReason = null;
                 break;
             case AIOrchestrationOutcome.EscalationRequired:
             case AIOrchestrationOutcome.ProviderUnavailable:
                 conversation.Status = ConversationStatus.AwaitingHost;
-                conversation.HumanTakeoverEnabled = true;
+                // Automatic escalation requests host attention, but explicit takeover remains host-driven.
+                conversation.HumanTakeoverEnabled = explicitHumanTakeover;
                 conversation.EscalationReason = result.EscalationReason ?? result.Outcome.ToString();
                 break;
             case AIOrchestrationOutcome.NoEligibleReservation:
@@ -324,6 +367,93 @@ public sealed class ChatService(
                 conversation.Status = ConversationStatus.AwaitingHost;
                 break;
         }
+    }
+
+    private static AIOrchestrationResult MapGuestOrchestrationResult(AIReplyOrchestrationResult replyResult)
+    {
+        var requiresReview = replyResult.RequiresHumanReview;
+        var fallbackMessage = AIOrchestrationSafeMessages.HostAssistanceRequired;
+        var responseMessage = string.IsNullOrWhiteSpace(replyResult.Output)
+            ? AIOrchestrationSafeMessages.GeneralResponseUnavailable
+            : replyResult.Output!;
+
+        var outcome = requiresReview
+            ? AIOrchestrationOutcome.EscalationRequired
+            : AIOrchestrationOutcome.Responded;
+
+        return new AIOrchestrationResult
+        {
+            Outcome = outcome,
+            GuestSafeMessage = requiresReview ? fallbackMessage : responseMessage,
+            QuestionCategories = MapQuestionCategories(replyResult.DetectedIntent?.Intent),
+            KnowledgeSources = MapKnowledgeSources(replyResult.Sources),
+            ProviderMetadata = new AIProviderMetadata
+            {
+                ProviderName = replyResult.Provider,
+                ModelName = replyResult.IsMock ? "deterministic" : null,
+                RequestId = null,
+                DurationMs = replyResult.DurationMilliseconds
+            },
+            EscalationReason = requiresReview ? "RequiresHumanReview" : null
+        };
+    }
+
+    private static IReadOnlyCollection<AIKnowledgeSourceReference> MapKnowledgeSources(IReadOnlyCollection<ConversationContextSource> sources)
+    {
+        var articleSources = sources
+            .Where(source => source.SourceType == ConversationContextSourceType.PropertyKnowledge)
+            .ToList();
+
+        var mapped = new List<AIKnowledgeSourceReference>(articleSources.Count);
+        var seen = new HashSet<Guid>();
+
+        for (var i = 0; i < articleSources.Count; i++)
+        {
+            var source = articleSources[i];
+            if (source.SourceId is null || !Guid.TryParse(source.SourceId, out var articleId) || !seen.Add(articleId))
+            {
+                continue;
+            }
+
+            mapped.Add(new AIKnowledgeSourceReference
+            {
+                PropertyKnowledgeArticleId = articleId,
+                Rank = i + 1,
+                IsPrimary = mapped.Count == 0,
+                RelevanceReason = string.IsNullOrWhiteSpace(source.RelevanceReason) ? null : source.RelevanceReason.Trim()
+            });
+        }
+
+        return mapped;
+    }
+
+    private static IReadOnlyCollection<QuestionContextCategory> MapQuestionCategories(Services.AI.Intent.GuestIntent? intent)
+    {
+        if (intent is null)
+        {
+            return [QuestionContextCategory.General];
+        }
+
+        return intent.Value switch
+        {
+            Services.AI.Intent.GuestIntent.WiFi => [QuestionContextCategory.WiFi],
+            Services.AI.Intent.GuestIntent.CheckIn or Services.AI.Intent.GuestIntent.EarlyCheckIn or Services.AI.Intent.GuestIntent.LateArrival => [QuestionContextCategory.CheckIn],
+            Services.AI.Intent.GuestIntent.Checkout => [QuestionContextCategory.CheckOut],
+            Services.AI.Intent.GuestIntent.Parking => [QuestionContextCategory.Parking],
+            Services.AI.Intent.GuestIntent.HouseRules or Services.AI.Intent.GuestIntent.Noise => [QuestionContextCategory.HouseRules],
+            Services.AI.Intent.GuestIntent.PetPolicy => [QuestionContextCategory.HouseRules],
+            Services.AI.Intent.GuestIntent.LocalRecommendations => [QuestionContextCategory.Restaurant],
+            Services.AI.Intent.GuestIntent.Amenities => [QuestionContextCategory.Amenities],
+            Services.AI.Intent.GuestIntent.Access or Services.AI.Intent.GuestIntent.PropertyAccess => [QuestionContextCategory.PropertyAccess],
+            Services.AI.Intent.GuestIntent.Reservation => [QuestionContextCategory.CheckIn],
+            Services.AI.Intent.GuestIntent.Payment => [QuestionContextCategory.General],
+            Services.AI.Intent.GuestIntent.HostContact => [QuestionContextCategory.General],
+            Services.AI.Intent.GuestIntent.GeneralProperty => [QuestionContextCategory.General],
+            Services.AI.Intent.GuestIntent.Laundry => [QuestionContextCategory.Laundry],
+            Services.AI.Intent.GuestIntent.Emergency or Services.AI.Intent.GuestIntent.Maintenance => [QuestionContextCategory.Emergency],
+            Services.AI.Intent.GuestIntent.GeneralQuestion => [QuestionContextCategory.General],
+            _ => [QuestionContextCategory.General]
+        };
     }
 
     private ChatMessageResponse ToChatMessageResponse(
@@ -388,6 +518,18 @@ public sealed class ChatService(
         return new ChatStatusResponse
         {
             ConversationId = conversation.ConversationId,
+            Status = conversation.Status,
+            HumanTakeoverEnabled = conversation.HumanTakeoverEnabled,
+            RequiresHostAttention = RequiresHostAttention(conversation.Status, conversation.HumanTakeoverEnabled),
+            GuestSafeMessage = guestSafeMessage
+        };
+    }
+
+    private static ChatStatusResponse MapStatus(Conversation conversation, string guestSafeMessage)
+    {
+        return new ChatStatusResponse
+        {
+            ConversationId = conversation.Id,
             Status = conversation.Status,
             HumanTakeoverEnabled = conversation.HumanTakeoverEnabled,
             RequiresHostAttention = RequiresHostAttention(conversation.Status, conversation.HumanTakeoverEnabled),
@@ -501,6 +643,32 @@ public sealed class ChatService(
     private static bool RequiresHostAttention(ConversationStatus status, bool humanTakeoverEnabled)
     {
         return humanTakeoverEnabled || status is ConversationStatus.AwaitingHost or ConversationStatus.Escalated or ConversationStatus.HumanManaged;
+    }
+
+    private static bool IsExplicitHumanTakeover(Conversation conversation)
+    {
+        if (conversation.Status == ConversationStatus.HumanManaged)
+        {
+            return true;
+        }
+
+        if (!conversation.HumanTakeoverEnabled)
+        {
+            return false;
+        }
+
+        if (conversation.AssignedUserId.HasValue || conversation.Status == ConversationStatus.Escalated)
+        {
+            return true;
+        }
+
+        if (string.Equals(conversation.EscalationReason, "ManualEscalation", StringComparison.Ordinal)
+            || string.Equals(conversation.EscalationReason, "GuestRequestedEscalation", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static ChatVisibleMessageDto MapMessage(ConversationMessageResponse message)

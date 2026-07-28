@@ -1,15 +1,18 @@
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIOrchestration;
+using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
+using StayFlow.Api.Services.AI.Intent;
+using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Services;
 
 public sealed class ConversationAIExchangeService(
     IConversationRepository conversationRepository,
     IConversationService conversationService,
-    IAIOrchestrator aiOrchestrator,
+    IAIReplyOrchestrator aiReplyOrchestrator,
     ICurrentTenantContext currentTenantContext) : IConversationAIExchangeService
 {
     public async Task<ApiResponse<AIOrchestrationResult>> ProcessGuestMessageAsync(Guid conversationId, AddGuestMessageRequest request, CancellationToken cancellationToken)
@@ -36,17 +39,72 @@ public sealed class ConversationAIExchangeService(
             return ApiResponse<AIOrchestrationResult>.Fail(storedGuestMessage.Message, storedGuestMessage.Errors);
         }
 
-        var result = await aiOrchestrator.ProcessAsync(new AIOrchestrationRequest
+        var replyResult = await aiReplyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
         {
-            GuestMessage = request.Content,
-            GuestId = conversation.GuestId,
             ConversationId = conversation.Id,
-            Channel = conversation.Channel.ToString(),
-            ChannelIdentity = conversation.ChannelIdentity,
-            CurrentTimestamp = request.SentAt ?? DateTimeOffset.UtcNow
+            Operation = AIReplyOperation.GeneratedHostReply,
+            CorrelationId = currentTenantContext.CorrelationId
         }, cancellationToken);
+
+        if (replyResult is null)
+        {
+            return ApiResponse<AIOrchestrationResult>.Fail("Conversation was not found.");
+        }
+
+        var result = MapGuestOrchestrationResult(replyResult);
 
         await conversationService.AddAIMessageAsync(conversationId, result.GuestSafeMessage, result, cancellationToken);
         return ApiResponse<AIOrchestrationResult>.Ok(result, "Conversation AI exchange processed.");
+    }
+
+    private static AIOrchestrationResult MapGuestOrchestrationResult(AIReplyOrchestrationResult replyResult)
+    {
+        var requiresReview = replyResult.RequiresHumanReview;
+
+        return new AIOrchestrationResult
+        {
+            Outcome = requiresReview ? AIOrchestrationOutcome.EscalationRequired : AIOrchestrationOutcome.Responded,
+            GuestSafeMessage = requiresReview
+                ? AIOrchestrationSafeMessages.HostAssistanceRequired
+                : (string.IsNullOrWhiteSpace(replyResult.Output) ? AIOrchestrationSafeMessages.GeneralResponseUnavailable : replyResult.Output),
+            QuestionCategories = MapQuestionCategories(replyResult.DetectedIntent?.Intent),
+            ProviderMetadata = new AIProviderMetadata
+            {
+                ProviderName = replyResult.Provider,
+                ModelName = replyResult.IsMock ? "deterministic" : null,
+                RequestId = null,
+                DurationMs = replyResult.DurationMilliseconds
+            },
+            EscalationReason = requiresReview ? "RequiresHumanReview" : null
+        };
+    }
+
+    private static IReadOnlyCollection<QuestionContextCategory> MapQuestionCategories(GuestIntent? intent)
+    {
+        if (intent is null)
+        {
+            return [QuestionContextCategory.General];
+        }
+
+        return intent.Value switch
+        {
+            GuestIntent.WiFi => [QuestionContextCategory.WiFi],
+            GuestIntent.CheckIn or GuestIntent.EarlyCheckIn or GuestIntent.LateArrival => [QuestionContextCategory.CheckIn],
+            GuestIntent.Checkout => [QuestionContextCategory.CheckOut],
+            GuestIntent.Parking => [QuestionContextCategory.Parking],
+            GuestIntent.HouseRules or GuestIntent.Noise => [QuestionContextCategory.HouseRules],
+            GuestIntent.PetPolicy => [QuestionContextCategory.HouseRules],
+            GuestIntent.LocalRecommendations => [QuestionContextCategory.Restaurant],
+            GuestIntent.Amenities => [QuestionContextCategory.Amenities],
+            GuestIntent.Access or GuestIntent.PropertyAccess => [QuestionContextCategory.PropertyAccess],
+            GuestIntent.Reservation => [QuestionContextCategory.CheckIn],
+            GuestIntent.Payment => [QuestionContextCategory.General],
+            GuestIntent.HostContact => [QuestionContextCategory.General],
+            GuestIntent.GeneralProperty => [QuestionContextCategory.General],
+            GuestIntent.Laundry => [QuestionContextCategory.Laundry],
+            GuestIntent.Emergency or GuestIntent.Maintenance => [QuestionContextCategory.Emergency],
+            GuestIntent.GeneralQuestion => [QuestionContextCategory.General],
+            _ => [QuestionContextCategory.General]
+        };
     }
 }

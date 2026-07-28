@@ -79,6 +79,19 @@ function conversationResponse() {
   });
 }
 
+function historyResponse() {
+  return apiResponse({
+    conversationId: "11111111-1111-1111-1111-111111111111",
+    messages: {
+      items: [],
+      pageNumber: 1,
+      pageSize: 20,
+      totalCount: 0,
+      totalPages: 0
+    }
+  });
+}
+
 async function openAndLogin(fetchMock: ReturnType<typeof vi.fn>) {
   vi.stubGlobal("fetch", fetchMock);
 
@@ -90,7 +103,7 @@ async function openAndLogin(fetchMock: ReturnType<typeof vi.fn>) {
   render(
     <StayFlowChatWidget
       guestId={guestId}
-      apiBaseUrl="https://bug-free-space-train-w4wvq5wxp4qfv9w9.github.dev/"
+      apiBaseUrl="http://localhost:5243"
       demoEmail="demo.user@stayflow.local"
     />
   );
@@ -281,11 +294,54 @@ describe("StayFlowChatWidget", () => {
     );
 
     await screen.findByText(/host has been notified/i);
+    expect(
+      screen.getByRole("button", { name: /host already notified/i })
+    ).toBeDisabled();
 
     expect(input).toBeEnabled();
 
     expect(
       screen.getByText(/host has been notified/i)
     ).toBeInTheDocument();
+  });
+
+  it("submits assistant message feedback", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(authResponse())
+      .mockResolvedValueOnce(messageResponse("Here is your answer."))
+      .mockResolvedValueOnce(conversationResponse())
+      .mockResolvedValueOnce(historyResponse())
+      .mockResolvedValueOnce(apiResponse({
+        id: "feedback-1",
+        conversationId: "11111111-1111-1111-1111-111111111111",
+        conversationMessageId: "assistant-message",
+        guestId,
+        feedbackValue: 0,
+        comment: null,
+        submittedAt: "2026-01-01T10:00:02Z"
+      }));
+
+    const user = await openAndLogin(fetchMock);
+
+    const input = screen.getByRole("textbox", {
+      name: /^message$/i
+    });
+
+    await user.type(input, "Need check-in details");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+    await screen.findByText("Here is your answer.");
+
+    await user.click(screen.getByRole("button", { name: /^helpful$/i }));
+
+    await waitFor(() => {
+      const feedbackCall = fetchMock.mock.calls.find(
+        ([url, options]) =>
+          new URL(url).pathname === "/chat/11111111-1111-1111-1111-111111111111/messages/assistant-message/feedback"
+          && options?.method === "POST"
+      );
+
+      expect(feedbackCall).toBeDefined();
+    });
   });
 });

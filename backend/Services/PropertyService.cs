@@ -252,8 +252,12 @@ public sealed class PropertyService(IPropertyRepository propertyRepository, ICur
                 Id = Guid.NewGuid(),
                 CompanyId = property.CompanyId,
                 PropertyId = property.Id,
+                Category = PropertyKnowledgeCategory.Other,
                 Title = item.Title.Trim(),
                 Content = item.Content.Trim(),
+                Tags = string.Empty,
+                Priority = 0,
+                IsApproved = false,
                 IsActive = true
             });
         }
@@ -316,7 +320,7 @@ public sealed class PropertyService(IPropertyRepository propertyRepository, ICur
             PropertyHouseRules = property.PropertyHouseRules.Where(item => item.IsActive).Select(item => new PropertyHouseRuleDto { Id = item.Id, Title = item.Title, Description = item.Description }).ToList(),
             PropertyRecommendations = property.PropertyRecommendations.Where(item => item.IsActive).Select(item => new PropertyRecommendationDto { Id = item.Id, Name = item.Name, Category = item.Category, Description = item.Description, Address = item.Address, PhoneNumber = item.PhoneNumber }).ToList(),
             PropertyEmergencyContacts = property.PropertyEmergencyContacts.Where(item => item.IsActive).Select(item => new PropertyEmergencyContactDto { Id = item.Id, Name = item.Name, Role = item.Role, PhoneNumber = item.PhoneNumber }).ToList(),
-            PropertyKnowledgeArticles = property.PropertyKnowledgeArticles.Where(item => item.IsActive).Select(item => new PropertyKnowledgeArticleDto { Id = item.Id, Title = item.Title, Content = item.Content }).ToList()
+            PropertyKnowledgeArticles = property.PropertyKnowledgeArticles.Where(item => item.IsActive && !item.IsDeleted).Select(item => new PropertyKnowledgeArticleDto { Id = item.Id, Title = item.Title, Content = item.Content }).ToList()
         };
     }
 

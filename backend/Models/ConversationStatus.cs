@@ -2,6 +2,7 @@ namespace StayFlow.Api.Models;
 
 public enum ConversationStatus
 {
+<<<<<<< HEAD
     Open = 0,
     AwaitingHost = 1,
     Escalated = 2,
@@ -9,4 +10,13 @@ public enum ConversationStatus
     Resolved = 4,
     Closed = 5,
     AwaitingGuest = 6
+=======
+    Open,
+    AwaitingGuest,
+    AwaitingHost,
+    Escalated,
+    HumanManaged,
+    Resolved,
+    Closed
+>>>>>>> origin/main
 }

@@ -520,7 +520,7 @@ public sealed class AIOrchestratorTests
         var result = await provider.GenerateAsync(ProviderRequest([QuestionContextCategory.WiFi]), CancellationToken.None);
 
         Assert.Equal(AIProviderOutcome.Success, result.Outcome);
-        Assert.Contains("WiFi", result.ResponseText);
+        Assert.Contains("wi-fi", result.ResponseText, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -672,6 +672,19 @@ public sealed class AIOrchestratorTests
                 PreferredLanguage = request.AIContext.Guest?.PreferredLanguage ?? "en",
                 ResponseConstraints = new AIResponseConstraints { PropertyAccessRestricted = request.AIContext.Safety.RequiresPropertyAccessAuthorization },
                 RenderedMessages = [new AIPromptMessage { Role = "user", Content = request.GuestQuestion }]
+            };
+        }
+
+        public AIPromptPackage BuildReply(AIReplyPromptBuildRequest request)
+        {
+            WasCalled = true;
+            return new AIPromptPackage
+            {
+                SystemInstructions = "system secret",
+                GuestMessage = request.ConversationContext.VisibleMessages.LastOrDefault()?.Text ?? string.Empty,
+                PreferredLanguage = "en",
+                ResponseConstraints = new AIResponseConstraints { PropertyAccessRestricted = false },
+                RenderedMessages = [new AIPromptMessage { Role = "user", Content = "reply prompt" }]
             };
         }
     }
