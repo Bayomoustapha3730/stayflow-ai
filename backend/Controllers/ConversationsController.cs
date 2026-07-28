@@ -19,8 +19,6 @@ public sealed class ConversationsController(
     IConversationService conversationService,
     IWhatsAppTemplateService whatsAppTemplateService) : ControllerBase
 {
-<<<<<<< HEAD
-=======
     [HttpGet]
     [RequiresPermission("conversations.read")]
     [ProducesResponseType(typeof(ApiResponse<ConversationListResponse>), StatusCodes.Status200OK)]
@@ -33,7 +31,6 @@ public sealed class ConversationsController(
         return response.Success ? Ok(response) : BadRequest(response);
     }
 
->>>>>>> origin/main
     [HttpPost]
     [RequiresPermission("conversations.create")]
     [ProducesResponseType(typeof(ApiResponse<ConversationDetailResponse>), StatusCodes.Status200OK)]
@@ -177,21 +174,6 @@ public sealed class ConversationsController(
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
-<<<<<<< HEAD
-    /// <summary>
-    /// Gets tenant-scoped conversations for the host inbox.
-    /// </summary>
-    [HttpGet]
-    [RequiresPermission("conversations.read")]
-    [ProducesResponseType(typeof(ApiResponse<ConversationListResponse>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ApiResponse<ConversationListResponse>), StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<ApiResponse<ConversationListResponse>>> GetConversations(
-        [FromQuery] ConversationListQueryParameters query,
-        CancellationToken cancellationToken)
-    {
-        var response = await conversationService.GetConversationsAsync(query, cancellationToken);
-        return response.Success ? Ok(response) : BadRequest(response);
-=======
     [HttpPost("{conversationId:guid}/assign-me")]
     [RequiresPermission("conversations.manage")]
     public async Task<ActionResult<ApiResponse<ConversationDetailResponse>>> AssignToMe(Guid conversationId, CancellationToken cancellationToken)
@@ -226,7 +208,6 @@ public sealed class ConversationsController(
     {
         var response = await conversationService.GetFeedbackAnalyticsAsync(query, cancellationToken);
         return response.Success ? Ok(response) : ToFailureResult(response);
->>>>>>> origin/main
     }
 
     private ActionResult<ApiResponse<T>> ToFailureResult<T>(ApiResponse<T> response)

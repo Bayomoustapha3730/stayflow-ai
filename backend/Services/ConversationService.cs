@@ -409,10 +409,6 @@ public sealed class ConversationService(
         }, cancellationToken);
     }
 
-<<<<<<< HEAD
-    public async Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(
-        ConversationListQueryParameters query,
-=======
     public async Task<ApiResponse<ConversationDetailResponse>> AssignConversationToCurrentUserAsync(Guid conversationId, CancellationToken cancellationToken)
     {
         var conversation = await GetConversationForTenantAsync(conversationId, cancellationToken);
@@ -512,44 +508,10 @@ public sealed class ConversationService(
         Guid conversationId,
         Guid messageId,
         AddChatMessageFeedbackRequest request,
->>>>>>> origin/main
         CancellationToken cancellationToken)
     {
         if (!TryGetCompanyId(out var companyId, out var tenantError))
         {
-<<<<<<< HEAD
-            return ApiResponse<ConversationListResponse>.Fail(tenantError, [tenantError], currentTenantContext.CorrelationId);
-        }
-
-        var validationErrors = Validate(query);
-        if (validationErrors.Count > 0)
-        {
-            return ApiResponse<ConversationListResponse>.Fail(
-                "Conversation list query validation failed.",
-                validationErrors,
-                currentTenantContext.CorrelationId);
-        }
-
-        var normalizedQuery = new ConversationListQueryParameters
-        {
-            Page = query.Page,
-            PageSize = query.PageSize,
-            Status = query.Status,
-            PropertyId = query.PropertyId,
-            RequiresHostAttention = query.RequiresHostAttention,
-            Search = string.IsNullOrWhiteSpace(query.Search) ? null : query.Search.Trim()
-        };
-
-        var conversations = await conversationRepository.GetInboxAsync(companyId, normalizedQuery, cancellationToken);
-        return ApiResponse<ConversationListResponse>.Ok(new ConversationListResponse
-        {
-            Items = conversations.Items,
-            TotalCount = conversations.TotalCount,
-            Page = conversations.PageNumber,
-            PageSize = conversations.PageSize,
-            TotalPages = conversations.TotalPages
-        }, correlationId: currentTenantContext.CorrelationId);
-=======
             return ApiResponse<ChatMessageFeedbackResponse>.Fail(tenantError, [tenantError]);
         }
 
@@ -653,7 +615,6 @@ public sealed class ConversationService(
             NotHelpfulCount = notHelpful,
             HelpfulRate = total == 0 ? 0 : (double)helpful / total
         });
->>>>>>> origin/main
     }
 
     private async Task<ApiResponse<ConversationMessageResponse>> AddMessageAsync(
@@ -1015,8 +976,6 @@ public sealed class ConversationService(
         }
 
         return errors;
-<<<<<<< HEAD
-=======
     }
 
     private static IReadOnlyCollection<string> ValidateListQuery(ConversationListQueryParameters query)
@@ -1050,7 +1009,6 @@ public sealed class ConversationService(
         }
 
         return errors;
->>>>>>> origin/main
     }
 
     private bool TryGetCompanyId(out Guid companyId, out string error)
@@ -1104,15 +1062,12 @@ public sealed class ConversationService(
     {
         return new ConversationDetailResponse
         {
-<<<<<<< HEAD
-=======
             Id = conversation.Id,
->>>>>>> origin/main
             ConversationId = conversation.Id,
             GuestId = conversation.GuestId,
             ReservationId = conversation.ReservationId,
             PropertyId = conversation.PropertyId,
-            Channel = conversation.Channel.ToString(),
+            Channel = conversation.Channel,
             ChannelIdentity = conversation.ChannelIdentity,
             Status = conversation.Status,
             Subject = conversation.Subject,
@@ -1124,27 +1079,19 @@ public sealed class ConversationService(
             ClosedAt = conversation.ClosedAt,
             Guest = new ConversationGuestSummary
             {
-<<<<<<< HEAD
-                GuestId = conversation.GuestId,
-                FullName = conversation.Guest is null ? string.Empty : $"{conversation.Guest.FirstName} {conversation.Guest.LastName}".Trim(),
-                FirstName = conversation.Guest?.FirstName ?? string.Empty,
-                LastName = conversation.Guest?.LastName ?? string.Empty,
-                Email = conversation.Guest?.Email,
-=======
                 Id = conversation.GuestId,
                 FirstName = conversation.Guest?.FirstName ?? string.Empty,
                 LastName = conversation.Guest?.LastName ?? string.Empty,
                 FullName = conversation.Guest is null ? string.Empty : $"{conversation.Guest.FirstName} {conversation.Guest.LastName}".Trim(),
                 Email = conversation.Guest?.Email,
                 MaskedPhoneNumber = PhoneNumberMasker.Mask(conversation.Guest?.PhoneNumber),
->>>>>>> origin/main
                 PreferredLanguage = conversation.Guest?.PreferredLanguage ?? string.Empty
             },
             Reservation = conversation.Reservation is null
                 ? null
                 : new ConversationReservationSummary
                 {
-                    ReservationId = conversation.Reservation.Id,
+                    Id = conversation.Reservation.Id,
                     ConfirmationNumber = conversation.Reservation.ConfirmationNumber,
                     CheckInDate = conversation.Reservation.CheckInDate,
                     CheckOutDate = conversation.Reservation.CheckOutDate,
@@ -1154,7 +1101,7 @@ public sealed class ConversationService(
                 ? null
                 : new ConversationPropertySummary
                 {
-                    PropertyId = conversation.Property.Id,
+                    Id = conversation.Property.Id,
                     Name = conversation.Property.Name,
                     City = conversation.Property.City
                 },
@@ -1162,7 +1109,7 @@ public sealed class ConversationService(
                 ? null
                 : new ConversationAssignedUserSummary
                 {
-                    UserId = conversation.AssignedUser.Id,
+                    Id = conversation.AssignedUser.Id,
                     FullName = conversation.AssignedUser.FullName
                 },
             HasFailedOutboundMessage = conversation.Messages.Any(message =>
@@ -1215,11 +1162,7 @@ public sealed class ConversationService(
         };
     }
 
-<<<<<<< HEAD
-    private static IReadOnlyCollection<string> Validate(ConversationListQueryParameters query)
-=======
     private async Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, ConversationMessage message, Conversation conversation, CancellationToken cancellationToken)
->>>>>>> origin/main
     {
         var safeFailureSummary = message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed
             ? WhatsAppFailureMapper.Map(message.FailureCode, message.FailureReason).Summary
@@ -1247,8 +1190,6 @@ public sealed class ConversationService(
         }
     }
 
-<<<<<<< HEAD
-=======
     private static ConversationMessageProvider ResolveProvider(Conversation conversation, ConversationSenderType senderType, ConversationMessageProvider requestedProvider, bool isInternal)
     {
         if (isInternal)
@@ -1441,6 +1382,5 @@ public sealed class ConversationService(
         };
     }
 
->>>>>>> origin/main
     private sealed record AssociationValidationResult(Guid? ReservationPropertyId);
 }

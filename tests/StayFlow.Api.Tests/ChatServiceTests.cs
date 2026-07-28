@@ -493,14 +493,7 @@ public sealed class ChatServiceTests
             });
         }
 
-<<<<<<< HEAD
-        public Task<PagedResult<ConversationSummaryResponse>> GetInboxAsync(Guid requestedCompanyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
-            => Task.FromResult(new PagedResult<ConversationSummaryResponse> { Items = [], PageNumber = 1, PageSize = 20, TotalCount = 0 });
-
-        public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid requestedCompanyId, string externalMessageId, CancellationToken cancellationToken)
-=======
         public Task<ConversationMessage?> GetLatestVisibleMessageAsync(Guid requestedCompanyId, Guid conversationId, CancellationToken cancellationToken)
->>>>>>> origin/main
         {
             var message = Messages
                 .Where(item => item.CompanyId == requestedCompanyId && item.ConversationId == conversationId && !item.IsInternal && !item.IsDeleted)
