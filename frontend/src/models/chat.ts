@@ -92,7 +92,47 @@ export interface ChatMessageResponse {
   requiresHostAttention: boolean;
   escalationReason?: string | null;
   providerMetadata?: ChatProviderMetadata | null;
+  pendingAction?: PendingActionCard | null;
   createdAt: string;
+}
+
+export enum PendingConciergeActionStatus {
+  AwaitingGuestConfirmation = 0,
+  AwaitingHostApproval = 1,
+  ReadyToExecute = 2,
+  Executing = 3,
+  Completed = 4,
+  Failed = 5,
+  Cancelled = 6,
+  Expired = 7
+}
+
+export enum ConciergeActionConfirmationRequirement {
+  None = 0,
+  ExplicitGuestConfirmation = 1,
+  HostApproval = 2,
+  Both = 3
+}
+
+export enum ConciergeActionType {
+  None = 0,
+  RequestEarlyCheckIn = 1,
+  RequestLateCheckout = 2,
+  CreateMaintenanceTicket = 3,
+  RequestHousekeeping = 4,
+  RequestExtraItem = 5,
+  RequestParking = 6,
+  NotifyHost = 7
+}
+
+export interface PendingActionCard {
+  actionId: string;
+  actionType: ConciergeActionType;
+  status: PendingConciergeActionStatus;
+  confirmationRequirement: ConciergeActionConfirmationRequirement;
+  prompt: string;
+  requiresHostApproval: boolean;
+  expiresAt: string;
 }
 
 export interface ChatHistoryResponse {

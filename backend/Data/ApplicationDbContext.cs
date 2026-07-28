@@ -21,6 +21,16 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ConversationMessageKnowledgeSource> ConversationMessageKnowledgeSources => Set<ConversationMessageKnowledgeSource>();
     public DbSet<ConversationMessageFeedback> ConversationMessageFeedback => Set<ConversationMessageFeedback>();
     public DbSet<ConversationParticipantReadState> ConversationParticipantReadStates => Set<ConversationParticipantReadState>();
+    public DbSet<PendingConciergeAction> PendingConciergeActions => Set<PendingConciergeAction>();
+    public DbSet<ConciergeActionAuditLog> ConciergeActionAuditLogs => Set<ConciergeActionAuditLog>();
+    public DbSet<EarlyCheckInRequest> EarlyCheckInRequests => Set<EarlyCheckInRequest>();
+    public DbSet<LateCheckoutRequest> LateCheckoutRequests => Set<LateCheckoutRequest>();
+    public DbSet<MaintenanceTicket> MaintenanceTickets => Set<MaintenanceTicket>();
+    public DbSet<HousekeepingRequest> HousekeepingRequests => Set<HousekeepingRequest>();
+    public DbSet<ExtraItemRequest> ExtraItemRequests => Set<ExtraItemRequest>();
+    public DbSet<ParkingRequest> ParkingRequests => Set<ParkingRequest>();
+    public DbSet<HostNotificationRecord> HostNotificationRecords => Set<HostNotificationRecord>();
+    public DbSet<ActionNotificationOutbox> ActionNotificationOutbox => Set<ActionNotificationOutbox>();
     public DbSet<WhatsAppIntegration> WhatsAppIntegrations => Set<WhatsAppIntegration>();
     public DbSet<WhatsAppTemplate> WhatsAppTemplates => Set<WhatsAppTemplate>();
     public DbSet<Models.ServiceProvider> ServiceProviders => Set<Models.ServiceProvider>();

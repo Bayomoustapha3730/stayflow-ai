@@ -6,12 +6,14 @@ using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.AIOrchestration;
 using StayFlow.Api.DTOs.Chat;
+using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services.AI.Context;
 using StayFlow.Api.Services.AI.Orchestration;
+using StayFlow.Api.Services.ConciergeActions;
 
 namespace StayFlow.Api.Services;
 
@@ -21,6 +23,7 @@ public sealed class ChatService(
     IAIReplyOrchestrator aiReplyOrchestrator,
     ICurrentTenantContext currentTenantContext,
     IOptions<ConversationOptions> options,
+    IConciergeActionOrchestrator? conciergeActionOrchestrator = null,
     ILogger<ChatService>? logger = null) : IChatService
 {
     private const string HostWillRespondMessage = "Thanks, your message has been received. A host or support team member will respond shortly.";
@@ -142,7 +145,45 @@ public sealed class ChatService(
                 SentAt = DateTimeOffset.UtcNow
             }, cancellationToken);
             await AuditAsync(companyId, conversation.Id, request.GuestId, "HumanManagedMessageReceived", request.Channel, AIOrchestrationOutcome.EscalationRequired, null, cancellationToken);
-            return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, guestMessage.Data, assistant.Data, null, [], []), "Chat message received.");
+            return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, guestMessage.Data, assistant.Data, null, [], [], null), "Chat message received.");
+        }
+
+        if (conciergeActionOrchestrator is not null)
+        {
+            var actionResult = await conciergeActionOrchestrator.HandleGuestMessageAsync(
+                companyId,
+                conversation,
+                guestMessage.Data.Id,
+                request.Message,
+                cancellationToken);
+
+            if (actionResult.Handled)
+            {
+                var actionOutcome = actionResult.ExecutionResult is null
+                    ? AIOrchestrationOutcome.ClarificationRequired
+                    : AIOrchestrationOutcome.Responded;
+
+                var assistant = await conversationService.AddAIMessageAsync(conversation.Id, actionResult.AssistantMessage, new AIOrchestrationResult
+                {
+                    Outcome = actionOutcome,
+                    GuestSafeMessage = actionResult.AssistantMessage,
+                    EscalationReason = actionResult.RequiresHostAttention ? "AwaitingHostApproval" : null
+                }, cancellationToken);
+
+                if (!assistant.Success || assistant.Data is null)
+                {
+                    return ApiResponse<ChatMessageResponse>.Fail(assistant.Message, assistant.Errors);
+                }
+
+                if (actionResult.RequiresHostAttention)
+                {
+                    conversation.Status = ConversationStatus.AwaitingHost;
+                }
+
+                return ApiResponse<ChatMessageResponse>.Ok(
+                    ToChatMessageResponse(conversation, guestMessage.Data, assistant.Data, null, [], [], actionResult.PendingAction),
+                    "Chat message processed successfully.");
+            }
         }
 
         var replyResult = await aiReplyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
@@ -164,8 +205,100 @@ public sealed class ChatService(
         await AuditAsync(companyId, conversation.Id, request.GuestId, orchestration.Outcome == AIOrchestrationOutcome.Responded ? "ChatAIResponseStored" : "ChatEscalated", request.Channel, orchestration.Outcome, orchestration.ProviderMetadata?.ProviderName, cancellationToken);
 
         return ApiResponse<ChatMessageResponse>.Ok(
-            ToChatMessageResponse(conversation, guestMessage.Data, aiMessage.Data, orchestration.ProviderMetadata, orchestration.QuestionCategories, orchestration.CandidateLabels),
+            ToChatMessageResponse(conversation, guestMessage.Data, aiMessage.Data, orchestration.ProviderMetadata, orchestration.QuestionCategories, orchestration.CandidateLabels, null),
             "Chat message processed successfully.");
+    }
+
+    public async Task<ApiResponse<ChatMessageResponse>> ConfirmPendingActionAsync(Guid conversationId, Guid actionId, ConfirmPendingActionRequest request, CancellationToken cancellationToken)
+    {
+        if (conciergeActionOrchestrator is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail("Action orchestration is not enabled.");
+        }
+
+        var validation = await ValidateConversationGuestAsync(conversationId, request.GuestId, cancellationToken);
+        if (!validation.Success || validation.Data is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail(validation.Message, validation.Errors);
+        }
+
+        var conversation = validation.Data;
+        var result = await conciergeActionOrchestrator.ConfirmPendingActionAsync(conversation.CompanyId, conversation.Id, actionId, cancellationToken);
+        if (!result.Handled)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail("Pending action was not found.");
+        }
+
+        var guestMessage = await conversationService.AddGuestMessageAsync(conversation.Id, new AddGuestMessageRequest
+        {
+            Content = "Confirm",
+            SentAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+        if (!guestMessage.Success || guestMessage.Data is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail(guestMessage.Message, guestMessage.Errors);
+        }
+
+        var assistantMessage = await conversationService.AddAIMessageAsync(conversation.Id, result.AssistantMessage, new AIOrchestrationResult
+        {
+            Outcome = AIOrchestrationOutcome.Responded,
+            GuestSafeMessage = result.AssistantMessage,
+            EscalationReason = result.RequiresHostAttention ? "AwaitingHostApproval" : null
+        }, cancellationToken);
+        if (!assistantMessage.Success || assistantMessage.Data is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail(assistantMessage.Message, assistantMessage.Errors);
+        }
+
+        if (result.RequiresHostAttention)
+        {
+            conversation.Status = ConversationStatus.AwaitingHost;
+        }
+
+        return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, guestMessage.Data, assistantMessage.Data, null, [], [], result.PendingAction));
+    }
+
+    public async Task<ApiResponse<ChatMessageResponse>> CancelPendingActionAsync(Guid conversationId, Guid actionId, CancelPendingActionRequest request, CancellationToken cancellationToken)
+    {
+        if (conciergeActionOrchestrator is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail("Action orchestration is not enabled.");
+        }
+
+        var validation = await ValidateConversationGuestAsync(conversationId, request.GuestId, cancellationToken);
+        if (!validation.Success || validation.Data is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail(validation.Message, validation.Errors);
+        }
+
+        var conversation = validation.Data;
+        var result = await conciergeActionOrchestrator.CancelPendingActionAsync(conversation.CompanyId, conversation.Id, actionId, cancellationToken);
+        if (!result.Handled)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail("Pending action was not found.");
+        }
+
+        var guestMessage = await conversationService.AddGuestMessageAsync(conversation.Id, new AddGuestMessageRequest
+        {
+            Content = "Cancel",
+            SentAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+        if (!guestMessage.Success || guestMessage.Data is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail(guestMessage.Message, guestMessage.Errors);
+        }
+
+        var assistantMessage = await conversationService.AddAIMessageAsync(conversation.Id, result.AssistantMessage, new AIOrchestrationResult
+        {
+            Outcome = AIOrchestrationOutcome.Responded,
+            GuestSafeMessage = result.AssistantMessage
+        }, cancellationToken);
+        if (!assistantMessage.Success || assistantMessage.Data is null)
+        {
+            return ApiResponse<ChatMessageResponse>.Fail(assistantMessage.Message, assistantMessage.Errors);
+        }
+
+        return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, guestMessage.Data, assistantMessage.Data, null, [], [], result.PendingAction));
     }
 
     public async Task<ApiResponse<ChatConversationResponse>> GetGuestConversationAsync(Guid conversationId, CancellationToken cancellationToken)
@@ -462,7 +595,8 @@ public sealed class ChatService(
         ConversationMessageResponse? assistantMessage,
         AIProviderMetadata? providerMetadata,
         IReadOnlyCollection<QuestionContextCategory> categories,
-        IReadOnlyCollection<ReservationCandidateLabel> candidateLabels)
+        IReadOnlyCollection<ReservationCandidateLabel> candidateLabels,
+        PendingActionCardDto? pendingAction)
     {
         return new ChatMessageResponse
         {
@@ -483,6 +617,7 @@ public sealed class ChatService(
                 },
             QuestionCategories = categories,
             CandidateLabels = candidateLabels,
+            PendingAction = pendingAction,
             CreatedAt = guestMessage.SentAt
         };
     }

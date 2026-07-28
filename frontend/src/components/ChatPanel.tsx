@@ -6,6 +6,7 @@ import { ChatComposer } from "./ChatComposer";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessageList } from "./ChatMessageList";
 import { ChatStatusBanner } from "./ChatStatusBanner";
+import { ActionConfirmationCard } from "./ActionConfirmationCard";
 import { DevLoginPanel } from "./DevLoginPanel";
 import { EndConversationDialog } from "./EndConversationDialog";
 import { ErrorBanner } from "./ErrorBanner";
@@ -90,6 +91,18 @@ export function ChatPanel({ chat, theme, demoEmail }: ChatPanelProps) {
             alreadyEscalated={chat.requiresHostAttention || chat.humanTakeoverEnabled}
             onEscalate={() => void chat.escalate("Guest requested host support from the web widget.")}
           />
+          {chat.pendingAction ? (
+            <ActionConfirmationCard
+              pendingAction={chat.pendingAction}
+              disabled={chat.isSending}
+              onConfirm={() => {
+                void chat.confirmPendingAction();
+              }}
+              onCancel={() => {
+                void chat.cancelPendingAction();
+              }}
+            />
+          ) : null}
           <ChatComposer
             disabled={composerDisabled}
             isSending={chat.isSending}

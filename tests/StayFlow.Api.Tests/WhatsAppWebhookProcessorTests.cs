@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using StayFlow.Api.Common;
+using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.DTOs.Chat;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
@@ -435,6 +436,8 @@ public sealed class WhatsAppWebhookProcessorTests
         public Task<ApiResponse<ChatHistoryResponse>> GetGuestHistoryAsync(Guid conversationId, ChatHistoryQueryParameters query, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<ChatStatusResponse>> EscalateGuestConversationAsync(Guid conversationId, EscalateChatRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<ChatStatusResponse>> EndGuestConversationAsync(Guid conversationId, EndChatRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ChatMessageResponse>> ConfirmPendingActionAsync(Guid conversationId, Guid actionId, ConfirmPendingActionRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ChatMessageResponse>> CancelPendingActionAsync(Guid conversationId, Guid actionId, CancelPendingActionRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
     }
 
     private sealed class FakeConversationService(Guid conversationId) : IConversationService

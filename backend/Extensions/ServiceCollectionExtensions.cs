@@ -98,6 +98,14 @@ public static class ServiceCollectionExtensions
         services.AddOptions<Services.AI.Orchestration.DevelopmentConciergeLanguageModelOptions>()
             .Bind(configuration.GetSection(Services.AI.Orchestration.DevelopmentConciergeLanguageModelOptions.SectionName))
             .ValidateOnStart();
+        services.AddOptions<Services.ConciergeActions.ConciergeActionsOptions>()
+            .Bind(configuration.GetSection(Services.ConciergeActions.ConciergeActionsOptions.SectionName))
+            .Validate(options => options.PendingActionExpirationMinutes is >= 5 and <= 1440, "Concierge action pending expiration must be between 5 and 1440 minutes.")
+            .Validate(options => options.MaximumActionsPerConversationPerHour is >= 1 and <= 100, "Concierge action maximum per conversation must be between 1 and 100 per hour.")
+            .Validate(options => options.MaximumExtraItemQuantity is >= 1 and <= 20, "Concierge action maximum extra item quantity must be between 1 and 20.")
+            .Validate(options => options.MaximumVehicleCount is >= 1 and <= 10, "Concierge action maximum vehicle count must be between 1 and 10.")
+            .Validate(options => options.MaximumNoteLength is >= 20 and <= 500, "Concierge action note length must be between 20 and 500 characters.")
+            .ValidateOnStart();
         services.AddOptions<Services.WhatsAppCloudOptions>()
             .Bind(configuration.GetSection(Services.WhatsAppCloudOptions.SectionName))
             .ValidateOnStart();
@@ -193,6 +201,26 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IWhatsAppCustomerServiceWindowEvaluator, Services.WhatsAppCustomerServiceWindowEvaluator>();
         services.AddSingleton<Services.IWhatsAppTemplateVariableValidator, Services.WhatsAppTemplateVariableValidator>();
         services.AddScoped<Services.IChatService, Services.ChatService>();
+        services.AddScoped<Services.ConciergeActions.IConciergeActionDetector, Services.ConciergeActions.ConciergeActionDetector>();
+        services.AddScoped<Services.ConciergeActions.IConciergeActionPolicy>(serviceProvider =>
+        {
+            var actionOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.ConciergeActions.ConciergeActionsOptions>>().Value;
+            return new Services.ConciergeActions.ConciergeActionPolicy(actionOptions);
+        });
+        services.AddScoped<Services.ConciergeActions.IConciergeActionIdempotencyService, Services.ConciergeActions.ConciergeActionIdempotencyService>();
+        services.AddScoped<Services.ConciergeActions.IConciergeActionAuditService, Services.ConciergeActions.ConciergeActionAuditService>();
+        services.AddScoped<Services.ConciergeActions.IConciergeActionConfirmationService, Services.ConciergeActions.ConciergeActionConfirmationService>();
+        services.AddScoped<Services.ConciergeActions.IConciergeActionResultFormatter, Services.ConciergeActions.ConciergeActionResultFormatter>();
+        services.AddScoped<Services.ConciergeActions.EarlyCheckInRequestHandler>();
+        services.AddScoped<Services.ConciergeActions.LateCheckoutRequestHandler>();
+        services.AddScoped<Services.ConciergeActions.MaintenanceTicketHandler>();
+        services.AddScoped<Services.ConciergeActions.HousekeepingRequestHandler>();
+        services.AddScoped<Services.ConciergeActions.ExtraItemRequestHandler>();
+        services.AddScoped<Services.ConciergeActions.ParkingRequestHandler>();
+        services.AddScoped<Services.ConciergeActions.HostNotificationHandler>();
+        services.AddScoped<Services.ConciergeActions.IConciergeActionExecutor, Services.ConciergeActions.ConciergeActionExecutor>();
+        services.AddScoped<Services.ConciergeActions.IConciergeActionOrchestrator, Services.ConciergeActions.ConciergeActionOrchestrator>();
+        services.AddScoped<Services.ConciergeActions.IConciergeHostActionService, Services.ConciergeActions.ConciergeHostActionService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();
         services.AddSingleton<Services.IQuestionRelevanceClassifier, Services.KeywordQuestionRelevanceClassifier>();
