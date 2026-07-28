@@ -15,7 +15,6 @@ namespace StayFlow.Api.Services.AI.Orchestration;
 
 public sealed class AIReplyOrchestrator(
     IConversationContextBuilder conversationContextBuilder,
-    IGuestIntentDetector intentDetector,
     IPropertyKnowledgeRanker knowledgeRanker,
     IAIPromptBuilder promptBuilder,
     IAIProvider aiProvider,
@@ -29,7 +28,8 @@ public sealed class AIReplyOrchestrator(
     IConversationMemoryService? conversationMemoryService = null,
     IPropertyKnowledgeRetriever? propertyKnowledgeRetriever = null,
     IConciergeResponseGenerator? conciergeResponseGenerator = null,
-    IOptions<ConciergeIntelligenceOptions>? conciergeOptions = null) : IAIReplyOrchestrator
+    IOptions<ConciergeIntelligenceOptions>? conciergeOptions = null,
+    IGroundedConciergeResponseGenerator? groundedConciergeResponseGenerator = null) : IAIReplyOrchestrator
 {
     public async Task<AIReplyOrchestrationResult?> OrchestrateAsync(
         Guid companyId,
@@ -252,26 +252,93 @@ public sealed class AIReplyOrchestrator(
                 ranking.SelectedItems.Count,
                 prompt.RenderedMessages.Count);
 
-            providerResult = await InvokeProviderWithTimeoutAsync(
-                prompt,
-                selectedKnowledge,
-                intent.Intent.ToString(),
-                request.RequestedTone,
-                request.CorrelationId,
-                orchestratorOptions.ProviderTimeoutSeconds,
-                cancellationToken);
-            completedStages.Add(AIReplyOrchestrationStage.ProviderInvoked);
-
-            if (providerResult.Outcome == AIProviderOutcome.Success && !string.IsNullOrWhiteSpace(providerResult.ResponseText))
+            var groundedGeneration = false;
+            if (groundedConciergeResponseGenerator is not null
+                && request.Operation != AIReplyOperation.SuggestedHostReplies
+                && !string.IsNullOrWhiteSpace(latestGuestMessage)
+                && selectedKnowledge.Count > 0
+                && !conflictRequiresReview)
             {
-                if (request.Operation == AIReplyOperation.SuggestedHostReplies)
+                var conciergeRequest = new ConciergeLanguageModelRequest(
+                    latestGuestMessage,
+                    intentResult,
+                    ranking,
+                    memory,
+                    DetermineRequiredOutcome(intent, ranking, latestGuestMessage),
+                    ParseLanguage(request.RequestedTone, "en"),
+                    context.PropertyName,
+                    context.ConfirmationNumber,
+                    ParseTone(request.RequestedTone, intelligence.DefaultTone),
+                    context.HumanTakeoverEnabled,
+                    intent.Intent == GuestIntent.Emergency,
+                    string.Equals(context.Status, "Closed", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(context.Status, "Resolved", StringComparison.OrdinalIgnoreCase),
+                    "v1",
+                    operationMaxChars,
+                    Math.Clamp(orchestratorOptions.MaximumSelectedKnowledgeCharacters, 1000, 30000));
+
+                var generated = await groundedConciergeResponseGenerator.GenerateAsync(conciergeRequest, cancellationToken);
+                if (generated.Success && !string.IsNullOrWhiteSpace(generated.Output))
                 {
-                    suggestions = BuildSuggestions(providerResult.ResponseText!, request.RequestedTone, expectedSuggestions);
+                    groundedGeneration = true;
+                    providerResult = new AIProviderResult
+                    {
+                        Outcome = AIProviderOutcome.Success,
+                        ProviderName = generated.Provider,
+                        ModelName = generated.Model,
+                        RequestId = generated.RequestId,
+                        DurationMs = generated.DurationMilliseconds,
+                        ResponseText = generated.Output
+                    };
+
+                    if (request.Operation == AIReplyOperation.SuggestedHostReplies)
+                    {
+                        suggestions = BuildSuggestions(generated.Output, request.RequestedTone, expectedSuggestions);
+                    }
+                    else
+                    {
+                        output = generated.Output;
+                    }
                 }
-                else
+            }
+
+            if (!groundedGeneration)
+            {
+                providerResult = await InvokeProviderWithTimeoutAsync(
+                    prompt,
+                    selectedKnowledge,
+                    intent.Intent.ToString(),
+                    request.RequestedTone,
+                    request.CorrelationId,
+                    orchestratorOptions.ProviderTimeoutSeconds,
+                    cancellationToken);
+                completedStages.Add(AIReplyOrchestrationStage.ProviderInvoked);
+
+                if (providerResult.Outcome == AIProviderOutcome.Success && !string.IsNullOrWhiteSpace(providerResult.ResponseText))
                 {
-                    output = providerResult.ResponseText!;
+                    if (request.Operation == AIReplyOperation.SuggestedHostReplies)
+                    {
+                        suggestions = BuildSuggestions(providerResult.ResponseText!, request.RequestedTone, expectedSuggestions);
+                    }
+                    else
+                    {
+                        output = providerResult.ResponseText!;
+                    }
                 }
+            }
+            else
+            {
+                completedStages.Add(AIReplyOrchestrationStage.ProviderInvoked);
+            }
+
+            if (providerResult is null)
+            {
+                providerResult = new AIProviderResult
+                {
+                    Outcome = AIProviderOutcome.Unavailable,
+                    ProviderName = "NotInvoked",
+                    FailureCategory = "NotInvoked"
+                };
             }
 
             logger.LogInformation(
@@ -481,6 +548,32 @@ public sealed class AIReplyOrchestrator(
             "concise" => ConciergeTone.Concise,
             _ => ConciergeTone.Warm
         };
+    }
+
+    private static string ParseLanguage(string? requestedTone, string defaultLanguage)
+    {
+        return string.IsNullOrWhiteSpace(requestedTone) ? defaultLanguage : defaultLanguage;
+    }
+
+    private static ConciergeRequiredOutcome DetermineRequiredOutcome(GuestIntentResult intent, KnowledgeRetrievalResult ranking, string latestGuestMessage)
+    {
+        var normalized = latestGuestMessage.Trim().ToLowerInvariant();
+        if (intent.Intent == GuestIntent.Emergency)
+        {
+            return ConciergeRequiredOutcome.Emergency;
+        }
+
+        if (ranking.RequiresClarification || ranking.SelectedItems.Count == 0)
+        {
+            return ConciergeRequiredOutcome.MissingInformation;
+        }
+
+        if (normalized.Contains("and", StringComparison.Ordinal) && ranking.SelectedItems.Count > 1)
+        {
+            return ConciergeRequiredOutcome.MultiIntentGroundedAnswer;
+        }
+
+        return ConciergeRequiredOutcome.GroundedAnswer;
     }
 
     private static string BuildClarificationPrompt(IReadOnlyCollection<string> clarificationChoices, string latestGuestMessage)

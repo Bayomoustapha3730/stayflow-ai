@@ -142,7 +142,6 @@ public sealed class AIReplyOrchestratorGroundingTests
     {
         return new AIReplyOrchestrator(
             new FakeConversationContextBuilder(context),
-            new FakeIntentDetector(),
             new FakeRanker(selectedItems),
             new AIPromptBuilder(Options.Create(new AIPromptOptions())),
             provider,

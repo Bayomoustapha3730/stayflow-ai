@@ -506,7 +506,6 @@ public sealed class GuestWidgetGroundedReplyTests
                     KnowledgeRepository,
                     Options.Create(new ConversationContextLimits()),
                     NullLogger<ConversationContextBuilder>.Instance),
-                new GuestIntentDetector(),
                 new PropertyKnowledgeRanker(
                     Options.Create(new KnowledgeRetrievalOptions()),
                     new DeterministicKnowledgeSimilarityScorer()),
