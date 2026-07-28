@@ -22,4 +22,5 @@ public sealed class AIReplyOrchestrationResult
     public IReadOnlyCollection<AIReplyOrchestrationStage> CompletedStages { get; init; } = [];
     public long DurationMilliseconds { get; init; }
     public bool RequiresHumanReview { get; init; }
+    public RetrievalDiagnosticsSnapshot? RetrievalDiagnostics { get; init; }
 }

@@ -20,12 +20,35 @@ The backend must allow the Vite origin in Development. The repository configures
 ## Environment
 
 - `VITE_STAYFLOW_API_URL` - backend API URL, default `http://localhost:5243`
+- `VITE_SIGNALR_TRANSPORT` - SignalR transport strategy: `auto` (default), `websockets`, `serverSentEvents`, or `longPolling`
 - `VITE_DEMO_EMAIL` - optional demo login email
 - `VITE_DEMO_GUEST_ID` - optional demo guest ID
 - `VITE_DEMO_RESERVATION_ID` - optional demo reservation ID
 - `VITE_DEMO_PROPERTY_ID` - optional demo property ID
 
 Do not store demo passwords in `.env.example`.
+
+## Realtime Lifecycle Notes
+
+- The frontend uses one shared SignalR connection per API base URL.
+- Connection startup is serialized, so concurrent subscribers reuse the same startup promise.
+- Cleanup is idempotent and coordinated with startup to avoid stopping during negotiation in React StrictMode.
+- Conversation group join/leave is synchronized to avoid duplicate `JoinConversation` calls.
+- After reconnect, the client rejoins the active conversation group automatically.
+
+### Codespaces and Transport Fallback
+
+- Keep `VITE_SIGNALR_TRANSPORT=auto` for normal environments.
+- If WebSocket upgrade is blocked by a proxy (for example in Codespaces), set `VITE_SIGNALR_TRANSPORT=longPolling`.
+- `serverSentEvents` can be used for diagnostics where SSE is allowed.
+- Invalid transport values safely fall back to `auto`.
+
+### Realtime Troubleshooting
+
+- Check `POST /hubs/conversations/negotiate` in the browser network tab.
+- A successful negotiate response should include `connectionId`, `connectionToken`, and available transports.
+- Expected cleanup cancellations during unmount are suppressed.
+- Unexpected startup failures (auth, CORS, route, or transport exhaustion) are logged as errors.
 
 ## Scripts
 

@@ -26,4 +26,5 @@ public sealed class PropertyKnowledgeArticle : AuditableEntity
     public User? CreatedByUser { get; set; }
     public User? UpdatedByUser { get; set; }
     public User? DeletedByUser { get; set; }
+    public ICollection<ConversationMessageKnowledgeSource> ConversationMessageSources { get; set; } = [];
 }

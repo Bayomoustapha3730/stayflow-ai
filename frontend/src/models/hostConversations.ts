@@ -134,3 +134,19 @@ export interface ConversationAssignedUserSummary {
   id: string;
   fullName: string;
 }
+
+export interface ConversationFeedbackAnalyticsQuery {
+  sinceUtc?: string;
+  untilUtc?: string;
+  propertyId?: string;
+}
+
+export interface ConversationFeedbackAnalyticsResponse {
+  sinceUtc: string;
+  untilUtc: string;
+  propertyId?: string | null;
+  totalFeedbackCount: number;
+  helpfulCount: number;
+  notHelpfulCount: number;
+  helpfulRate: number;
+}

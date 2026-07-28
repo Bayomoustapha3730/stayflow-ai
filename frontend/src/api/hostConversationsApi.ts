@@ -2,6 +2,8 @@ import type {
   AddInternalNoteRequest,
   AddHostMessageRequest,
   ConversationDetailResponse,
+  ConversationFeedbackAnalyticsQuery,
+  ConversationFeedbackAnalyticsResponse,
   ConversationHistoryQuery,
   ConversationHistoryResponse,
   ConversationListQuery,
@@ -100,6 +102,26 @@ export function createHostConversationsApi(http: HttpClient) {
 
     closeConversation(conversationId: string) {
       return http.post<ConversationDetailResponse>(`/conversations/${conversationId}/close`);
+    },
+
+    getFeedbackAnalytics(query?: ConversationFeedbackAnalyticsQuery) {
+      const params = new URLSearchParams();
+      if (query?.sinceUtc) {
+        params.set("sinceUtc", query.sinceUtc);
+      }
+
+      if (query?.untilUtc) {
+        params.set("untilUtc", query.untilUtc);
+      }
+
+      if (query?.propertyId) {
+        params.set("propertyId", query.propertyId);
+      }
+
+      const queryString = params.toString();
+      return http.get<ConversationFeedbackAnalyticsResponse>(
+        queryString ? `/conversations/feedback/analytics?${queryString}` : "/conversations/feedback/analytics"
+      );
     }
   };
 }

@@ -237,6 +237,9 @@ public sealed class WhatsAppWebhookProcessorTests
         public Task<WhatsAppIntegration?> GetActiveIntegrationByPhoneNumberIdAsync(string phoneNumberId, CancellationToken cancellationToken)
             => Task.FromResult(ScopedIntegrations.FirstOrDefault(item => item.IsActive && item.PhoneNumberId == phoneNumberId));
 
+        public Task<IReadOnlyCollection<WhatsAppIntegration>> ListActiveIntegrationsAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyCollection<WhatsAppIntegration>>(ScopedIntegrations.Where(item => item.IsActive).ToList());
+
         public Task<WhatsAppIntegration?> GetActiveIntegrationByCompanyIdAsync(Guid companyId, CancellationToken cancellationToken)
             => Task.FromResult(ScopedIntegrations.FirstOrDefault(item => item.IsActive && item.CompanyId == companyId));
 
@@ -554,5 +557,7 @@ public sealed class WhatsAppWebhookProcessorTests
         public Task<ApiResponse<ConversationDetailResponse>> UnassignConversationAsync(Guid conversationId, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<bool>> MarkConversationReadForCurrentUserAsync(Guid conversationId, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<bool>> MarkConversationReadForGuestAsync(Guid conversationId, Guid guestId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ChatMessageFeedbackResponse>> AddGuestMessageFeedbackAsync(Guid conversationId, Guid messageId, AddChatMessageFeedbackRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ConversationFeedbackAnalyticsResponse>> GetFeedbackAnalyticsAsync(ConversationFeedbackAnalyticsQuery query, CancellationToken cancellationToken) => throw new NotImplementedException();
     }
 }

@@ -53,6 +53,42 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.MaximumSelectedKnowledgeItems is >= 1 and <= 8, "AI reply orchestrator selected knowledge item limit must be between 1 and 8.")
             .Validate(options => options.MaximumSelectedKnowledgeCharacters is >= 1000 and <= 30000, "AI reply orchestrator selected knowledge character limit must be between 1000 and 30000.")
             .ValidateOnStart();
+        services.AddOptions<Services.AI.Retrieval.KnowledgeRetrievalOptions>()
+            .Bind(configuration.GetSection(Services.AI.Retrieval.KnowledgeRetrievalOptions.SectionName))
+            .Validate(options => options.MaxCandidates is >= 1 and <= 100, "Knowledge retrieval max candidates must be between 1 and 100.")
+            .Validate(options => options.TopCandidateCount is >= 1 and <= 10, "Knowledge retrieval top candidate count must be between 1 and 10.")
+            .Validate(options => options.MaxSelectedItems is >= 1 and <= 8, "Knowledge retrieval max selected items must be between 1 and 8.")
+            .Validate(options => options.MinimumScore is >= -100 and <= 200, "Knowledge retrieval minimum score must be between -100 and 200.")
+            .Validate(options => options.MinimumConfidenceScore is >= 0 and <= 100, "Knowledge retrieval minimum confidence score must be between 0 and 100.")
+            .Validate(options => options.HighConfidenceScore is >= 0 and <= 100, "Knowledge retrieval high confidence score must be between 0 and 100.")
+            .Validate(options => options.MediumConfidenceScore is >= 0 and <= 100, "Knowledge retrieval medium confidence score must be between 0 and 100.")
+            .Validate(options => options.MinimumScoreGap is >= 0 and <= 50, "Knowledge retrieval minimum score gap must be between 0 and 50.")
+            .Validate(options => options.ContextCharacterBudget is >= 1000 and <= 30000, "Knowledge retrieval context character budget must be between 1000 and 30000.")
+            .Validate(options => options.EmergencyMismatchPenalty is >= 0 and <= 500, "Knowledge retrieval emergency mismatch penalty must be between 0 and 500.")
+            .ValidateOnStart();
+        services.AddOptions<Services.AI.Retrieval.KnowledgeRerankerOptions>()
+            .Bind(configuration.GetSection(Services.AI.Retrieval.KnowledgeRerankerOptions.SectionName))
+            .Validate(options => options.PriorSelectionBoost is >= 0 and <= 0.3, "Knowledge reranker prior selection boost must be between 0 and 0.3.")
+            .Validate(options => options.ClarificationTopicBoost is >= 0 and <= 0.3, "Knowledge reranker clarification topic boost must be between 0 and 0.3.")
+            .ValidateOnStart();
+        services.AddOptions<Services.AI.Retrieval.KnowledgeEmbeddingOptions>()
+            .Bind(configuration.GetSection(Services.AI.Retrieval.KnowledgeEmbeddingOptions.SectionName))
+            .Validate(options => options.EmbeddingWeight is >= 0 and <= 0.5, "Knowledge embedding blend weight must be between 0 and 0.5.")
+            .ValidateOnStart();
+        services.AddOptions<Services.AI.Orchestration.ConciergeIntelligenceOptions>()
+            .Bind(configuration.GetSection(Services.AI.Orchestration.ConciergeIntelligenceOptions.SectionName))
+            .Validate(options => options.RecentMessageCount is >= 4 and <= 20, "Concierge intelligence recent message count must be between 4 and 20.")
+            .Validate(options => options.MemoryCharacterBudget is >= 300 and <= 20000, "Concierge intelligence memory character budget must be between 300 and 20000.")
+            .Validate(options => options.MaximumIntents is >= 1 and <= 3, "Concierge intelligence maximum intents must be between 1 and 3.")
+            .Validate(options => options.MaximumCandidates is >= 1 and <= 30, "Concierge intelligence maximum candidates must be between 1 and 30.")
+            .Validate(options => options.MaximumSelectedItems is >= 1 and <= 5, "Concierge intelligence maximum selected items must be between 1 and 5.")
+            .Validate(options => options.ContextCharacterBudget is >= 1000 and <= 30000, "Concierge intelligence context character budget must be between 1000 and 30000.")
+            .Validate(options => options.HighConfidenceThreshold > options.MediumConfidenceThreshold, "Concierge intelligence high confidence threshold must be greater than medium confidence threshold.")
+            .Validate(options => options.IntentWeight >= 0 && options.LexicalWeight >= 0 && options.SemanticWeight >= 0 && options.PriorityWeight >= 0,
+                "Concierge intelligence component weights must be nonnegative.")
+            .Validate(options => Math.Abs((options.IntentWeight + options.LexicalWeight + options.SemanticWeight + options.PriorityWeight) - 1.0) <= 0.25,
+                "Concierge intelligence component weights should be approximately normalized.")
+            .ValidateOnStart();
         services.AddOptions<Services.WhatsAppCloudOptions>()
             .Bind(configuration.GetSection(Services.WhatsAppCloudOptions.SectionName))
             .ValidateOnStart();
@@ -80,8 +116,18 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IConversationAIExchangeService, Services.ConversationAIExchangeService>();
         services.AddScoped<Services.AI.Context.IConversationContextBuilder, Services.AI.Context.ConversationContextBuilder>();
         services.AddSingleton<Services.AI.Context.IContextConfidenceEvaluator, Services.AI.Context.ContextConfidenceEvaluator>();
+        services.AddSingleton<Services.AI.Intent.IConversationIntentRecognizer, Services.AI.Intent.ConversationIntentRecognizer>();
         services.AddSingleton<Services.AI.Intent.IGuestIntentDetector, Services.AI.Intent.GuestIntentDetector>();
+        services.AddSingleton<Services.AI.Memory.IConversationSummaryService, Services.AI.Memory.DeterministicConversationSummaryService>();
+        services.AddSingleton<Services.AI.Memory.IConversationMemoryService, Services.AI.Memory.ConversationMemoryService>();
+        services.AddSingleton<Services.AI.Retrieval.IKnowledgeEmbeddingProvider, Services.AI.Retrieval.NoOpKnowledgeEmbeddingProvider>();
+        services.AddSingleton<Services.AI.Retrieval.IKnowledgeReranker, Services.AI.Retrieval.DeterministicKnowledgeReranker>();
+        services.AddSingleton<Services.AI.Retrieval.IKnowledgeQueryExpander, Services.AI.Retrieval.KnowledgeQueryExpander>();
+        services.AddSingleton<Services.AI.Retrieval.IKnowledgeSemanticSimilarityService, Services.AI.Retrieval.DeterministicKnowledgeSemanticSimilarityService>();
+        services.AddSingleton<Services.AI.Retrieval.IKnowledgeSimilarityScorer, Services.AI.Retrieval.DeterministicKnowledgeSimilarityScorer>();
         services.AddSingleton<Services.AI.Retrieval.IPropertyKnowledgeRanker, Services.AI.Retrieval.PropertyKnowledgeRanker>();
+        services.AddSingleton<Services.AI.Retrieval.IPropertyKnowledgeRetriever, Services.AI.Retrieval.PropertyKnowledgeRetriever>();
+        services.AddSingleton<Services.AI.Orchestration.IConciergeResponseGenerator, Services.AI.Orchestration.ConciergeResponseGenerator>();
         services.AddSingleton<Services.AI.Validation.IAIReplyOutputValidator, Services.AI.Validation.AIReplyOutputValidator>();
         services.AddSingleton<Services.AI.Safety.IAIReplySafetyEvaluator, Services.AI.Safety.AIReplySafetyEvaluator>();
         services.AddSingleton<Services.AI.Orchestration.IAIReplyFallbackProvider, Services.AI.Orchestration.AIReplyFallbackProvider>();
@@ -90,20 +136,41 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IConversationRealtimePublisher, Services.ConversationRealtimePublisher>();
         services.AddSingleton<Services.IWhatsAppDevelopmentMessageStore, Services.WhatsAppDevelopmentMessageStore>();
         services.AddScoped<Services.IPhoneNumberNormalizer, Services.PhoneNumberNormalizer>();
+        services.AddHttpClient(nameof(Services.WhatsAppCloudClient), (serviceProvider, client) =>
+        {
+            var cloudOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.WhatsAppCloudOptions>>().Value;
+            client.BaseAddress = new Uri(cloudOptions.GraphApiBaseUrl.TrimEnd('/') + "/", UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(cloudOptions.RequestTimeoutSeconds);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("StayFlow-WhatsAppCloud/1.0");
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate
+        });
         services.AddScoped<Services.WhatsAppCloudClient>();
         services.AddScoped<Services.DevelopmentWhatsAppCloudClient>();
+        services.AddSingleton<Services.IWhatsAppProviderTelemetry, Services.WhatsAppProviderTelemetry>();
         services.AddScoped<Services.IWhatsAppCloudClient>(serviceProvider =>
         {
             var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.WhatsAppCloudOptions>>().Value;
-            return options.DevelopmentMode
-                ? serviceProvider.GetRequiredService<Services.DevelopmentWhatsAppCloudClient>()
-                : serviceProvider.GetRequiredService<Services.WhatsAppCloudClient>();
+            var environment = serviceProvider.GetRequiredService<IHostEnvironment>();
+            if (options.DevelopmentMode)
+            {
+                if (!environment.IsDevelopment())
+                {
+                    throw new InvalidOperationException("WhatsAppCloud:DevelopmentMode cannot be enabled outside Development environment.");
+                }
+
+                return serviceProvider.GetRequiredService<Services.DevelopmentWhatsAppCloudClient>();
+            }
+
+            return serviceProvider.GetRequiredService<Services.WhatsAppCloudClient>();
         });
         services.AddScoped<Services.IConversationChannelSender, Services.WebConversationChannelSender>();
         services.AddScoped<Services.IConversationChannelSender, Services.WhatsAppConversationChannelSender>();
         services.AddScoped<Services.IConversationChannelDispatcher, Services.ConversationChannelDispatcher>();
         services.AddSingleton<Services.IWhatsAppWebhookQueue, Services.WhatsAppWebhookQueue>();
-        services.AddSingleton<Services.IWhatsAppWebhookSignatureVerifier, Services.WhatsAppWebhookSignatureVerifier>();
+        services.AddScoped<Services.IWhatsAppWebhookSignatureVerifier, Services.WhatsAppWebhookSignatureVerifier>();
         services.AddHostedService<Services.WhatsAppWebhookBackgroundService>();
         services.AddScoped<Services.IWhatsAppWebhookProcessor, Services.WhatsAppWebhookProcessor>();
         services.AddScoped<Services.IWhatsAppCredentialResolver, Services.WhatsAppCredentialResolver>();

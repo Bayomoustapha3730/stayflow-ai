@@ -62,7 +62,8 @@ export function HostConversationActions({
   }, [pendingAction]);
 
   const canTakeOver = !conversation.humanTakeoverEnabled && canTransitionToHumanManaged(conversation.status);
-  const canReturnToAi = conversation.humanTakeoverEnabled && canTransitionBackToOpen(conversation.status);
+  const canReturnToAi = canTransitionBackToOpen(conversation.status);
+  const isAlreadyAiManaged = conversation.status === ConversationStatus.Open && !conversation.humanTakeoverEnabled;
   const canResolve = canTransitionToResolved(conversation.status);
   const canClose = canTransitionToClosed(conversation.status);
 
@@ -87,8 +88,14 @@ export function HostConversationActions({
         ) : null}
 
         {canReturnToAi ? (
-          <button type="button" onClick={() => void onReturnToAI()} disabled={isChangingMode} aria-label="Return conversation to AI">
-            {isChangingMode ? "Updating..." : "Return to AI"}
+          <button
+            type="button"
+            onClick={() => void onReturnToAI()}
+            disabled={isChangingMode || isAlreadyAiManaged}
+            aria-label="Return conversation to AI"
+            title={isAlreadyAiManaged ? "This conversation is already managed by AI." : undefined}
+          >
+            {isChangingMode ? "Updating..." : isAlreadyAiManaged ? "AI already active" : "Return to AI"}
           </button>
         ) : null}
 

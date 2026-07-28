@@ -258,6 +258,23 @@ describe("HostConversationDetail", () => {
     expect(screen.getByRole("textbox", { name: /note content/i })).toBeDisabled();
   });
 
+  it("shows a disabled return to AI action when the conversation is already AI-managed", async () => {
+    vi.stubGlobal("fetch", createFetchMock(detail(ConversationStatus.Open, false)));
+
+    render(
+      <HostConversationDetail
+        conversationId="c-1"
+        accessToken="host-token"
+        onUnauthorized={vi.fn()}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /return conversation to ai/i })).toBeDisabled()
+    );
+    expect(screen.getByRole("button", { name: /return conversation to ai/i })).toHaveTextContent(/ai already active/i);
+  });
+
   it("calls onUnauthorized when API returns 401", async () => {
     const onUnauthorized = vi.fn();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(fail(401, "Unauthorized")));

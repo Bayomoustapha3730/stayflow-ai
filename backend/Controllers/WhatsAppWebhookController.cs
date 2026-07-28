@@ -22,7 +22,7 @@ public sealed class WhatsAppWebhookController(
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [HttpGet]
-    public IActionResult Verify([FromQuery(Name = "hub.mode")] string? mode, [FromQuery(Name = "hub.verify_token")] string? verifyToken, [FromQuery(Name = "hub.challenge")] string? challenge)
+    public async Task<IActionResult> Verify([FromQuery(Name = "hub.mode")] string? mode, [FromQuery(Name = "hub.verify_token")] string? verifyToken, [FromQuery(Name = "hub.challenge")] string? challenge, CancellationToken cancellationToken)
     {
         if (!options.Value.Enabled)
         {
@@ -34,7 +34,8 @@ public sealed class WhatsAppWebhookController(
             return Unauthorized();
         }
 
-        return signatureVerifier.IsWebhookVerificationTokenValid(verifyToken)
+        var valid = await signatureVerifier.IsWebhookVerificationTokenValidAsync(verifyToken, cancellationToken);
+        return valid
             ? Content(challenge, "text/plain")
             : Unauthorized();
     }
@@ -59,9 +60,10 @@ public sealed class WhatsAppWebhookController(
             return StatusCode(StatusCodes.Status413PayloadTooLarge);
         }
 
-        if (!signatureVerifier.TryValidateSignature(rawBody, Request.Headers["X-Hub-Signature-256"], out var failureReason))
+        var signatureValidation = await signatureVerifier.ValidateSignatureAsync(rawBody, Request.Headers["X-Hub-Signature-256"], cancellationToken);
+        if (!signatureValidation.IsValid)
         {
-            logger.LogWarning("WhatsApp webhook signature validation failed. Reason={Reason} CorrelationId={CorrelationId}", failureReason, HttpContext.TraceIdentifier);
+            logger.LogWarning("WhatsApp webhook signature validation failed. Reason={Reason} CorrelationId={CorrelationId}", signatureValidation.FailureReason, HttpContext.TraceIdentifier);
             return Unauthorized();
         }
 

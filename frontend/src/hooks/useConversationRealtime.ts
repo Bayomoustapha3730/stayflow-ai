@@ -3,6 +3,7 @@ import { HubConnectionState } from "@microsoft/signalr";
 import {
   acquireConversationConnection,
   ensureConversationConnectionStarted,
+  isExpectedConnectionLifecycleCancellation,
   onConversationRealtimeEvent,
   releaseConversationConnection,
   subscribeConversationConnectionState,
@@ -54,11 +55,13 @@ export function useConversationRealtime({
   onReadStateChanged,
   onStateChanged
 }: UseConversationRealtimeOptions): UseConversationRealtimeResult {
-  const isTestMode = import.meta.env.MODE === "test";
+  const isTestMode = import.meta.env.MODE === "test" && import.meta.env.VITE_ENABLE_REALTIME_IN_TESTS !== "true";
 
   const [connectionState, setConnectionState] = useState<UseConversationRealtimeResult["connectionState"]>("offline");
   const connectionRef = useRef<ReturnType<typeof acquireConversationConnection> | null>(null);
   const joinedConversationRef = useRef<string | null>(null);
+  const syncMembershipRef = useRef<(() => Promise<void>) | null>(null);
+  const membershipSyncPromiseRef = useRef<Promise<void> | null>(null);
   const latestConversationIdRef = useRef<string | null>(conversationId);
   const callbacksRef = useRef({
     onMessageCreated,
@@ -96,37 +99,83 @@ export function useConversationRealtime({
       return;
     }
 
+    let disposed = false;
+
     const connection = acquireConversationConnection(baseUrl, accessToken);
     connectionRef.current = connection;
     setConnectionState(connection.state === HubConnectionState.Connected ? "online" : "connecting");
 
+    const syncConversationMembership = async () => {
+      if (disposed || connectionRef.current !== connection || connection.state !== HubConnectionState.Connected) {
+        return;
+      }
+
+      if (membershipSyncPromiseRef.current) {
+        await membershipSyncPromiseRef.current;
+        return;
+      }
+
+      const syncAttempt = (async () => {
+        const targetConversationId = latestConversationIdRef.current;
+        const previousConversationId = joinedConversationRef.current;
+
+        if (previousConversationId && previousConversationId !== targetConversationId) {
+          try {
+            await connection.invoke("LeaveConversation", previousConversationId);
+          } catch (error) {
+            if (!(disposed && isExpectedConnectionLifecycleCancellation(error))) {
+              console.warn("StayFlow realtime leave conversation failed.", error);
+            }
+          } finally {
+            if (joinedConversationRef.current === previousConversationId) {
+              joinedConversationRef.current = null;
+            }
+          }
+        }
+
+        const currentConversationId = latestConversationIdRef.current;
+        if (!currentConversationId || currentConversationId === joinedConversationRef.current) {
+          return;
+        }
+
+        try {
+          await connection.invoke("JoinConversation", currentConversationId);
+          joinedConversationRef.current = currentConversationId;
+        } catch (error) {
+          if (!(disposed && isExpectedConnectionLifecycleCancellation(error))) {
+            console.warn("StayFlow realtime join conversation failed.", error);
+          }
+        }
+      })();
+
+      membershipSyncPromiseRef.current = syncAttempt;
+
+      try {
+        await syncAttempt;
+      } finally {
+        if (membershipSyncPromiseRef.current === syncAttempt) {
+          membershipSyncPromiseRef.current = null;
+        }
+      }
+    };
+
+    syncMembershipRef.current = syncConversationMembership;
+
     const unsubscribeConnectionState = subscribeConversationConnectionState(connection, (state) => {
       setConnectionState(state);
+
+      if (state === "offline" || state === "reconnecting") {
+        joinedConversationRef.current = null;
+      }
 
       if (state !== "online") {
         return;
       }
 
-      const nextConversationId = latestConversationIdRef.current;
-      const previousConversationId = joinedConversationRef.current;
-
-      if (previousConversationId && previousConversationId !== nextConversationId) {
-        void connection.invoke("LeaveConversation", previousConversationId).catch(() => {});
-        joinedConversationRef.current = null;
-      }
-
-      if (nextConversationId && nextConversationId !== joinedConversationRef.current) {
-        void connection.invoke("JoinConversation", nextConversationId)
-          .then(() => {
-            joinedConversationRef.current = nextConversationId;
-          })
-          .catch(() => {
-            // Ignore; polling remains the fallback path.
-          });
-      }
+      void syncConversationMembership();
 
       callbacksRef.current.onUnreadChanged?.({
-        conversationId: nextConversationId ?? undefined,
+        conversationId: latestConversationIdRef.current ?? undefined,
         timestamp: new Date().toISOString()
       });
     });
@@ -158,32 +207,38 @@ export function useConversationRealtime({
       })
     ];
 
-    void ensureConversationConnectionStarted(baseUrl, accessToken)
-      .then(async () => {
-        setConnectionState("online");
-
-        const nextConversationId = latestConversationIdRef.current;
-        if (nextConversationId) {
-          try {
-            await connection.invoke("JoinConversation", nextConversationId);
-            joinedConversationRef.current = nextConversationId;
-          } catch {
-            // Ignore; polling remains the fallback path.
-          }
+    void ensureConversationConnectionStarted(baseUrl)
+      .then(() => {
+        if (!disposed) {
+          setConnectionState((current) =>
+            connection.state === HubConnectionState.Connected ? "online" : current
+          );
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        if (disposed && isExpectedConnectionLifecycleCancellation(error)) {
+          return;
+        }
+
+        console.error("StayFlow realtime connection failed to start.", error);
         setConnectionState("offline");
       });
 
     return () => {
+      disposed = true;
+      syncMembershipRef.current = null;
+
       const activeConnection = connectionRef.current;
       connectionRef.current = null;
       const joinedConversationId = joinedConversationRef.current;
       joinedConversationRef.current = null;
 
       if (activeConnection && joinedConversationId && activeConnection.state === HubConnectionState.Connected) {
-        void activeConnection.invoke("LeaveConversation", joinedConversationId).catch(() => {});
+        void activeConnection.invoke("LeaveConversation", joinedConversationId).catch((error: unknown) => {
+          if (!isExpectedConnectionLifecycleCancellation(error)) {
+            console.warn("StayFlow realtime leave conversation cleanup failed.", error);
+          }
+        });
       }
 
       for (const unsubscribe of unsubscribers) {
@@ -193,7 +248,11 @@ export function useConversationRealtime({
       unsubscribeConnectionState();
 
       if (activeConnection) {
-        void releaseConversationConnection(baseUrl, accessToken);
+        void releaseConversationConnection(baseUrl).catch((error) => {
+          if (!isExpectedConnectionLifecycleCancellation(error)) {
+            console.error("StayFlow realtime connection cleanup failed.", error);
+          }
+        });
       }
     };
   }, [accessToken, baseUrl, enabled, isTestMode]);
@@ -205,15 +264,11 @@ export function useConversationRealtime({
     }
 
     const previousConversationId = joinedConversationRef.current;
-    if (previousConversationId && previousConversationId !== conversationId) {
-      void connection.invoke("LeaveConversation", previousConversationId);
-      joinedConversationRef.current = null;
+    if (previousConversationId === conversationId) {
+      return;
     }
 
-    if (conversationId && conversationId !== joinedConversationRef.current) {
-      void connection.invoke("JoinConversation", conversationId);
-      joinedConversationRef.current = conversationId;
-    }
+    void syncMembershipRef.current?.();
   }, [conversationId, isTestMode]);
 
   async function startTyping(context: "guest" | "host" | "internal-note") {

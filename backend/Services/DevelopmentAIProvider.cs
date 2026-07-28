@@ -19,28 +19,17 @@ public sealed class DevelopmentAIProvider(ILogger<DevelopmentAIProvider>? logger
             : request.QuestionCategories;
 
         this.logger.LogInformation(
-            "AI reply trace: development provider request. Categories={Categories} DetectedIntent={DetectedIntent} SelectedKnowledgeCount={SelectedKnowledgeCount} SelectedKnowledge={SelectedKnowledge} GuestMessagePreview={GuestMessagePreview}",
+            "AI reply trace: development provider request. Categories={Categories} DetectedIntent={DetectedIntent} SelectedKnowledgeCount={SelectedKnowledgeCount}",
             categories.Select(category => category.ToString()).ToArray(),
             request.DetectedIntent,
-            request.SelectedKnowledgeItems.Count,
-            request.SelectedKnowledgeItems
-                .Select(item => new
-                {
-                    item.Title,
-                    item.Category,
-                    ContentPreview = item.Content.Length <= 50 ? item.Content : item.Content[..50]
-                })
-                .ToArray(),
-            request.PromptPackage.GuestMessage.Length <= 120
-                ? request.PromptPackage.GuestMessage
-                : request.PromptPackage.GuestMessage[..120]);
+            request.SelectedKnowledgeItems.Count);
 
         var response = BuildResponse(categories, request);
         stopwatch.Stop();
 
         this.logger.LogInformation(
-            "AI reply trace: development provider response. ResponsePreview={ResponsePreview}",
-            response.Length <= 200 ? response : response[..200]);
+            "AI reply trace: development provider response generated. ResponseLength={ResponseLength}",
+            response.Length);
 
         return Task.FromResult(AIProviderResult.Success(
             response,
@@ -124,8 +113,6 @@ public sealed class DevelopmentAIProvider(ILogger<DevelopmentAIProvider>? logger
 
         var top = request.SelectedKnowledgeItems
             .Where(item => item.IsApproved)
-            .OrderByDescending(item => item.Priority)
-            .ThenBy(item => item.Title, StringComparer.Ordinal)
             .FirstOrDefault();
 
         if (top is null || string.IsNullOrWhiteSpace(top.Content))

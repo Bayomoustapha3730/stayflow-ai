@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using StayFlow.Api.Extensions;
 using StayFlow.Api.Hubs;
 using StayFlow.Api.Middleware;
-using Microsoft.AspNetCore.RateLimiting;
+//using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -66,6 +68,8 @@ var app = builder.Build();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<GlobalExceptionHandlingMiddleware>();
 
+app.UseRouting();
+
 app.UseCors("StayFlowFrontendDevelopment");
 app.UseRateLimiter();
 
@@ -81,6 +85,11 @@ if (app.Environment.IsDevelopment())
         >()
         .SeedAsync(CancellationToken.None);
 }
+else
+{
+    app.UseHttpsRedirection();
+}
+
 
 app.UseHttpsRedirection();
 
@@ -91,7 +100,10 @@ app.UseMiddleware<PermissionAuthorizationMiddleware>();
 
 app.MapControllers();
 app.MapHub<ConversationHub>("/hubs/conversations")
+.RequireAuthorization()
 .RequireCors("StayFlowFrontendDevelopment");
 app.MapHealthChecks("/health");
 
 app.Run();
+
+public partial class Program;

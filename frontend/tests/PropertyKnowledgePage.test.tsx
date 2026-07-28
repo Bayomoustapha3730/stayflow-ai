@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../src/api/httpClient";
 
 const useHostAuthMock = vi.fn();
@@ -11,7 +11,7 @@ vi.mock("../src/hooks/useHostAuth", () => ({
 }));
 
 vi.mock("../src/hooks/usePropertyKnowledge", () => ({
-  usePropertyKnowledge: () => usePropertyKnowledgeMock()
+  usePropertyKnowledge: (options: unknown) => usePropertyKnowledgeMock(options)
 }));
 
 import { PropertyKnowledgePage } from "../src/pages/PropertyKnowledgePage";
@@ -99,6 +99,10 @@ describe("PropertyKnowledgePage", () => {
     usePropertyKnowledgeMock.mockReturnValue(baseKnowledgeState());
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("shows property-specific list errors and keeps the conversation 404 text out of the page", () => {
     usePropertyKnowledgeMock.mockReturnValue(baseKnowledgeState({
       error: "Property not found."
@@ -116,6 +120,53 @@ describe("PropertyKnowledgePage", () => {
     render(<PropertyKnowledgePage propertyId={null} />);
 
     expect(screen.getByText(/select a conversation with a property first\./i)).toBeInTheDocument();
+  });
+
+  it("resolves tenant property and enables creation when route property is missing", async () => {
+    usePropertyKnowledgeMock.mockImplementation((options?: { propertyId?: string | null }) => {
+      const resolvedId = options?.propertyId ?? null;
+      return baseKnowledgeState({
+        propertyName: resolvedId ? "Demo Nairobi Apartment" : null,
+        response: resolvedId ? {
+          items: [summaryItem("k-1")],
+          pageNumber: 1,
+          pageSize: 10,
+          totalCount: 1,
+          totalPages: 1
+        } : null
+      });
+    });
+
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        message: "ok",
+        data: {
+          items: [
+            {
+              id: "22222222-2222-2222-2222-222222222222",
+              name: "Demo Nairobi Apartment"
+            }
+          ],
+          pageNumber: 1,
+          pageSize: 1,
+          totalCount: 1,
+          totalPages: 1
+        },
+        errors: [],
+        correlationId: "cid"
+      })
+    })));
+
+    render(<PropertyKnowledgePage propertyId={null} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /create knowledge/i })).toBeEnabled();
+    });
+
+    expect(screen.getByText("Demo Nairobi Apartment")).toBeInTheDocument();
   });
 
   it("shows item-specific errors and keeps the conversation 404 text out of the page", () => {

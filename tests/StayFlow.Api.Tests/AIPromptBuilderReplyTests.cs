@@ -39,6 +39,7 @@ public sealed class AIPromptBuilderReplyTests
 
         Assert.Contains("APPROVED PROPERTY KNOWLEDGE", userContent);
         Assert.Contains("[Source 1]", userContent);
+        Assert.Contains("- Property: Demo Property", userContent);
         Assert.Contains("Title: Guest Wi-Fi", userContent);
         Assert.Contains("Category: WiFi", userContent);
         Assert.Contains("Tags: wifi, network", userContent);

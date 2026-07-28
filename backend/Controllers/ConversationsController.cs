@@ -77,7 +77,6 @@ public sealed class ConversationsController(
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
-<<<<<<< HEAD
     [HttpGet("{conversationId:guid}/whatsapp/window")]
     [RequiresPermission("conversations.read")]
     [ProducesResponseType(typeof(ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>), StatusCodes.Status200OK)]
@@ -101,7 +100,9 @@ public sealed class ConversationsController(
         CancellationToken cancellationToken)
     {
         var response = await whatsAppTemplateService.SendTemplateMessageAsync(conversationId, templateId, request, cancellationToken);
-=======
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
     [HttpPost("{conversationId:guid}/messages/{messageId:guid}/retry")]
     [RequiresPermission("conversations.reply")]
     [ProducesResponseType(typeof(ApiResponse<ConversationMessageResponse>), StatusCodes.Status200OK)]
@@ -112,7 +113,6 @@ public sealed class ConversationsController(
         CancellationToken cancellationToken)
     {
         var response = await conversationService.RetryFailedMessageAsync(conversationId, messageId, cancellationToken);
->>>>>>> origin/main
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
@@ -195,6 +195,18 @@ public sealed class ConversationsController(
     public async Task<ActionResult<ApiResponse<bool>>> MarkRead(Guid conversationId, CancellationToken cancellationToken)
     {
         var response = await conversationService.MarkConversationReadForCurrentUserAsync(conversationId, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpGet("feedback/analytics")]
+    [RequiresPermission("conversations.read")]
+    [ProducesResponseType(typeof(ApiResponse<ConversationFeedbackAnalyticsResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ConversationFeedbackAnalyticsResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ConversationFeedbackAnalyticsResponse>>> GetFeedbackAnalytics(
+        [FromQuery] ConversationFeedbackAnalyticsQuery query,
+        CancellationToken cancellationToken)
+    {
+        var response = await conversationService.GetFeedbackAnalyticsAsync(query, cancellationToken);
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 

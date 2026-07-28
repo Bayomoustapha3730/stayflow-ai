@@ -141,6 +141,59 @@ public sealed class CopilotService(
         });
     }
 
+    public async Task<ApiResponse<ConversationRetrievalDiagnosticsResponse>> GetRetrievalDiagnosticsAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<ConversationRetrievalDiagnosticsResponse>.Fail(tenantError, [tenantError]);
+        }
+
+        var result = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+        {
+            ConversationId = conversationId,
+            Operation = AIReplyOperation.SuggestedHostReplies,
+            RequestedSuggestionCount = 3,
+            CorrelationId = currentTenantContext.CorrelationId
+        }, cancellationToken);
+
+        if (result is null)
+        {
+            return ApiResponse<ConversationRetrievalDiagnosticsResponse>.Fail("Conversation was not found.");
+        }
+
+        var diagnostics = result.RetrievalDiagnostics ?? new RetrievalDiagnosticsSnapshot
+        {
+            DetectedIntent = result.DetectedIntent?.Intent.ToString() ?? "Unknown",
+            IntentAmbiguous = result.DetectedIntent?.Ambiguous ?? false,
+            IntentConfidenceScore = (int)Math.Round((result.DetectedIntent?.ConfidenceScore ?? 0) * 100),
+            SecondaryIntentCount = 0,
+            CandidateCount = 0,
+            SelectedCount = 0,
+            ConfidenceLevel = Services.AI.Retrieval.KnowledgeConfidenceLevel.None,
+            ReasonCode = Services.AI.Retrieval.KnowledgeRetrievalReasonCode.NoMatch,
+            ClarificationRequired = false,
+            EscalationRecommended = result.RequiresHumanReview,
+            SelectedCategories = [],
+            ClarificationChoices = [],
+            WarningCodes = result.Warnings.Select(item => item.Code).Distinct(StringComparer.Ordinal).ToArray(),
+            EvaluationMetadata = new Dictionary<string, string>(StringComparer.Ordinal)
+        };
+
+        return ApiResponse<ConversationRetrievalDiagnosticsResponse>.Ok(new ConversationRetrievalDiagnosticsResponse
+        {
+            ConversationId = conversationId,
+            Diagnostics = MapRetrievalDiagnostics(diagnostics),
+            ContextTruncated = result.ContextTruncated,
+            FallbackUsed = result.FallbackUsed,
+            RequiresHumanReview = result.RequiresHumanReview,
+            Provider = result.Provider,
+            DurationMilliseconds = result.DurationMilliseconds,
+            GeneratedAt = result.GeneratedAt
+        });
+    }
+
     private bool TryGetCompanyId(out Guid companyId, out string error)
     {
         companyId = currentTenantContext.CompanyId ?? Guid.Empty;
@@ -205,6 +258,27 @@ public sealed class CopilotService(
             Code = warning.Code,
             Message = warning.Message,
             Severity = warning.Severity
+        };
+    }
+
+    private static CopilotRetrievalDiagnosticsDto MapRetrievalDiagnostics(RetrievalDiagnosticsSnapshot snapshot)
+    {
+        return new CopilotRetrievalDiagnosticsDto
+        {
+            DetectedIntent = snapshot.DetectedIntent,
+            IntentAmbiguous = snapshot.IntentAmbiguous,
+            IntentConfidenceScore = snapshot.IntentConfidenceScore,
+            SecondaryIntentCount = snapshot.SecondaryIntentCount,
+            CandidateCount = snapshot.CandidateCount,
+            SelectedCount = snapshot.SelectedCount,
+            ConfidenceLevel = snapshot.ConfidenceLevel.ToString(),
+            ReasonCode = snapshot.ReasonCode.ToString(),
+            ClarificationRequired = snapshot.ClarificationRequired,
+            EscalationRecommended = snapshot.EscalationRecommended,
+            SelectedCategories = snapshot.SelectedCategories,
+            ClarificationChoices = snapshot.ClarificationChoices,
+            WarningCodes = snapshot.WarningCodes,
+            EvaluationMetadata = snapshot.EvaluationMetadata
         };
     }
 

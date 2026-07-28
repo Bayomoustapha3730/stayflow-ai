@@ -6,36 +6,78 @@ public static class WhatsAppFailureMapper
 {
     public static (string Category, string Summary) Map(string? failureCode, string? failureReason)
     {
+        return Map(failureCode, failureReason, null, null, null, null, null);
+    }
+
+    public static (string Category, string Summary) Map(
+        string? failureCode,
+        string? failureReason,
+        int? httpStatusCode,
+        int? providerCode,
+        int? providerSubcode,
+        bool? isTransient,
+        Exception? exception)
+    {
         var code = Normalize(failureCode);
         var reason = Normalize(failureReason);
-        var combined = $"{code} {reason}".Trim();
+        var combined = $"{code} {reason} {providerCode} {providerSubcode} {httpStatusCode}".Trim();
 
-        if (Matches(combined, "rate", "throttle", "too many requests", "429"))
+        if (exception is OperationCanceledException)
         {
-            return ("RateLimited", "WhatsApp is receiving too many requests. Try again shortly.");
+            return ("TemporaryProviderFailure", "WhatsApp request timed out. Try again shortly.");
         }
 
-        if (Matches(combined, "auth", "token", "permission", "forbidden", "unauthorized", "phone_number_id", "waba", "configuration", "credential", "signature"))
+        if (httpStatusCode == 429 || Matches(combined, "rate", "throttle", "too many requests", "130429"))
         {
-            return ("AuthenticationOrConfigurationIssue", "WhatsApp sending is unavailable. Contact an administrator.");
+            return ("RateLimited", "WhatsApp is temporarily rate limited. Try again shortly.");
         }
 
-        if (Matches(combined, "invalid", "malformed", "format", "destination", "phone"))
+        if (httpStatusCode == 401 || Matches(combined, "oauth", "invalid_token", "190", "authentication"))
+        {
+            return ("Authentication", "WhatsApp authentication failed. Contact an administrator.");
+        }
+
+        if (httpStatusCode == 403 || Matches(combined, "permission", "forbidden", "authorization", "200", "10"))
+        {
+            return ("Authorization", "WhatsApp authorization failed. Contact an administrator.");
+        }
+
+        if (Matches(combined, "131026", "invalid recipient", "recipient", "not a whatsapp"))
         {
             return ("InvalidDestination", "This WhatsApp destination is invalid.");
         }
 
-        if (Matches(combined, "opt out", "opted out", "recipient", "not a whatsapp", "unavailable", "blocked"))
+        if (Matches(combined, "132001", "132005", "template", "not found", "status"))
         {
-            return ("RecipientUnavailable", "This WhatsApp recipient is unavailable.");
+            return ("InvalidTemplate", "The selected WhatsApp template is unavailable.");
         }
 
-        if (Matches(combined, "temporary", "timeout", "timed out", "unavailable", "internal", "service"))
+        if (Matches(combined, "132012", "132000", "parameter", "variables", "placeholder"))
         {
-            return ("TemporaryProviderIssue", "WhatsApp is temporarily unavailable. Try again.");
+            return ("TemplateParameterMismatch", "Template variables do not match the approved WhatsApp template.");
         }
 
-        return ("UnknownDeliveryFailure", "WhatsApp could not deliver this message.");
+        if (Matches(combined, "131047", "service window", "24-hour", "customer service"))
+        {
+            return ("CustomerServiceWindowClosed", "The WhatsApp customer-service window is closed. Send an approved template.");
+        }
+
+        if (httpStatusCode == 400 || Matches(combined, "invalid", "malformed", "configuration", "phone_number_id", "waba"))
+        {
+            return ("Configuration", "WhatsApp configuration is incomplete or invalid.");
+        }
+
+        if (httpStatusCode is 500 or 502 or 503 or 504)
+        {
+            return ("ProviderUnavailable", "WhatsApp provider is temporarily unavailable. Try again shortly.");
+        }
+
+        if (isTransient == true || Matches(combined, "timeout", "temporary", "internal", "service unavailable"))
+        {
+            return ("TemporaryProviderFailure", "WhatsApp is temporarily unavailable. Try again shortly.");
+        }
+
+        return ("Unknown", "WhatsApp could not complete this request.");
     }
 
     private static bool Matches(string value, params string[] patterns)

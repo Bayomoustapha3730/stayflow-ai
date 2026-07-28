@@ -8,6 +8,7 @@ public sealed class WhatsAppCredentialResolution
     public string? AccessToken { get; init; }
     public string? AppSecret { get; init; }
     public string? WebhookVerifyToken { get; init; }
+    public string? FailureCode { get; init; }
     public string? FailureSummary { get; init; }
 }
 

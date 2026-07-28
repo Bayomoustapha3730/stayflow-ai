@@ -73,6 +73,8 @@ public sealed class WhatsAppConversationChannelSender(
 
         var result = await whatsAppCloudClient.SendTextMessageAsync(new WhatsAppSendTextMessageRequest
         {
+            CompanyId = conversation.CompanyId,
+            IntegrationId = integration.Id,
             AccessToken = credentials.AccessToken,
             GraphApiVersion = integration.GraphApiVersion,
             PhoneNumberId = integration.PhoneNumberId,
@@ -92,6 +94,7 @@ public sealed class WhatsAppConversationChannelSender(
             message.FailureCode = null;
             message.FailureReason = null;
             message.FailureCategory = null;
+            message.ProviderRequestId = result.ProviderRequestId;
             return;
         }
 
@@ -105,14 +108,9 @@ public sealed class WhatsAppConversationChannelSender(
         message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
         message.FailedAt = DateTimeOffset.UtcNow;
         message.FailureCode = result.FailureCode;
-<<<<<<< HEAD
-        message.FailureReason = result.IsTransientFailure
-            ? "WhatsApp is temporarily unavailable. Try again."
-            : "WhatsApp could not deliver this message.";
-=======
-        message.FailureReason = result.FailureReason;
-        var mapped = WhatsAppFailureMapper.Map(result.FailureCode, result.FailureReason);
+        var mapped = WhatsAppFailureMapper.Map(result.FailureCode, result.FailureReason, result.HttpStatusCode, null, null, result.IsTransientFailure, null);
+        message.FailureReason = mapped.Summary;
         message.FailureCategory = mapped.Category;
->>>>>>> origin/main
+        message.ProviderRequestId = result.ProviderRequestId;
     }
 }

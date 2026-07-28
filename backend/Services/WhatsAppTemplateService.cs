@@ -39,7 +39,7 @@ public sealed class WhatsAppTemplateService(
             IsActive = integration.IsActive,
             IsProductionEnabled = integration.IsProductionEnabled,
             Mode = integration.IsProductionEnabled ? "Production" : "Development",
-            HealthStatus = integration.LastErrorSummary is null ? "Unknown" : integration.WebhookConfigurationStatus,
+            HealthStatus = string.IsNullOrWhiteSpace(integration.WebhookConfigurationStatus) ? "Unknown" : integration.WebhookConfigurationStatus,
             LastHealthCheckAt = integration.LastHealthCheckAt,
             LastSuccessfulHealthCheckAt = integration.LastSuccessfulHealthCheckAt,
             LastTemplateSyncAt = integration.LastTemplateSyncAt,
@@ -109,6 +109,8 @@ public sealed class WhatsAppTemplateService(
 
         var provider = await whatsAppCloudClient.GetTemplatesAsync(new WhatsAppGetTemplatesRequest
         {
+            CompanyId = integration.CompanyId,
+            IntegrationId = integration.Id,
             AccessToken = credentials.AccessToken,
             GraphApiVersion = integration.GraphApiVersion,
             WhatsAppBusinessAccountId = integration.WhatsAppBusinessAccountId
@@ -374,6 +376,8 @@ public sealed class WhatsAppTemplateService(
 
         var sendResult = await whatsAppCloudClient.SendTemplateMessageAsync(new WhatsAppTemplateSendRequest
         {
+            CompanyId = integration.CompanyId,
+            IntegrationId = integration.Id,
             AccessToken = credentials.AccessToken,
             GraphApiVersion = integration.GraphApiVersion,
             PhoneNumberId = integration.PhoneNumberId,
@@ -387,6 +391,7 @@ public sealed class WhatsAppTemplateService(
         if (sendResult.Success)
         {
             message.ExternalMessageId = sendResult.ExternalMessageId;
+            message.ProviderRequestId = sendResult.ProviderRequestId;
             message.DeliveryStatus = ConversationMessageDeliveryStatus.Sent;
             message.FailedAt = null;
             message.FailureCode = null;
@@ -398,10 +403,10 @@ public sealed class WhatsAppTemplateService(
             message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
             message.FailedAt = DateTimeOffset.UtcNow;
             message.FailureCode = sendResult.FailureCode;
-            message.FailureCategory = sendResult.IsTransientFailure ? "Temporary provider issue" : "Unknown delivery failure";
-            message.FailureReason = sendResult.IsTransientFailure
-                ? "WhatsApp is temporarily unavailable. Try again."
-                : "WhatsApp could not deliver this message.";
+            var mapped = WhatsAppFailureMapper.Map(sendResult.FailureCode, sendResult.FailureReason, sendResult.HttpStatusCode, null, null, sendResult.IsTransientFailure, null);
+            message.FailureCategory = mapped.Category;
+            message.FailureReason = mapped.Summary;
+            message.ProviderRequestId = sendResult.ProviderRequestId;
         }
 
         await conversationRepository.SaveChangesAsync(cancellationToken);
@@ -768,6 +773,10 @@ public sealed class WhatsAppTemplateService(
 
     private static ConversationMessageResponse MapMessage(ConversationMessage message)
     {
+        var safeFailureSummary = message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed
+            ? WhatsAppFailureMapper.Map(message.FailureCode, message.FailureReason).Summary
+            : null;
+
         return new ConversationMessageResponse
         {
             Id = message.Id,
@@ -781,9 +790,13 @@ public sealed class WhatsAppTemplateService(
             DeliveredAt = message.DeliveredAt,
             ReadAt = message.ReadAt,
             FailedAt = message.FailedAt,
-            FailureCode = message.FailureCode,
-            FailureReason = message.FailureReason,
-            SafeFailureSummary = message.FailureReason,
+            SafeFailureSummary = safeFailureSummary,
+            RetryOfMessageId = message.RetryOfMessageId,
+            SendAttemptNumber = message.SendAttemptNumber,
+            CanRetry = message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed
+                && !message.IsInternal
+                && message.Provider == ConversationMessageProvider.WhatsAppCloud
+                && message.SenderType is ConversationSenderType.Host or ConversationSenderType.AI,
             IsTemplateMessage = message.IsTemplateMessage,
             WhatsAppTemplateId = message.WhatsAppTemplateId,
             TemplateName = message.TemplateName,

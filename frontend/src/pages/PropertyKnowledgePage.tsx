@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ApiError, HttpClient } from "../api/httpClient";
 import { HostLoginPanel } from "../components/host";
 import { HostConsoleNav } from "../components/host/HostConsoleNav";
 import { PropertyKnowledgeCard } from "../components/knowledge/PropertyKnowledgeCard";
@@ -19,6 +20,7 @@ import {
   type PropertyKnowledgeSummary,
   type UpdatePropertyKnowledgeRequest
 } from "../models/propertyKnowledge";
+import type { PagedResult } from "../models/chat";
 import "../styles/property-knowledge.css";
 
 interface PropertyKnowledgePageProps {
@@ -41,10 +43,86 @@ const blankDraft: PropertyKnowledgeFormDraft = {
   isActive: true
 };
 
+interface HostPropertySummary {
+  id: string;
+  name: string;
+}
+
 export function PropertyKnowledgePage({ propertyId }: PropertyKnowledgePageProps) {
   const auth = useHostAuth();
+  const [resolvedPropertyId, setResolvedPropertyId] = useState<string | null>(null);
+  const [isResolvingProperty, setIsResolvingProperty] = useState(false);
+  const [propertyResolutionError, setPropertyResolutionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (propertyId) {
+      setResolvedPropertyId(null);
+      setPropertyResolutionError(null);
+      setIsResolvingProperty(false);
+      return;
+    }
+
+    if (!auth.isAuthenticated || !auth.accessToken) {
+      setResolvedPropertyId(null);
+      setPropertyResolutionError(null);
+      setIsResolvingProperty(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let isActive = true;
+
+    async function resolveDefaultProperty() {
+      setIsResolvingProperty(true);
+      setPropertyResolutionError(null);
+
+      try {
+        const http = new HttpClient({
+          baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
+          getAccessToken: () => auth.accessToken
+        });
+
+        const page = await http.get<PagedResult<HostPropertySummary>>(
+          "/properties?pageNumber=1&pageSize=1",
+          { signal: controller.signal }
+        );
+
+        if (!isActive) {
+          return;
+        }
+
+        setResolvedPropertyId(page.items[0]?.id ?? null);
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+
+        if (error instanceof ApiError && error.status === 401) {
+          auth.logout();
+          return;
+        }
+
+        setResolvedPropertyId(null);
+        setPropertyResolutionError("Property unavailable");
+      } finally {
+        if (isActive) {
+          setIsResolvingProperty(false);
+        }
+      }
+    }
+
+    void resolveDefaultProperty();
+
+    return () => {
+      isActive = false;
+      controller.abort();
+    };
+  }, [auth.accessToken, auth.isAuthenticated, auth.logout, propertyId]);
+
+  const effectivePropertyId = propertyId ?? resolvedPropertyId;
+
   const knowledge = usePropertyKnowledge({
-    propertyId,
+    propertyId: effectivePropertyId,
     accessToken: auth.accessToken,
     onUnauthorized: auth.logout
   });
@@ -59,7 +137,7 @@ export function PropertyKnowledgePage({ propertyId }: PropertyKnowledgePageProps
   );
 
   const selectedPropertyName = knowledge.propertyName || selectedSummary?.propertyName || null;
-  const propertyKnowledgeHref = propertyId ? `/host/properties/${propertyId}/knowledge` : null;
+  const propertyKnowledgeHref = effectivePropertyId ? `/host/properties/${effectivePropertyId}/knowledge` : null;
 
   if (!auth.isAuthenticated) {
     return (
@@ -134,11 +212,11 @@ export function PropertyKnowledgePage({ propertyId }: PropertyKnowledgePageProps
           <div>
             <p className="sf-host-kicker">StayFlow Host Console</p>
             <h1>Property Knowledge</h1>
-            <p className="sf-knowledge-property-name">{selectedPropertyName || (propertyId ? "Loading property name..." : "Property unavailable")}</p>
+            <p className="sf-knowledge-property-name">{selectedPropertyName || (effectivePropertyId ? "Loading property name..." : isResolvingProperty ? "Resolving property..." : "Property unavailable")}</p>
           </div>
 
           <div className="sf-knowledge-header-actions">
-            <button type="button" onClick={() => setDialog({ mode: "create" })} disabled={!propertyId}>
+            <button type="button" onClick={() => setDialog({ mode: "create" })} disabled={!effectivePropertyId}>
               Create Knowledge
             </button>
             <button type="button" onClick={() => knowledge.refresh()} disabled={knowledge.isLoading || knowledge.isRefreshing}>
@@ -154,7 +232,11 @@ export function PropertyKnowledgePage({ propertyId }: PropertyKnowledgePageProps
           current="knowledge"
         />
 
-        {!propertyId ? <p className="sf-knowledge-help">Select a conversation with a property first.</p> : null}
+        {!effectivePropertyId ? (
+          <p className="sf-knowledge-help">
+            {propertyResolutionError ?? "Select a conversation with a property first."}
+          </p>
+        ) : null}
 
         {knowledge.error ? (
           <div className="sf-host-inline-error" role="alert">

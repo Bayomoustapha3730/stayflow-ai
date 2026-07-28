@@ -349,6 +349,171 @@ public sealed class ConversationServiceTests
     }
 
     [Fact]
+    public async Task AddAIMessageAsync_PersistsKnowledgeSources()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var articleOne = Guid.NewGuid();
+        var articleTwo = Guid.NewGuid();
+        var response = await fixture.Service.AddAIMessageAsync(conversation.Id, "Here is the answer.", new DTOs.AIOrchestration.AIOrchestrationResult
+        {
+            Outcome = DTOs.AIOrchestration.AIOrchestrationOutcome.Responded,
+            KnowledgeSources =
+            [
+                new DTOs.AIOrchestration.AIKnowledgeSourceReference { PropertyKnowledgeArticleId = articleOne, Rank = 2, IsPrimary = false, RelevanceReason = "Matches check-in question" },
+                new DTOs.AIOrchestration.AIKnowledgeSourceReference { PropertyKnowledgeArticleId = articleTwo, Rank = 1, IsPrimary = true, RelevanceReason = "Contains entry steps" },
+                new DTOs.AIOrchestration.AIKnowledgeSourceReference { PropertyKnowledgeArticleId = articleOne, Rank = 3, IsPrimary = false, RelevanceReason = "duplicate" }
+            ]
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(2, fixture.Repository.MessageKnowledgeSources.Count);
+
+        var first = fixture.Repository.MessageKnowledgeSources.OrderBy(item => item.Rank).First();
+        var second = fixture.Repository.MessageKnowledgeSources.OrderBy(item => item.Rank).Last();
+
+        Assert.Equal(articleTwo, first.PropertyKnowledgeArticleId);
+        Assert.True(first.IsPrimary);
+        Assert.Equal("Contains entry steps", first.RelevanceReason);
+
+        Assert.Equal(articleOne, second.PropertyKnowledgeArticleId);
+        Assert.False(second.IsPrimary);
+        Assert.Equal("Matches check-in question", second.RelevanceReason);
+    }
+
+    [Fact]
+    public async Task AddAIMessageAsync_WithoutKnowledgeSources_DoesNotPersistProvenance()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.AddAIMessageAsync(conversation.Id, "Fallback response.", new DTOs.AIOrchestration.AIOrchestrationResult
+        {
+            Outcome = DTOs.AIOrchestration.AIOrchestrationOutcome.Responded
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Empty(fixture.Repository.MessageKnowledgeSources);
+    }
+
+    [Fact]
+    public async Task AddGuestMessageFeedbackAsync_PersistsAndUpdatesFeedback()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var aiMessage = await fixture.Service.AddAIMessageAsync(conversation.Id, "AI response", new DTOs.AIOrchestration.AIOrchestrationResult
+        {
+            Outcome = DTOs.AIOrchestration.AIOrchestrationOutcome.Responded
+        }, CancellationToken.None);
+
+        Assert.True(aiMessage.Success);
+
+        var first = await fixture.Service.AddGuestMessageFeedbackAsync(conversation.Id, aiMessage.Data!.Id, new DTOs.Chat.AddChatMessageFeedbackRequest
+        {
+            GuestId = fixture.Guest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.Helpful,
+            Comment = "Clear answer"
+        }, CancellationToken.None);
+
+        Assert.True(first.Success);
+        Assert.Single(fixture.Repository.MessageFeedback);
+        Assert.Equal(ConversationMessageFeedbackValue.Helpful, fixture.Repository.MessageFeedback[0].FeedbackValue);
+
+        var second = await fixture.Service.AddGuestMessageFeedbackAsync(conversation.Id, aiMessage.Data.Id, new DTOs.Chat.AddChatMessageFeedbackRequest
+        {
+            GuestId = fixture.Guest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.NotHelpful,
+            Comment = "Need more detail"
+        }, CancellationToken.None);
+
+        Assert.True(second.Success);
+        Assert.Single(fixture.Repository.MessageFeedback);
+        Assert.Equal(ConversationMessageFeedbackValue.NotHelpful, fixture.Repository.MessageFeedback[0].FeedbackValue);
+        Assert.Equal("Need more detail", fixture.Repository.MessageFeedback[0].Comment);
+    }
+
+    [Fact]
+    public async Task AddGuestMessageFeedbackAsync_RejectsNonAiMessages()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var guestMessage = await fixture.Service.AddGuestMessageAsync(conversation.Id, new AddGuestMessageRequest
+        {
+            Content = "Hi"
+        }, CancellationToken.None);
+
+        var response = await fixture.Service.AddGuestMessageFeedbackAsync(conversation.Id, guestMessage.Data!.Id, new DTOs.Chat.AddChatMessageFeedbackRequest
+        {
+            GuestId = fixture.Guest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.Helpful
+        }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Feedback can only be submitted for AI responses.", response.Message);
+    }
+
+    [Fact]
+    public async Task GetFeedbackAnalyticsAsync_ReturnsCountsAndRate()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var aiMessage = await fixture.Service.AddAIMessageAsync(conversation.Id, "AI response", new DTOs.AIOrchestration.AIOrchestrationResult
+        {
+            Outcome = DTOs.AIOrchestration.AIOrchestrationOutcome.Responded
+        }, CancellationToken.None);
+
+        Assert.True(aiMessage.Success);
+
+        await fixture.Service.AddGuestMessageFeedbackAsync(conversation.Id, aiMessage.Data!.Id, new DTOs.Chat.AddChatMessageFeedbackRequest
+        {
+            GuestId = fixture.Guest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.Helpful
+        }, CancellationToken.None);
+
+        var secondGuest = new Guest
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            FirstName = "Second",
+            LastName = "Guest",
+            Email = "second@guest.local",
+            PreferredLanguage = "en",
+            CountryCode = "KE",
+            IsActive = true
+        };
+        fixture.Repository.Guests.Add(secondGuest);
+
+        fixture.Repository.MessageFeedback.Add(new ConversationMessageFeedback
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            ConversationId = conversation.Id,
+            ConversationMessageId = aiMessage.Data.Id,
+            GuestId = secondGuest.Id,
+            FeedbackValue = ConversationMessageFeedbackValue.NotHelpful,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        var analytics = await fixture.Service.GetFeedbackAnalyticsAsync(new ConversationFeedbackAnalyticsQuery(), CancellationToken.None);
+
+        Assert.True(analytics.Success);
+        Assert.Equal(2, analytics.Data!.TotalFeedbackCount);
+        Assert.Equal(1, analytics.Data.HelpfulCount);
+        Assert.Equal(1, analytics.Data.NotHelpfulCount);
+        Assert.Equal(0.5d, analytics.Data.HelpfulRate);
+    }
+
+    [Fact]
     public async Task CloseConversationAsync_BlocksNewMessages()
     {
         var fixture = new Fixture();
@@ -396,13 +561,48 @@ public sealed class ConversationServiceTests
         var fixture = new Fixture();
         var conversation = fixture.Repository.NewConversation(status: ConversationStatus.HumanManaged, humanTakeover: true);
         conversation.AssignedUserId = fixture.User.Id;
+        conversation.EscalationReason = "RequiresHumanReview";
         fixture.Repository.Conversations.Add(conversation);
 
         var response = await fixture.Service.ReturnToAIModeAsync(conversation.Id, CancellationToken.None);
 
         Assert.True(response.Success);
+        Assert.Equal(ConversationStatus.Open, conversation.Status);
         Assert.False(response.Data!.HumanTakeoverEnabled);
+        Assert.Null(response.Data.EscalationReason);
+        Assert.Null(conversation.EscalationReason);
         Assert.Equal(fixture.User.Id, conversation.AssignedUserId);
+    }
+
+    [Fact]
+    public async Task ReturnToAIModeAsync_AlreadyAiManagedIsIdempotent()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.Open, humanTakeover: false);
+        conversation.AssignedUserId = fixture.User.Id;
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.ReturnToAIModeAsync(conversation.Id, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal("Conversation is already managed by AI.", response.Message);
+        Assert.Equal(ConversationStatus.Open, response.Data!.Status);
+        Assert.False(response.Data.HumanTakeoverEnabled);
+        Assert.Equal(fixture.User.Id, conversation.AssignedUserId);
+    }
+
+    [Fact]
+    public async Task ReturnToAIModeAsync_DeletedConversationIsRejected()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.HumanManaged, humanTakeover: true);
+        conversation.IsDeleted = true;
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.ReturnToAIModeAsync(conversation.Id, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Conversation was not found.", response.Message);
     }
 
     [Fact]
@@ -517,6 +717,8 @@ public sealed class ConversationServiceTests
     {
         public List<Conversation> Conversations { get; } = [];
         public List<ConversationMessage> Messages { get; } = [];
+        public List<ConversationMessageKnowledgeSource> MessageKnowledgeSources { get; } = [];
+        public List<ConversationMessageFeedback> MessageFeedback { get; } = [];
         public List<Guest> Guests { get; } = [];
         public List<Property> Properties { get; } = [];
         public List<Reservation> Reservations { get; } = [];
@@ -718,6 +920,49 @@ public sealed class ConversationServiceTests
             return Task.CompletedTask;
         }
 
+        public Task AddMessageKnowledgeSourceAsync(ConversationMessageKnowledgeSource source, CancellationToken cancellationToken)
+        {
+            MessageKnowledgeSources.Add(source);
+            return Task.CompletedTask;
+        }
+
+        public Task<ConversationMessageFeedback?> GetMessageFeedbackAsync(Guid requestedCompanyId, Guid conversationId, Guid messageId, Guid guestId, CancellationToken cancellationToken)
+        {
+            var feedback = MessageFeedback.FirstOrDefault(item =>
+                item.CompanyId == requestedCompanyId
+                && item.ConversationId == conversationId
+                && item.ConversationMessageId == messageId
+                && item.GuestId == guestId);
+
+            return Task.FromResult(feedback);
+        }
+
+        public Task AddMessageFeedbackAsync(ConversationMessageFeedback feedback, CancellationToken cancellationToken)
+        {
+            MessageFeedback.Add(feedback);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyCollection<ConversationMessageFeedback>> ListMessageFeedbackAsync(Guid requestedCompanyId, DateTimeOffset sinceUtc, DateTimeOffset untilUtc, Guid? propertyId, CancellationToken cancellationToken)
+        {
+            var query = MessageFeedback
+                .Where(item => item.CompanyId == requestedCompanyId
+                    && item.CreatedAt >= sinceUtc
+                    && item.CreatedAt <= untilUtc)
+                .ToList();
+
+            if (propertyId is { } requestedPropertyId)
+            {
+                var conversationIds = Conversations
+                    .Where(item => item.CompanyId == requestedCompanyId && item.PropertyId == requestedPropertyId)
+                    .Select(item => item.Id)
+                    .ToHashSet();
+                query = query.Where(item => conversationIds.Contains(item.ConversationId)).ToList();
+            }
+
+            return Task.FromResult<IReadOnlyCollection<ConversationMessageFeedback>>(query);
+        }
+
         public Task AddReadStateAsync(ConversationParticipantReadState state, CancellationToken cancellationToken)
         {
             ReadStates.Add(state);
@@ -743,6 +988,12 @@ public sealed class ConversationServiceTests
             {
                 message.CreatedAt = now;
                 message.UpdatedAt = now;
+            }
+
+            foreach (var feedback in MessageFeedback.Where(feedback => feedback.CreatedAt == default))
+            {
+                feedback.CreatedAt = now;
+                feedback.UpdatedAt = now;
             }
 
             return Task.CompletedTask;

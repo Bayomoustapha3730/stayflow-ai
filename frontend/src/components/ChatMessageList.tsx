@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { ChatMessage } from "../models/chat";
+import { ConversationMessageFeedbackValue } from "../models/chat";
 import { ChatMessageBubble } from "./ChatMessageBubble";
 import { EmptyConversationState } from "./EmptyConversationState";
 import { TypingIndicator } from "./TypingIndicator";
@@ -11,6 +12,8 @@ interface ChatMessageListProps {
   isLoadingHistory: boolean;
   showAssistantTyping: boolean;
   realtimeState: "offline" | "connecting" | "online" | "reconnecting";
+  feedbackSubmittingMessageId?: string | null;
+  onSubmitFeedback?: (messageId: string, feedbackValue: ConversationMessageFeedbackValue) => Promise<void>;
 }
 
 export function ChatMessageList({
@@ -19,7 +22,9 @@ export function ChatMessageList({
   isSending,
   isLoadingHistory,
   showAssistantTyping,
-  realtimeState
+  realtimeState,
+  feedbackSubmittingMessageId,
+  onSubmitFeedback
 }: ChatMessageListProps) {
   const endRef = useRef<HTMLDivElement>(null);
 
@@ -37,7 +42,12 @@ export function ChatMessageList({
       ) : null}
       {messages.length === 0 ? <EmptyConversationState welcomeMessage={welcomeMessage} /> : null}
       {messages.map((message) => (
-        <ChatMessageBubble key={message.id} message={message} />
+        <ChatMessageBubble
+          key={message.id}
+          message={message}
+          onSubmitFeedback={onSubmitFeedback}
+          isSubmittingFeedback={feedbackSubmittingMessageId === message.id}
+        />
       ))}
       {isSending && showAssistantTyping ? <TypingIndicator /> : null}
       <div ref={endRef} />

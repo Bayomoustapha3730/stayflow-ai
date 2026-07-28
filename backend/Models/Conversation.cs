@@ -31,5 +31,7 @@ public sealed class Conversation : AuditableEntity
     public Reservation? Reservation { get; set; }
     public User? AssignedUser { get; set; }
     public ICollection<ConversationMessage> Messages { get; set; } = [];
+    public ICollection<ConversationMessageKnowledgeSource> MessageKnowledgeSources { get; set; } = [];
+    public ICollection<ConversationMessageFeedback> MessageFeedback { get; set; } = [];
     public ICollection<ServiceRequest> ServiceRequests { get; set; } = [];
 }

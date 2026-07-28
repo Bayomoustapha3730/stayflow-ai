@@ -129,6 +129,15 @@ public sealed class CopilotServiceTests
     }
 
     [Fact]
+    public void GetRetrievalDiagnostics_RequiresConversationsReadPermission()
+    {
+        var method = typeof(CopilotController).GetMethod(nameof(CopilotController.GetRetrievalDiagnostics));
+        var attribute = Assert.Single(method!.GetCustomAttributes(typeof(RequiresPermissionAttribute), inherit: false).Cast<RequiresPermissionAttribute>());
+
+        Assert.Equal("conversations.read", attribute.Permission);
+    }
+
+    [Fact]
     public void SuggestReply_RequiresConversationsReplyPermission()
     {
         var method = typeof(CopilotController).GetMethod(nameof(CopilotController.SuggestReply));
@@ -147,6 +156,26 @@ public sealed class CopilotServiceTests
 
         Assert.NotNull(typeof(ConversationCopilotSuggestionsResponse).GetProperty(nameof(ConversationCopilotSuggestionsResponse.Confidence)));
         Assert.NotNull(typeof(CopilotSuggestReplyResponse).GetProperty(nameof(CopilotSuggestReplyResponse.Confidence)));
+        Assert.NotNull(typeof(ConversationRetrievalDiagnosticsResponse).GetProperty(nameof(ConversationRetrievalDiagnosticsResponse.Diagnostics)));
+        Assert.NotNull(typeof(CopilotRetrievalDiagnosticsDto).GetProperty(nameof(CopilotRetrievalDiagnosticsDto.EvaluationMetadata)));
+    }
+
+    [Fact]
+    public async Task GetRetrievalDiagnosticsAsync_ReturnsSanitizedSnapshot()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.GetRetrievalDiagnosticsAsync(conversation.Id, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        Assert.Equal(conversation.Id, response.Data!.ConversationId);
+        Assert.NotNull(response.Data.Diagnostics);
+        Assert.True(response.Data.Diagnostics.IntentConfidenceScore >= 0);
+        Assert.True(response.Data.Diagnostics.CandidateCount >= response.Data.Diagnostics.SelectedCount);
+        Assert.NotNull(response.Data.Diagnostics.EvaluationMetadata);
     }
 
     private sealed class Fixture
@@ -248,7 +277,28 @@ public sealed class CopilotServiceTests
                 FallbackUsed = false,
                 CompletedStages = [AIReplyOrchestrationStage.ResultAssembled],
                 DurationMilliseconds = 4,
-                RequiresHumanReview = false
+                RequiresHumanReview = false,
+                RetrievalDiagnostics = new RetrievalDiagnosticsSnapshot
+                {
+                    DetectedIntent = "WiFi",
+                    IntentAmbiguous = false,
+                    IntentConfidenceScore = 92,
+                    SecondaryIntentCount = 0,
+                    CandidateCount = 3,
+                    SelectedCount = 2,
+                    ConfidenceLevel = Services.AI.Retrieval.KnowledgeConfidenceLevel.High,
+                    ReasonCode = Services.AI.Retrieval.KnowledgeRetrievalReasonCode.ExactIntentAndCategoryMatch,
+                    ClarificationRequired = false,
+                    EscalationRecommended = false,
+                    SelectedCategories = ["WiFi"],
+                    ClarificationChoices = [],
+                    WarningCodes = [],
+                    EvaluationMetadata = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["CandidateCount"] = "3",
+                        ["SelectedCount"] = "2"
+                    }
+                }
             });
         }
     }

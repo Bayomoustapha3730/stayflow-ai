@@ -2,9 +2,9 @@
 
 ## Executive Summary
 
-The StayFlow guest chat widget is a React and TypeScript frontend for the authenticated guest conversation API. Sprint 3 provides a polished local-development widget that can open a protected conversation, send guest messages, load conversation history, request host escalation, and end a conversation.
+The StayFlow guest chat widget is a React and TypeScript frontend for the authenticated guest conversation API. It supports protected conversations, guest and host realtime updates through SignalR, host escalation, and conversation lifecycle actions.
 
-This sprint intentionally does not implement anonymous public guest access, SignalR, host dashboard functionality, WhatsApp UI, or guest token issuance.
+Anonymous public guest token flows remain out of scope for this development setup.
 
 ## Architecture
 
@@ -72,10 +72,37 @@ docker compose up postgres api frontend
 ## Environment Variables
 
 - `VITE_STAYFLOW_API_URL` sets the backend base URL.
+- `VITE_SIGNALR_TRANSPORT` controls SignalR transport selection: `auto`, `websockets`, `serverSentEvents`, or `longPolling`.
 - `VITE_DEMO_EMAIL` optionally pre-fills the local login email.
 - `VITE_DEMO_GUEST_ID` sets the demo guest used by the widget.
 - `VITE_DEMO_RESERVATION_ID` optionally binds the demo request to a reservation.
 - `VITE_DEMO_PROPERTY_ID` optionally binds the demo request to a property.
+
+`VITE_SIGNALR_TRANSPORT=auto` is the default and should be used for normal environments. For proxy-constrained development environments (for example GitHub Codespaces), use `VITE_SIGNALR_TRANSPORT=longPolling`.
+
+## SignalR Lifecycle
+
+- The frontend uses a shared connection manager in `frontend/src/realtime/conversationConnection.ts`.
+- Only one startup attempt runs at a time and concurrent callers reuse the same promise.
+- Cleanup coordinates with startup to avoid stop/start races during React StrictMode mount, cleanup, and remount.
+- The conversation hook joins groups only after the connection is online.
+- Conversation group membership is synchronized when conversation selection changes.
+- On reconnect, the client rejoins the active conversation group.
+
+## SignalR Diagnostics
+
+Use browser dev tools when realtime does not connect:
+
+1. Verify `POST /hubs/conversations/negotiate` succeeds.
+2. Confirm the negotiate response includes `connectionId`, `connectionToken`, and transports.
+3. In `auto` mode, ensure at least one transport can connect.
+4. If WebSockets fail in a proxy path, retry with `VITE_SIGNALR_TRANSPORT=longPolling`.
+5. Keep auth enabled and verify the `Authorization` header is present.
+
+Expected vs unexpected errors:
+
+- Expected during cleanup/unmount: connection stopped during negotiation, invocation canceled by teardown.
+- Unexpected and actionable: `401`, CORS errors, missing hub route, transport exhaustion.
 
 Never commit demo passwords, JWTs, refresh tokens, or provider secrets.
 

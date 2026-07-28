@@ -38,4 +38,6 @@ public sealed class ConversationMessage : AuditableEntity
     public Conversation Conversation { get; set; } = null!;
     public ConversationMessage? RetryOfMessage { get; set; }
     public ICollection<ConversationMessage> RetryAttempts { get; set; } = [];
+    public ICollection<ConversationMessageKnowledgeSource> KnowledgeSources { get; set; } = [];
+    public ICollection<ConversationMessageFeedback> Feedback { get; set; } = [];
 }

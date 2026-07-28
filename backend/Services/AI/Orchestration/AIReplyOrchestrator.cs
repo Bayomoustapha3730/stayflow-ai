@@ -6,6 +6,7 @@ using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.Services.AI.Context;
 using StayFlow.Api.Services.AI.Grounding;
 using StayFlow.Api.Services.AI.Intent;
+using StayFlow.Api.Services.AI.Memory;
 using StayFlow.Api.Services.AI.Retrieval;
 using StayFlow.Api.Services.AI.Safety;
 using StayFlow.Api.Services.AI.Validation;
@@ -23,7 +24,12 @@ public sealed class AIReplyOrchestrator(
     IContextConfidenceEvaluator confidenceEvaluator,
     IAIReplyFallbackProvider fallbackProvider,
     IOptions<AIReplyOrchestratorOptions> options,
-    ILogger<AIReplyOrchestrator> logger) : IAIReplyOrchestrator
+    ILogger<AIReplyOrchestrator> logger,
+    IConversationIntentRecognizer? conversationIntentRecognizer = null,
+    IConversationMemoryService? conversationMemoryService = null,
+    IPropertyKnowledgeRetriever? propertyKnowledgeRetriever = null,
+    IConciergeResponseGenerator? conciergeResponseGenerator = null,
+    IOptions<ConciergeIntelligenceOptions>? conciergeOptions = null) : IAIReplyOrchestrator
 {
     public async Task<AIReplyOrchestrationResult?> OrchestrateAsync(
         Guid companyId,
@@ -47,17 +53,15 @@ public sealed class AIReplyOrchestrator(
         }
 
         logger.LogInformation(
-            "AI reply trace: context built. ConversationId={ConversationId} ApprovedKnowledgeCount={ApprovedKnowledgeCount} Knowledge={Knowledge}",
+            "AI reply trace: context built. ConversationId={ConversationId} CompanyId={CompanyId} PropertyId={PropertyId} ReservationId={ReservationId} ApprovedKnowledgeCount={ApprovedKnowledgeCount} HumanTakeoverEnabled={HumanTakeoverEnabled} RequiresHostAttention={RequiresHostAttention} WarningCount={WarningCount}",
             request.ConversationId,
+            context.TenantId,
+            context.PropertyId,
+            context.ReservationId,
             context.ApprovedKnowledgeItems.Count,
-            context.ApprovedKnowledgeItems
-                .Select(item => new
-                {
-                    item.Title,
-                    Category = item.Category.ToString(),
-                    ContentPreview = item.Content.Length <= 50 ? item.Content : item.Content[..50]
-                })
-                .ToArray());
+            context.HumanTakeoverEnabled,
+            context.RequiresHostAttention,
+            context.Warnings.Count);
 
         completedStages.Add(AIReplyOrchestrationStage.ContextLoaded);
 
@@ -66,19 +70,44 @@ public sealed class AIReplyOrchestrator(
             item.ToString(),
             "info")));
 
-        var intent = intentDetector.Detect(context);
-        completedStages.Add(AIReplyOrchestrationStage.IntentDetected);
-
         var latestGuestMessage = context.VisibleMessages
             .LastOrDefault(message => string.Equals(message.SenderType, "Guest", StringComparison.OrdinalIgnoreCase))
             ?.Text ?? string.Empty;
 
-        var ranking = knowledgeRanker.Rank(
+        var intelligence = conciergeOptions?.Value ?? new ConciergeIntelligenceOptions();
+        var v2IntentRecognizer = conversationIntentRecognizer ?? new ConversationIntentRecognizer();
+        var memoryService = conversationMemoryService ?? new ConversationMemoryService(v2IntentRecognizer);
+        var memory = memoryService.BuildContext(
             context,
-            intent,
+            intelligence.RecentMessageCount,
+            intelligence.MemoryCharacterBudget);
+
+        var intentResult = v2IntentRecognizer.Recognize(
             latestGuestMessage,
-            Math.Clamp(orchestratorOptions.MaximumSelectedKnowledgeItems, 1, 8),
-            Math.Max(500, orchestratorOptions.MaximumSelectedKnowledgeCharacters));
+            memory.ActiveTopic is null ? null : [memory.ActiveTopic],
+            intelligence.MaximumIntents);
+        var intent = intentResult.ToGuestIntentResult();
+        completedStages.Add(AIReplyOrchestrationStage.IntentDetected);
+
+        var ranking = propertyKnowledgeRetriever is null
+            ? knowledgeRanker.Rank(
+                context,
+                intent,
+                latestGuestMessage,
+                Math.Clamp(orchestratorOptions.MaximumSelectedKnowledgeItems, 1, 8),
+                Math.Max(500, orchestratorOptions.MaximumSelectedKnowledgeCharacters))
+            : propertyKnowledgeRetriever.Retrieve(
+                context,
+                new KnowledgeRetrievalRequest(
+                    companyId,
+                    context.PropertyId,
+                    request.ConversationId,
+                    latestGuestMessage,
+                    intentResult,
+                    memory,
+                    intelligence.MaximumCandidates,
+                    intelligence.MaximumSelectedItems,
+                    intelligence.ContextCharacterBudget));
 
         completedStages.Add(AIReplyOrchestrationStage.KnowledgeRanked);
 
@@ -88,26 +117,23 @@ public sealed class AIReplyOrchestrator(
         }
 
         logger.LogInformation(
-            "AI reply trace: ranking completed. SelectedCount={SelectedCount} RankedTop={RankedTop} Selected={Selected}",
+            "AI reply trace: ranking completed. SelectedCount={SelectedCount} RankedCandidateCount={RankedCandidateCount} RejectedCount={RejectedCount} Ambiguous={Ambiguous}",
             ranking.SelectedItems.Count,
-            ranking.RankedItems
-                .Take(5)
-                .Select(item => new
-                {
-                    item.Item.Title,
-                    Category = item.Item.Category.ToString(),
-                    item.Score,
-                    ContentPreview = item.Item.Content.Length <= 50 ? item.Item.Content : item.Item.Content[..50]
-                })
-                .ToArray(),
-            ranking.SelectedItems
-                .Select(item => new
-                {
-                    item.Title,
-                    Category = item.Category.ToString(),
-                    ContentPreview = item.Content.Length <= 50 ? item.Content : item.Content[..50]
-                })
-                .ToArray());
+            ranking.Candidates.Count,
+            Math.Max(0, ranking.Candidates.Count - ranking.SelectedItems.Count),
+            ranking.RequiresClarification);
+
+        logger.LogInformation(
+            "Knowledge retrieval completed. ConversationId={ConversationId} PropertyId={PropertyId} Intent={Intent} SecondaryIntentCount={SecondaryIntentCount} CandidateCount={CandidateCount} SelectedCount={SelectedCount} ConfidenceLevel={ConfidenceLevel} TopCategory={TopCategory} ReasonCode={ReasonCode}",
+            request.ConversationId,
+            context.PropertyId,
+            intent.Intent,
+            intentResult.SecondaryIntents.Count,
+            ranking.Candidates.Count,
+            ranking.SelectedItems.Count,
+            ranking.ConfidenceLevel,
+            ranking.SelectedItems.FirstOrDefault()?.Category.ToString() ?? "None",
+            ranking.ReasonCode);
 
         var contextConfidence = confidenceEvaluator.Evaluate(context);
         completedStages.Add(AIReplyOrchestrationStage.ConfidenceEvaluated);
@@ -126,21 +152,37 @@ public sealed class AIReplyOrchestrator(
         var operationMaxChars = request.Operation == AIReplyOperation.GeneratedHostReply ? 1500 : 700;
 
         var selectedKnowledge = ranking.SelectedItems
-            .Select(MapProviderKnowledge)
+            .Select(candidate => MapProviderKnowledge(candidate.Item))
             .ToList();
 
+        if (conciergeResponseGenerator is not null
+            && request.Operation != AIReplyOperation.SuggestedHostReplies
+            && !string.IsNullOrWhiteSpace(latestGuestMessage))
+        {
+            var generated = conciergeResponseGenerator.Generate(new ConciergeResponseRequest(
+                latestGuestMessage,
+                intentResult,
+                ranking,
+                memory,
+                context.PropertyName,
+                context.ConfirmationNumber,
+                ParseTone(request.RequestedTone, intelligence.DefaultTone),
+                "en",
+                context.HumanTakeoverEnabled));
+
+            output = generated.Text;
+            conflictRequiresReview = generated.RequiresEscalation;
+            if (generated.RequiresClarification)
+            {
+                warnings.Add(new AIReplyOrchestrationWarning("Clarification", "Clarification was requested by concierge response generator.", "info"));
+            }
+        }
+
         logger.LogInformation(
-            "AI reply trace: orchestrator input. DetectedIntent={DetectedIntent} IntentConfidence={IntentConfidence} SelectedKnowledge={SelectedKnowledge}",
+            "AI reply trace: orchestrator input. DetectedIntent={DetectedIntent} IntentConfidence={IntentConfidence} SelectedKnowledgeCount={SelectedKnowledgeCount}",
             intent.Intent,
             intent.ConfidenceScore,
-            selectedKnowledge
-                .Select(item => new
-                {
-                    item.Title,
-                    item.Category,
-                    ContentPreview = item.Content.Length <= 50 ? item.Content : item.Content[..50]
-                })
-                .ToArray());
+            selectedKnowledge.Count);
 
         if (intent.Intent == GuestIntent.WiFi && selectedKnowledge.Count > 0)
         {
@@ -165,14 +207,37 @@ public sealed class AIReplyOrchestrator(
             }
         }
 
+        var ambiguousAccessClarification = intentResult.IsAmbiguous && IsAccessClarificationRequest(latestGuestMessage);
+
         if (!conflictRequiresReview
+            && ((ranking.RequiresClarification && ShouldAskClarification(intentResult)) || ambiguousAccessClarification)
+            && request.Operation != AIReplyOperation.SuggestedHostReplies
+            && intent.Intent != GuestIntent.Emergency
+            && intent.Intent != GuestIntent.PetPolicy)
+        {
+            output = BuildClarificationPrompt(ranking.ClarificationChoices, latestGuestMessage);
+        }
+
+        if (!conflictRequiresReview
+            && string.IsNullOrWhiteSpace(output)
+            && ranking.SelectedItems.Count == 0
+            && intent.Intent != GuestIntent.Emergency
+            && request.Operation != AIReplyOperation.SuggestedHostReplies)
+        {
+            output = BuildKnowledgeNotFoundResponse(intent.Intent, latestGuestMessage);
+        }
+
+        if (!conflictRequiresReview
+            && string.IsNullOrWhiteSpace(output)
             && (!string.IsNullOrWhiteSpace(latestGuestMessage) || request.Operation == AIReplyOperation.FutureGuestReply))
         {
             var prompt = promptBuilder.BuildReply(new AIReplyPromptBuildRequest
             {
                 ConversationContext = context,
                 Intent = intent,
-                SelectedKnowledgeItems = ranking.SelectedItems,
+                SelectedKnowledgeItems = ranking.SelectedItems.Select(candidate => candidate.Item).ToList(),
+                RetrievalConfidenceLevel = ranking.ConfidenceLevel,
+                RetrievalReasonCode = ranking.ReasonCode.ToString(),
                 Operation = request.Operation,
                 RequestedTone = request.RequestedTone,
                 HostInstruction = request.HostInstruction,
@@ -182,19 +247,10 @@ public sealed class AIReplyOrchestrator(
 
             completedStages.Add(AIReplyOrchestrationStage.PromptBuilt);
 
-            var promptUser = prompt.RenderedMessages.FirstOrDefault(message => string.Equals(message.Role, "user", StringComparison.OrdinalIgnoreCase))?.Content ?? string.Empty;
             logger.LogInformation(
-                "AI reply trace: prompt built. ContainsSelectedKnowledge={ContainsSelectedKnowledge}",
-                ranking.SelectedItems
-                    .Select(item => new
-                    {
-                        item.Title,
-                        Category = item.Category.ToString(),
-                        HasTitle = promptUser.Contains($"Title: {item.Title}", StringComparison.Ordinal),
-                        HasCategory = promptUser.Contains($"Category: {item.Category}", StringComparison.Ordinal),
-                        HasContent = promptUser.Contains(item.Content, StringComparison.Ordinal)
-                    })
-                    .ToArray());
+                "AI reply trace: prompt built. SelectedKnowledgeCount={SelectedKnowledgeCount} PromptMessageCount={PromptMessageCount}",
+                ranking.SelectedItems.Count,
+                prompt.RenderedMessages.Count);
 
             providerResult = await InvokeProviderWithTimeoutAsync(
                 prompt,
@@ -219,12 +275,10 @@ public sealed class AIReplyOrchestrator(
             }
 
             logger.LogInformation(
-                "AI reply trace: provider response. Outcome={Outcome} Provider={Provider} ResponsePreview={ResponsePreview}",
+                "AI reply trace: provider response. Outcome={Outcome} Provider={Provider} FailureCategory={FailureCategory}",
                 providerResult.Outcome,
                 providerResult.ProviderName,
-                providerResult.ResponseText is null
-                    ? null
-                    : (providerResult.ResponseText.Length <= 200 ? providerResult.ResponseText : providerResult.ResponseText[..200]));
+                providerResult.FailureCategory);
         }
 
         var validation = outputValidator.Validate(
@@ -238,13 +292,10 @@ public sealed class AIReplyOrchestrator(
         completedStages.Add(AIReplyOrchestrationStage.OutputValidated);
 
         logger.LogInformation(
-            "AI reply trace: validator output. IsValid={IsValid} Errors={Errors} Warnings={WarningCodes} NormalizedOutputPreview={NormalizedOutputPreview}",
+            "AI reply trace: validator output. IsValid={IsValid} ErrorCount={ErrorCount} WarningCount={WarningCount}",
             validation.IsValid,
-            validation.Errors.ToArray(),
-            validation.Warnings.Select(warning => warning.Code).ToArray(),
-            validation.NormalizedOutput is null
-                ? null
-                : (validation.NormalizedOutput.Length <= 200 ? validation.NormalizedOutput : validation.NormalizedOutput[..200]));
+            validation.Errors.Count,
+            validation.Warnings.Count);
 
         warnings.AddRange(validation.Warnings);
 
@@ -262,7 +313,7 @@ public sealed class AIReplyOrchestrator(
             output,
             suggestions,
             context,
-            ranking.SelectedItems,
+            ranking.SelectedItems.Select(candidate => candidate.Item).ToList(),
             intent,
             contextConfidence.Score,
             fallbackUsed);
@@ -272,6 +323,8 @@ public sealed class AIReplyOrchestrator(
 
         var providerFailed = conflictRequiresReview
             ? false
+            : !string.IsNullOrWhiteSpace(output)
+                ? false
             : providerResult is null
             || providerResult.Outcome != AIProviderOutcome.Success
             || (request.Operation == AIReplyOperation.SuggestedHostReplies ? suggestions.Count == 0 : string.IsNullOrWhiteSpace(output));
@@ -279,7 +332,8 @@ public sealed class AIReplyOrchestrator(
         var safetyBlocked = safety.BlockedReasons.Count > 0;
         var contextInsufficient = conflictRequiresReview
             ? false
-            : string.IsNullOrWhiteSpace(latestGuestMessage) || ranking.SelectedItems.Count == 0;
+            : string.IsNullOrWhiteSpace(latestGuestMessage)
+                || (string.IsNullOrWhiteSpace(output) && ranking.SelectedItems.Count == 0 && !ranking.RequiresClarification);
 
         if (request.Operation == AIReplyOperation.FutureGuestReply)
         {
@@ -319,24 +373,24 @@ public sealed class AIReplyOrchestrator(
             output,
             suggestions,
             context,
-            ranking.SelectedItems,
+            ranking.SelectedItems.Select(candidate => candidate.Item).ToList(),
             intent,
             contextConfidence.Score,
             fallbackUsed);
 
         warnings.AddRange(safetyAfterFallback.Warnings);
 
-        var sourceIds = new HashSet<string>(ranking.SelectedItems.Select(item => item.SourceId), StringComparer.OrdinalIgnoreCase);
+        var sourceIds = new HashSet<string>(ranking.SelectedItems.Select(item => item.ArticleId), StringComparer.OrdinalIgnoreCase);
         var sources = context.Sources
             .Where(source => source.SourceType != ConversationContextSourceType.PropertyKnowledge || (source.SourceId is not null && sourceIds.Contains(source.SourceId)))
             .ToList();
 
         completedStages.Add(AIReplyOrchestrationStage.SourcesAssembled);
 
-        var confidence = contextConfidence.Score;
-        if (intent.Ambiguous)
+        var confidence = (int)Math.Round((contextConfidence.Score * 0.45) + (ranking.Confidence * 0.55));
+        if (intent.Ambiguous || ranking.RequiresClarification)
         {
-            confidence = Math.Max(0, confidence - 8);
+            confidence = Math.Max(0, confidence - 10);
         }
 
         if (fallbackUsed)
@@ -358,7 +412,7 @@ public sealed class AIReplyOrchestrator(
         stopwatch.Stop();
 
         logger.LogInformation(
-            "AI reply orchestration completed. Operation={Operation} ConversationId={ConversationId} Provider={Provider} DurationMs={DurationMs} FallbackUsed={FallbackUsed} SourceCount={SourceCount} WarningCount={WarningCount} FinalReplyPreview={FinalReplyPreview}",
+            "AI reply orchestration completed. Operation={Operation} ConversationId={ConversationId} Provider={Provider} DurationMs={DurationMs} FallbackUsed={FallbackUsed} SourceCount={SourceCount} WarningCount={WarningCount} RequiresHumanReview={RequiresHumanReview}",
             request.Operation,
             request.ConversationId,
             providerResult?.ProviderName ?? "fallback",
@@ -366,9 +420,9 @@ public sealed class AIReplyOrchestrator(
             fallbackUsed,
             sources.Count,
             warnings.Count,
-            request.Operation == AIReplyOperation.SuggestedHostReplies
-                ? (suggestions.FirstOrDefault()?.Length <= 200 ? suggestions.FirstOrDefault() : suggestions.FirstOrDefault()?[..200])
-                : (output.Length <= 200 ? output : output[..200]));
+            conflictRequiresReview
+                || safetyAfterFallback.RequiresHumanReview
+                || request.Operation == AIReplyOperation.FutureGuestReply);
 
         return new AIReplyOrchestrationResult
         {
@@ -390,8 +444,183 @@ public sealed class AIReplyOrchestrator(
             DurationMilliseconds = stopwatch.ElapsedMilliseconds,
             RequiresHumanReview = conflictRequiresReview
                 || safetyAfterFallback.RequiresHumanReview
-                || request.Operation == AIReplyOperation.FutureGuestReply
+                || request.Operation == AIReplyOperation.FutureGuestReply,
+            RetrievalDiagnostics = new RetrievalDiagnosticsSnapshot
+            {
+                DetectedIntent = intent.Intent.ToString(),
+                IntentAmbiguous = intentResult.IsAmbiguous,
+                IntentConfidenceScore = (int)Math.Round(intentResult.Confidence * 100),
+                SecondaryIntentCount = intentResult.SecondaryIntents.Count,
+                CandidateCount = ranking.Candidates.Count,
+                SelectedCount = ranking.SelectedItems.Count,
+                ConfidenceLevel = ranking.ConfidenceLevel,
+                ReasonCode = ranking.ReasonCode,
+                ClarificationRequired = ranking.RequiresClarification,
+                EscalationRecommended = ranking.EscalationRecommended,
+                SelectedCategories = ranking.SelectedItems
+                    .Select(item => item.Category.ToString())
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray(),
+                ClarificationChoices = ranking.ClarificationChoices,
+                WarningCodes = warnings
+                    .Select(item => item.Code)
+                    .Where(code => !string.IsNullOrWhiteSpace(code))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray(),
+                EvaluationMetadata = ranking.EvaluationMetadata
+            }
         };
+    }
+
+    private static ConciergeTone ParseTone(string? requestedTone, string defaultTone)
+    {
+        var tone = string.IsNullOrWhiteSpace(requestedTone) ? defaultTone : requestedTone;
+        return tone.Trim().ToLowerInvariant() switch
+        {
+            "professional" => ConciergeTone.Professional,
+            "concise" => ConciergeTone.Concise,
+            _ => ConciergeTone.Warm
+        };
+    }
+
+    private static string BuildClarificationPrompt(IReadOnlyCollection<string> clarificationChoices, string latestGuestMessage)
+    {
+        if (IsAccessClarificationRequest(latestGuestMessage))
+        {
+            return "Are you asking about check-in time, property entry, or Wi-Fi access?";
+        }
+
+        var choices = clarificationChoices
+            .Select(MapGuestFacingClarificationChoice)
+            .Where(choice => !string.IsNullOrWhiteSpace(choice))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(3)
+            .ToArray();
+
+        if (choices.Length == 0)
+        {
+            return "Could you clarify what you need help with so I can provide the right details?";
+        }
+
+        if (choices.Length == 1)
+        {
+            return $"Could you clarify whether you are asking about {choices[0]}?";
+        }
+
+        if (choices.Length == 2)
+        {
+            return $"Are you asking about {choices[0]} or {choices[1]}?";
+        }
+
+        return $"Are you asking about {choices[0]}, {choices[1]}, or {choices[2]}?";
+    }
+
+    private static bool ShouldAskClarification(ConversationIntentResult intentResult)
+    {
+        if (intentResult.AllIntents().Count > 1 && !intentResult.IsAmbiguous)
+        {
+            return false;
+        }
+
+        return intentResult.IsAmbiguous || intentResult.Confidence < 0.70;
+    }
+
+    private static bool IsAccessClarificationRequest(string latestGuestMessage)
+    {
+        var normalized = latestGuestMessage.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        return normalized.Contains("access", StringComparison.Ordinal)
+            || normalized.Contains("enter", StringComparison.Ordinal)
+            || normalized.Contains("entry", StringComparison.Ordinal)
+            || normalized.Contains("get in", StringComparison.Ordinal)
+            || normalized.Contains("getting in", StringComparison.Ordinal)
+            || normalized.Contains("inside", StringComparison.Ordinal)
+            || normalized.Contains("unlock", StringComparison.Ordinal)
+            || normalized.Contains("building", StringComparison.Ordinal);
+    }
+
+    private static string BuildKnowledgeNotFoundResponse(GuestIntent intent, string latestGuestMessage)
+    {
+        if (intent == GuestIntent.PetPolicy)
+        {
+            return "I couldn't find a pet policy for this property. I can notify the host to confirm whether pets are allowed.";
+        }
+
+        var normalized = latestGuestMessage.Trim().ToLowerInvariant();
+        if (normalized.Contains("curtain", StringComparison.Ordinal) && normalized.Contains("color", StringComparison.Ordinal))
+        {
+            return "I don't have information about the curtain color. I can ask the host if you'd like.";
+        }
+
+        return "I could not find approved property information for that request. I can help contact the host so they can assist you directly.";
+    }
+
+    private static string MapGuestFacingClarificationChoice(string rawChoice)
+    {
+        var normalized = rawChoice.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return string.Empty;
+        }
+
+        if (normalized.Contains("check-in", StringComparison.Ordinal)
+            || normalized.Contains("checkin", StringComparison.Ordinal)
+            || normalized.Contains("arrival", StringComparison.Ordinal))
+        {
+            return "check-in time";
+        }
+
+        if (normalized.Contains("propertyaccess", StringComparison.Ordinal)
+            || normalized.Contains("access code", StringComparison.Ordinal)
+            || normalized.Contains("door", StringComparison.Ordinal)
+            || normalized.Contains("entry", StringComparison.Ordinal)
+            || normalized.Contains("property entry", StringComparison.Ordinal))
+        {
+            return "property entry";
+        }
+
+        if (normalized.Contains("wifi", StringComparison.Ordinal)
+            || normalized.Contains("wi-fi", StringComparison.Ordinal)
+            || normalized.Contains("wireless", StringComparison.Ordinal))
+        {
+            return "Wi-Fi access";
+        }
+
+        if (normalized.Contains("parking", StringComparison.Ordinal))
+        {
+            return "parking";
+        }
+
+        if (normalized.Contains("checkout", StringComparison.Ordinal)
+            || normalized.Contains("check-out", StringComparison.Ordinal))
+        {
+            return "checkout details";
+        }
+
+        if (normalized.Contains("pet", StringComparison.Ordinal)
+            || normalized.Contains("animal", StringComparison.Ordinal))
+        {
+            return "pet policy";
+        }
+
+        if (normalized.Contains("house", StringComparison.Ordinal)
+            || normalized.Contains("rule", StringComparison.Ordinal))
+        {
+            return "house rules";
+        }
+
+        if (normalized.Contains("local", StringComparison.Ordinal)
+            || normalized.Contains("restaurant", StringComparison.Ordinal)
+            || normalized.Contains("nearby", StringComparison.Ordinal))
+        {
+            return "local recommendations";
+        }
+
+        return "your request";
     }
 
     private static AIProviderKnowledgeItem MapProviderKnowledge(ConversationContextKnowledgeItem item)
@@ -459,18 +688,10 @@ public sealed class AIReplyOrchestrator(
 
             var mappedCategories = MapCategories(detectedIntent);
             logger.LogInformation(
-                "AI reply trace: provider request. DetectedIntent={DetectedIntent} Categories={Categories} SelectedKnowledgeCount={SelectedKnowledgeCount} SelectedKnowledge={SelectedKnowledge} PromptMessageCount={PromptMessageCount}",
+                "AI reply trace: provider request. DetectedIntent={DetectedIntent} Categories={Categories} SelectedKnowledgeCount={SelectedKnowledgeCount} PromptMessageCount={PromptMessageCount}",
                 detectedIntent,
                 mappedCategories.Select(category => category.ToString()).ToArray(),
                 selectedKnowledge.Count,
-                selectedKnowledge
-                    .Select(item => new
-                    {
-                        item.Title,
-                        item.Category,
-                        ContentPreview = item.Content.Length <= 50 ? item.Content : item.Content[..50]
-                    })
-                    .ToArray(),
                 prompt.RenderedMessages.Count);
 
             return await aiProvider.GenerateAsync(new AIProviderRequest
@@ -525,8 +746,13 @@ public sealed class AIReplyOrchestrator(
             "checkin" or "earlycheckin" or "latearrival" => [QuestionContextCategory.CheckIn],
             "checkout" => [QuestionContextCategory.CheckOut],
             "parking" => [QuestionContextCategory.Parking],
-            "houserules" or "noise" => [QuestionContextCategory.HouseRules],
+            "houserules" or "noise" or "petpolicy" => [QuestionContextCategory.HouseRules],
+            "localrecommendations" => [QuestionContextCategory.Restaurant],
             "amenities" => [QuestionContextCategory.Amenities],
+            "access" or "propertyaccess" => [QuestionContextCategory.PropertyAccess],
+            "reservation" => [QuestionContextCategory.CheckIn],
+            "payment" or "hostcontact" => [QuestionContextCategory.General],
+            "generalproperty" => [QuestionContextCategory.General],
             "laundry" => [QuestionContextCategory.Laundry],
             "emergency" or "maintenance" => [QuestionContextCategory.Emergency],
             _ => [QuestionContextCategory.General]

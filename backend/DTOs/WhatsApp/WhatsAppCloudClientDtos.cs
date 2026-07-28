@@ -2,6 +2,8 @@ namespace StayFlow.Api.DTOs.WhatsApp;
 
 public sealed class WhatsAppSendTextMessageRequest
 {
+    public Guid CompanyId { get; init; }
+    public Guid IntegrationId { get; init; }
     public string AccessToken { get; init; } = string.Empty;
     public string GraphApiVersion { get; init; } = string.Empty;
     public string PhoneNumberId { get; init; } = string.Empty;
@@ -12,6 +14,8 @@ public sealed class WhatsAppSendTextMessageRequest
 
 public sealed class WhatsAppTemplateSendRequest
 {
+    public Guid CompanyId { get; init; }
+    public Guid IntegrationId { get; init; }
     public string AccessToken { get; init; } = string.Empty;
     public string GraphApiVersion { get; init; } = string.Empty;
     public string PhoneNumberId { get; init; } = string.Empty;
@@ -47,6 +51,8 @@ public sealed class WhatsAppGetTemplatesResult
 
 public sealed class WhatsAppGetTemplatesRequest
 {
+    public Guid CompanyId { get; init; }
+    public Guid IntegrationId { get; init; }
     public string AccessToken { get; init; } = string.Empty;
     public string GraphApiVersion { get; init; } = string.Empty;
     public string WhatsAppBusinessAccountId { get; init; } = string.Empty;
@@ -54,6 +60,8 @@ public sealed class WhatsAppGetTemplatesRequest
 
 public sealed class WhatsAppValidateIntegrationRequest
 {
+    public Guid CompanyId { get; init; }
+    public Guid IntegrationId { get; init; }
     public string AccessToken { get; init; } = string.Empty;
     public string GraphApiVersion { get; init; } = string.Empty;
     public string WhatsAppBusinessAccountId { get; init; } = string.Empty;
@@ -64,6 +72,10 @@ public sealed class WhatsAppSendTemplateMessageResult
     public bool Success { get; init; }
     public bool IsTransientFailure { get; init; }
     public string? ExternalMessageId { get; init; }
+    public string? ProviderRequestId { get; init; }
+    public string? ProviderTraceId { get; init; }
+    public int? HttpStatusCode { get; init; }
+    public string? FailureCategory { get; init; }
     public string? FailureCode { get; init; }
     public string? FailureReason { get; init; }
 }
@@ -72,6 +84,8 @@ public sealed class WhatsAppValidateIntegrationResult
 {
     public bool Success { get; init; }
     public bool IsTransientFailure { get; init; }
+    public int? HttpStatusCode { get; init; }
+    public string? FailureCategory { get; init; }
     public string? FailureCode { get; init; }
     public string? FailureReason { get; init; }
 }
@@ -81,6 +95,10 @@ public sealed class WhatsAppSendTextMessageResult
     public bool Success { get; init; }
     public bool IsTransientFailure { get; init; }
     public string? ExternalMessageId { get; init; }
+    public string? ProviderRequestId { get; init; }
+    public string? ProviderTraceId { get; init; }
+    public int? HttpStatusCode { get; init; }
+    public string? FailureCategory { get; init; }
     public string? FailureCode { get; init; }
     public string? FailureReason { get; init; }
 }
