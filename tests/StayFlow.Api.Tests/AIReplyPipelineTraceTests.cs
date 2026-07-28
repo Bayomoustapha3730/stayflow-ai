@@ -130,7 +130,6 @@ public sealed class AIReplyPipelineTraceTests
 
         var orchestrator = new AIReplyOrchestrator(
             traceContextBuilder,
-            new GuestIntentDetector(),
             traceRanker,
             tracePromptBuilder,
             traceProvider,

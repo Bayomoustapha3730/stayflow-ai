@@ -89,6 +89,15 @@ public static class ServiceCollectionExtensions
             .Validate(options => Math.Abs((options.IntentWeight + options.LexicalWeight + options.SemanticWeight + options.PriorityWeight) - 1.0) <= 0.25,
                 "Concierge intelligence component weights should be approximately normalized.")
             .ValidateOnStart();
+        services.AddOptions<Services.AI.Orchestration.GroundedConciergeOptions>()
+            .Bind(configuration.GetSection(Services.AI.Orchestration.GroundedConciergeOptions.SectionName))
+            .Validate(options => options.ProviderTimeoutSeconds is >= 3 and <= 60, "Grounded concierge provider timeout must be between 3 and 60 seconds.")
+            .Validate(options => options.MaximumResponseCharacters is >= 200 and <= 4000, "Grounded concierge maximum response characters must be between 200 and 4000.")
+            .Validate(options => options.MaximumKnowledgeCharacters is >= 1000 and <= 30000, "Grounded concierge maximum knowledge characters must be between 1000 and 30000.")
+            .ValidateOnStart();
+        services.AddOptions<Services.AI.Orchestration.DevelopmentConciergeLanguageModelOptions>()
+            .Bind(configuration.GetSection(Services.AI.Orchestration.DevelopmentConciergeLanguageModelOptions.SectionName))
+            .ValidateOnStart();
         services.AddOptions<Services.WhatsAppCloudOptions>()
             .Bind(configuration.GetSection(Services.WhatsAppCloudOptions.SectionName))
             .ValidateOnStart();
@@ -128,6 +137,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.AI.Retrieval.IPropertyKnowledgeRanker, Services.AI.Retrieval.PropertyKnowledgeRanker>();
         services.AddSingleton<Services.AI.Retrieval.IPropertyKnowledgeRetriever, Services.AI.Retrieval.PropertyKnowledgeRetriever>();
         services.AddSingleton<Services.AI.Orchestration.IConciergeResponseGenerator, Services.AI.Orchestration.ConciergeResponseGenerator>();
+        services.AddSingleton<Services.AI.Orchestration.IConciergePromptBuilder, Services.AI.Orchestration.ConciergePromptBuilder>();
+        services.AddSingleton<Services.AI.Orchestration.IConciergeResponseValidator, Services.AI.Orchestration.ConciergeResponseValidator>();
+        services.AddSingleton<Services.AI.Orchestration.IConciergeLanguageModel, Services.AI.Orchestration.DevelopmentConciergeLanguageModel>();
+        services.AddSingleton<Services.AI.Orchestration.IConciergeLanguageModelProviderFactory, Services.AI.Orchestration.ConciergeLanguageModelProviderFactory>();
+        services.AddSingleton<Services.AI.Orchestration.IGroundedConciergeResponseGenerator, Services.AI.Orchestration.GroundedConciergeResponseGenerator>();
         services.AddSingleton<Services.AI.Validation.IAIReplyOutputValidator, Services.AI.Validation.AIReplyOutputValidator>();
         services.AddSingleton<Services.AI.Safety.IAIReplySafetyEvaluator, Services.AI.Safety.AIReplySafetyEvaluator>();
         services.AddSingleton<Services.AI.Orchestration.IAIReplyFallbackProvider, Services.AI.Orchestration.AIReplyFallbackProvider>();
