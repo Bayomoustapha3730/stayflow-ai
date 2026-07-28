@@ -335,6 +335,54 @@
   padding: 10px 14px;
 }
 
+.sf-action-card {
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.sf-action-card__prompt {
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.sf-action-card__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.sf-action-card__confirm,
+.sf-action-card__cancel {
+  border-radius: 10px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.sf-action-card__confirm {
+  background: var(--sf-chat-primary);
+  border: 0;
+  color: #fff;
+}
+
+.sf-action-card__cancel {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+}
+
+.sf-action-card__confirm:disabled,
+.sf-action-card__cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .sf-chat-escalation span {
   color: #64748b;
   font-size: 13px;

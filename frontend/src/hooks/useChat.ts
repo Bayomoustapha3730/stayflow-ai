@@ -5,6 +5,7 @@ import type {
   ConversationMessageFeedbackValue,
   ChatConversation,
   ChatMessage,
+  PendingActionCard,
   ChatStatusResponse,
   SendChatMessageRequest
 } from "../models/chat";
@@ -37,6 +38,7 @@ export interface UseChatResult {
   conversationStatus: ConversationStatus | null;
   humanTakeoverEnabled: boolean;
   requiresHostAttention: boolean;
+  pendingAction: PendingActionCard | null;
   messages: ChatMessage[];
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
@@ -48,6 +50,8 @@ export interface UseChatResult {
   escalate: (reason?: string) => Promise<void>;
   endConversation: () => Promise<void>;
   submitMessageFeedback: (messageId: string, feedbackValue: ConversationMessageFeedbackValue) => Promise<void>;
+  confirmPendingAction: () => Promise<void>;
+  cancelPendingAction: () => Promise<void>;
   startNewConversation: () => void;
   clearError: () => void;
   isHostTyping: boolean;
@@ -62,6 +66,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
   const [conversationStatus, setConversationStatus] = useState<ConversationStatus | null>(null);
   const [humanTakeoverEnabled, setHumanTakeoverEnabled] = useState(false);
   const [requiresAttention, setRequiresAttention] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingActionCard | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isOpen, setIsOpen] = useState(() => sessionStorage.getItem(openStorageKey) === "true");
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -129,6 +134,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
     setConversationStatus(null);
     setHumanTakeoverEnabled(false);
     setRequiresAttention(false);
+    setPendingAction(null);
     setMessages([]);
   }, []);
 
@@ -255,6 +261,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
           response.requiresHostAttention ||
             requiresHostAttention(response.conversationStatus, response.humanTakeoverEnabled)
         );
+        setPendingAction(response.pendingAction ?? null);
 
         const returnedMessages = [response.guestMessage, response.assistantMessage].filter(Boolean) as ChatMessage[];
         setMessages((current) =>
@@ -423,9 +430,56 @@ export function useChat(options: UseChatOptions): UseChatResult {
     setConversationStatus(null);
     setHumanTakeoverEnabled(false);
     setRequiresAttention(false);
+    setPendingAction(null);
     setMessages([]);
     setError(null);
   }, []);
+
+  const confirmPendingAction = useCallback(async () => {
+    if (!conversationId || !options.guestId || !pendingAction) {
+      return;
+    }
+
+    setError(null);
+    try {
+      const response = await chatApi.confirmPendingAction(conversationId, pendingAction.actionId, options.guestId);
+      setConversationStatus(response.conversationStatus);
+      setHumanTakeoverEnabled(response.humanTakeoverEnabled);
+      setRequiresAttention(
+        response.requiresHostAttention ||
+          requiresHostAttention(response.conversationStatus, response.humanTakeoverEnabled)
+      );
+      setPendingAction(response.pendingAction ?? null);
+      const returnedMessages = [response.guestMessage, response.assistantMessage].filter(Boolean) as ChatMessage[];
+      setMessages((current) => mergeMessages(current, returnedMessages));
+      markReadIfVisible();
+    } catch (failure) {
+      handleError(failure);
+    }
+  }, [chatApi, conversationId, handleError, markReadIfVisible, options.guestId, pendingAction]);
+
+  const cancelPendingAction = useCallback(async () => {
+    if (!conversationId || !options.guestId || !pendingAction) {
+      return;
+    }
+
+    setError(null);
+    try {
+      const response = await chatApi.cancelPendingAction(conversationId, pendingAction.actionId, options.guestId);
+      setConversationStatus(response.conversationStatus);
+      setHumanTakeoverEnabled(response.humanTakeoverEnabled);
+      setRequiresAttention(
+        response.requiresHostAttention ||
+          requiresHostAttention(response.conversationStatus, response.humanTakeoverEnabled)
+      );
+      setPendingAction(response.pendingAction ?? null);
+      const returnedMessages = [response.guestMessage, response.assistantMessage].filter(Boolean) as ChatMessage[];
+      setMessages((current) => mergeMessages(current, returnedMessages));
+      markReadIfVisible();
+    } catch (failure) {
+      handleError(failure);
+    }
+  }, [chatApi, conversationId, handleError, markReadIfVisible, options.guestId, pendingAction]);
 
   const startTyping = useCallback(async () => {
     await realtime.startTyping("guest");
@@ -449,6 +503,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
     conversationStatus,
     humanTakeoverEnabled,
     requiresHostAttention: requiresAttention,
+    pendingAction,
     messages,
     login,
     logout,
@@ -460,6 +515,8 @@ export function useChat(options: UseChatOptions): UseChatResult {
     escalate,
     endConversation,
     submitMessageFeedback,
+    confirmPendingAction,
+    cancelPendingAction,
     startNewConversation,
     clearError: () => setError(null),
     isHostTyping,

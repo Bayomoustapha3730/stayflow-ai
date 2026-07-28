@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Chat;
+using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Controllers;
@@ -99,6 +100,34 @@ public sealed class ChatController(IChatService chatService, IConversationServic
         CancellationToken cancellationToken)
     {
         var response = await conversationService.AddGuestMessageFeedbackAsync(conversationId, messageId, request, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("{conversationId:guid}/actions/{actionId:guid}/confirm")]
+    [RequiresPermission("chat.send")]
+    [ProducesResponseType(typeof(ApiResponse<ChatMessageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ChatMessageResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ChatMessageResponse>>> ConfirmPendingAction(
+        Guid conversationId,
+        Guid actionId,
+        ConfirmPendingActionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await chatService.ConfirmPendingActionAsync(conversationId, actionId, request, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
+    [HttpPost("{conversationId:guid}/actions/{actionId:guid}/cancel")]
+    [RequiresPermission("chat.send")]
+    [ProducesResponseType(typeof(ApiResponse<ChatMessageResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ChatMessageResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ChatMessageResponse>>> CancelPendingAction(
+        Guid conversationId,
+        Guid actionId,
+        CancelPendingActionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await chatService.CancelPendingActionAsync(conversationId, actionId, request, cancellationToken);
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 

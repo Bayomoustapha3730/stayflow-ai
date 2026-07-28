@@ -31,6 +31,12 @@ export function createChatApi(http: HttpClient) {
     },
     submitMessageFeedback(conversationId: string, messageId: string, request: AddChatMessageFeedbackRequest) {
       return http.post<ChatMessageFeedbackResponse>(`/chat/${conversationId}/messages/${messageId}/feedback`, request);
+    },
+    confirmPendingAction(conversationId: string, actionId: string, guestId: string) {
+      return http.post<ChatMessageResponse>(`/chat/${conversationId}/actions/${actionId}/confirm`, { guestId });
+    },
+    cancelPendingAction(conversationId: string, actionId: string, guestId: string) {
+      return http.post<ChatMessageResponse>(`/chat/${conversationId}/actions/${actionId}/cancel`, { guestId });
     }
   };
 }

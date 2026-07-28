@@ -1,4 +1,5 @@
 using StayFlow.Api.Common;
+using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.AIOrchestration;
 using StayFlow.Api.DTOs.ReservationContext;
@@ -58,6 +59,7 @@ public sealed class ChatMessageResponse
     public ChatProviderMetadataResponse? ProviderMetadata { get; init; }
     public IReadOnlyCollection<QuestionContextCategory> QuestionCategories { get; init; } = [];
     public IReadOnlyCollection<ReservationCandidateLabel> CandidateLabels { get; init; } = [];
+    public PendingActionCardDto? PendingAction { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
 }
 
