@@ -127,10 +127,15 @@ public sealed class ConversationContextBuilder(
         }
 
         logger.LogInformation(
-            "Conversation context built. ConversationId={ConversationId} VisibleMessageCount={VisibleMessageCount} KnowledgeItemCount={KnowledgeItemCount} Truncated={Truncated}",
+            "Conversation AI context resolved. ConversationId={ConversationId} CompanyId={CompanyId} PropertyId={PropertyId} ReservationId={ReservationId} ApprovedKnowledgeCount={ApprovedKnowledgeCount} VisibleMessageCount={VisibleMessageCount} HumanTakeoverEnabled={HumanTakeoverEnabled} RequiresHostAttention={RequiresHostAttention} Truncated={Truncated}",
             conversationId,
-            visibleMessages.Count,
+            companyId,
+            conversation.PropertyId,
+            conversation.ReservationId,
             knowledgeItems.Count,
+            visibleMessages.Count,
+            conversation.HumanTakeoverEnabled,
+            requiresHostAttention,
             contextTruncated);
 
         return new ConversationContext(

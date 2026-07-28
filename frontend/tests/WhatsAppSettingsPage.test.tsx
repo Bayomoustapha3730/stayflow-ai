@@ -151,12 +151,24 @@ function listTemplatesFromQuery(url: URL) {
   };
 }
 
-function createFetchMock(options?: { healthFails?: boolean; syncFails?: boolean; templatesEmpty?: boolean }) {
+function createFetchMock(options?: {
+  healthFails?: boolean;
+  syncFails?: boolean;
+  templatesEmpty?: boolean;
+  integrationHealthStatus?: string;
+  integrationErrorSummary?: string;
+}) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost:5243");
 
     if (url.pathname === "/whatsapp/integrations" && (init?.method ?? "GET") === "GET") {
-      return apiSuccess([integration]);
+      return apiSuccess([
+        {
+          ...integration,
+          healthStatus: options?.integrationHealthStatus ?? integration.healthStatus,
+          lastErrorSummary: options?.integrationErrorSummary ?? integration.lastErrorSummary
+        }
+      ]);
     }
 
     if (url.pathname === `/whatsapp/integrations/${integration.id}/health` && (init?.method ?? "GET") === "GET") {
@@ -383,6 +395,29 @@ describe("WhatsAppSettingsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Sync Templates" }));
 
     expect(await screen.findByText("Sync unavailable")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["AuthenticationFailed", "Token rejected"],
+    ["AuthorizationFailed", "Permission missing"],
+    ["RateLimited", "Too many requests"],
+    ["ProviderUnavailable", "Provider unavailable"],
+    ["DevelopmentOnly", "Production sending not enabled"]
+  ])("renders production health state %s", async (status, summary) => {
+    sessionStorage.setItem("stayflow.host.accessToken", "token");
+    createFetchMock({ integrationHealthStatus: status, integrationErrorSummary: summary });
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "WhatsApp Settings" });
+    expect(screen.getByText(status)).toBeInTheDocument();
+    expect(screen.getByText(summary)).toBeInTheDocument();
+
+    expect(screen.queryByText(/access token/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/app secret/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/credential reference/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/phone number id/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/waba/i)).not.toBeInTheDocument();
   });
 
 });

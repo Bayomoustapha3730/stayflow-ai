@@ -133,19 +133,291 @@ public sealed class GuestWidgetGroundedReplyTests
         Assert.Contains("Host verification is required", response.Data!.AssistantMessage!.Content);
     }
 
-    private static PropertyKnowledgeArticle Article(Guid companyId, Guid propertyId, string title, string content, bool approved, bool active)
+    [Fact]
+    public async Task GuestWidget_CheckInInformation_DoesNotSelectEmergencyGuidance()
+    {
+        var fixture = new Fixture();
+        fixture.Knowledge.Add(Article(
+            fixture.CompanyId,
+            fixture.Property.Id,
+            "Emergency guidance",
+            "If there is a fire, leave immediately and call emergency services.",
+            approved: true,
+            active: true,
+            category: PropertyKnowledgeCategory.Emergency,
+            priority: 10));
+        fixture.Knowledge.Add(Article(
+            fixture.CompanyId,
+            fixture.Property.Id,
+            "Check-in details",
+            "Check-in starts at 3:00 PM. Use the keypad code in your arrival message.",
+            approved: true,
+            active: true,
+            category: PropertyKnowledgeCategory.CheckIn,
+            priority: 9));
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = "Check-in Information"
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var content = response.Data!.AssistantMessage!.Content;
+        Assert.Contains("Check-in starts at 3:00 PM", content);
+        Assert.DoesNotContain("fire", content, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GuestWidget_EmergencyQuery_SelectsEmergencyGuidanceFirst()
+    {
+        var fixture = new Fixture();
+        fixture.Knowledge.Add(Article(
+            fixture.CompanyId,
+            fixture.Property.Id,
+            "Check-in details",
+            "Check-in starts at 3:00 PM.",
+            approved: true,
+            active: true,
+            category: PropertyKnowledgeCategory.CheckIn,
+            priority: 10));
+        fixture.Knowledge.Add(Article(
+            fixture.CompanyId,
+            fixture.Property.Id,
+            "Emergency guidance",
+            "If there is immediate danger, contact local emergency services now.",
+            approved: true,
+            active: true,
+            category: PropertyKnowledgeCategory.Emergency,
+            priority: 6));
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = "There is a fire"
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var content = response.Data!.AssistantMessage!.Content;
+        Assert.Contains("emergency services", content, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GuestWidget_AmbiguousAccessQuestion_AsksClarification()
+    {
+        var fixture = new Fixture();
+        fixture.Knowledge.Add(Article(fixture.CompanyId, fixture.Property.Id, "Check-in details", "Use the smart lock for entry.", approved: true, active: true, category: PropertyKnowledgeCategory.CheckIn));
+        fixture.Knowledge.Add(Article(fixture.CompanyId, fixture.Property.Id, "Guest Wi-Fi", "Network: StayFlowGuest\nPassword: DemoStay2026", approved: true, active: true, category: PropertyKnowledgeCategory.WiFi));
+        fixture.Knowledge.Add(Article(fixture.CompanyId, fixture.Property.Id, "Parking", "Garage B is assigned to your unit.", approved: true, active: true, category: PropertyKnowledgeCategory.Parking));
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = "Tell me about access"
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var content = response.Data!.AssistantMessage!.Content;
+        Assert.Equal("Are you asking about check-in time, property entry, or Wi-Fi access?", content);
+        AssertNoInternalIdentifiers(content);
+        Assert.DoesNotContain("fire", content, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("access")]
+    [InlineData("property access")]
+    [InlineData("access information")]
+    [InlineData("access instructions")]
+    [InlineData("access details")]
+    [InlineData("building access")]
+    [InlineData("entry information")]
+    [InlineData("entering")]
+    [InlineData("getting in")]
+    [InlineData("get in")]
+    [InlineData("getting inside")]
+    [InlineData("I need access information")]
+    [InlineData("How does access work?")]
+    [InlineData("I need access details")]
+    [InlineData("Can you share access instructions?")]
+    [InlineData("I have a question about property access")]
+    [InlineData("Can you explain building access?")]
+    [InlineData("Access work?")]
+    public async Task GuestWidget_AmbiguousAccessVariants_AskClarification(string message)
+    {
+        var fixture = new Fixture();
+        fixture.Knowledge.Add(Article(fixture.CompanyId, fixture.Property.Id, "Check-in details", "Use the smart lock for entry.", approved: true, active: true, category: PropertyKnowledgeCategory.CheckIn));
+        fixture.Knowledge.Add(Article(fixture.CompanyId, fixture.Property.Id, "Guest Wi-Fi", "Network: StayFlowGuest\nPassword: DemoStay2026", approved: true, active: true, category: PropertyKnowledgeCategory.WiFi));
+        fixture.Knowledge.Add(Article(fixture.CompanyId, fixture.Property.Id, "Parking", "Garage B is assigned to your unit.", approved: true, active: true, category: PropertyKnowledgeCategory.Parking));
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = message
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var content = response.Data!.AssistantMessage!.Content;
+        Assert.Equal("Are you asking about check-in time, property entry, or Wi-Fi access?", content);
+        AssertNoInternalIdentifiers(content);
+    }
+
+    [Fact]
+    public async Task GuestWidget_PetPolicyMissing_ReturnsKnowledgeUnavailableWithoutClarificationEnums()
+    {
+        var fixture = new Fixture();
+        fixture.Knowledge.Add(Article(
+            fixture.CompanyId,
+            fixture.Property.Id,
+            "House rules",
+            "Quiet hours are 10 PM to 8 AM. No smoking.",
+            approved: true,
+            active: true,
+            category: PropertyKnowledgeCategory.HouseRules));
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = "Can I bring pets?"
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var content = response.Data!.AssistantMessage!.Content;
+        Assert.Equal("I couldn't find a pet policy for this property. I can notify the host to confirm whether pets are allowed.", content);
+        AssertNoInternalIdentifiers(content);
+    }
+
+    [Fact]
+    public async Task GuestWidget_HighConfidencePetPolicyMissing_DoesNotAskForClarification()
+    {
+        var fixture = new Fixture();
+        fixture.Knowledge.Add(Article(
+            fixture.CompanyId,
+            fixture.Property.Id,
+            "House rules",
+            "Quiet hours are 10 PM to 8 AM. No smoking.",
+            approved: true,
+            active: true,
+            category: PropertyKnowledgeCategory.HouseRules));
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = "Do you allow dogs?"
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var content = response.Data!.AssistantMessage!.Content;
+        Assert.Equal("I couldn't find a pet policy for this property. I can notify the host to confirm whether pets are allowed.", content);
+        Assert.DoesNotContain("Are you asking", content, StringComparison.OrdinalIgnoreCase);
+        AssertNoInternalIdentifiers(content);
+    }
+
+    [Fact]
+    public async Task GuestWidget_UnknownCurtainQuestion_ReturnsNoKnowledgeWithoutFabrication()
+    {
+        var fixture = new Fixture();
+        fixture.Knowledge.Add(Article(
+            fixture.CompanyId,
+            fixture.Property.Id,
+            "Check-in details",
+            "Check-in starts at 3:00 PM.",
+            approved: true,
+            active: true,
+            category: PropertyKnowledgeCategory.CheckIn));
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = "What color are the curtains?"
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        var content = response.Data!.AssistantMessage!.Content;
+        Assert.Equal("I don't have information about the curtain color. I can ask the host if you'd like.", content);
+        AssertNoInternalIdentifiers(content);
+        Assert.DoesNotContain("3:00 PM", content, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GuestWidget_GuestVisibleResponses_NeverExposeInternalIntentIdentifiers()
+    {
+        var fixture = new Fixture();
+        fixture.Knowledge.Add(Article(fixture.CompanyId, fixture.Property.Id, "Check-in details", "Use the smart lock for entry.", approved: true, active: true, category: PropertyKnowledgeCategory.CheckIn));
+        fixture.Knowledge.Add(Article(fixture.CompanyId, fixture.Property.Id, "Guest Wi-Fi", "Network: StayFlowGuest\nPassword: DemoStay2026", approved: true, active: true, category: PropertyKnowledgeCategory.WiFi));
+
+        var responses = new List<string>();
+        responses.Add((await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = "Tell me about access"
+        }, CancellationToken.None)).Data!.AssistantMessage!.Content);
+
+        responses.Add((await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = "Can I bring pets?"
+        }, CancellationToken.None)).Data!.AssistantMessage!.Content);
+
+        responses.Add((await fixture.ChatService.SendGuestMessageAsync(new SendChatMessageRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.Web,
+            Message = "What color are the curtains?"
+        }, CancellationToken.None)).Data!.AssistantMessage!.Content);
+
+        Assert.All(responses, AssertNoInternalIdentifiers);
+    }
+
+    private static PropertyKnowledgeArticle Article(
+        Guid companyId,
+        Guid propertyId,
+        string title,
+        string content,
+        bool approved,
+        bool active,
+        PropertyKnowledgeCategory category = PropertyKnowledgeCategory.WiFi,
+        int priority = 10)
     {
         return new PropertyKnowledgeArticle
         {
             Id = Guid.NewGuid(),
             CompanyId = companyId,
             PropertyId = propertyId,
-            Category = PropertyKnowledgeCategory.WiFi,
+            Category = category,
             Title = title,
             Summary = null,
             Content = content,
-            Tags = "wifi,network",
-            Priority = 10,
+            Tags = category switch
+            {
+                PropertyKnowledgeCategory.WiFi => "wifi,network,password",
+                PropertyKnowledgeCategory.CheckIn => "check-in,arrival,entry",
+                PropertyKnowledgeCategory.Checkout => "checkout,departure",
+                PropertyKnowledgeCategory.Parking => "parking,garage,car",
+                PropertyKnowledgeCategory.HouseRules => "rules,quiet hours",
+                PropertyKnowledgeCategory.LocalRecommendations => "restaurant,nearby,recommendations",
+                PropertyKnowledgeCategory.Emergency => "emergency,fire,safety",
+                _ => "property,info"
+            },
+            Priority = priority,
             IsApproved = approved,
             IsActive = active,
             IsDeleted = false,
@@ -173,6 +445,16 @@ public sealed class GuestWidgetGroundedReplyTests
             count++;
             index += token.Length;
         }
+    }
+
+    private static void AssertNoInternalIdentifiers(string content)
+    {
+        Assert.DoesNotContain("PetPolicy", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("HouseRules", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("PropertyAccess", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("LocalRecommendations", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("GuestIntent", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReasonCode", content, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class Fixture
@@ -225,7 +507,9 @@ public sealed class GuestWidgetGroundedReplyTests
                     Options.Create(new ConversationContextLimits()),
                     NullLogger<ConversationContextBuilder>.Instance),
                 new GuestIntentDetector(),
-                new PropertyKnowledgeRanker(),
+                new PropertyKnowledgeRanker(
+                    Options.Create(new KnowledgeRetrievalOptions()),
+                    new DeterministicKnowledgeSimilarityScorer()),
                 new AIPromptBuilder(Options.Create(new AIPromptOptions())),
                 new DevelopmentAIProvider(),
                 new AIReplyOutputValidator(),

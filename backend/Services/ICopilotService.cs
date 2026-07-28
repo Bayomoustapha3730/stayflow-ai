@@ -18,4 +18,8 @@ public interface ICopilotService
         Guid conversationId,
         CopilotSuggestReplyRequest request,
         CancellationToken cancellationToken);
+
+    Task<ApiResponse<ConversationRetrievalDiagnosticsResponse>> GetRetrievalDiagnosticsAsync(
+        Guid conversationId,
+        CancellationToken cancellationToken);
 }

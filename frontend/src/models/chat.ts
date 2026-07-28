@@ -29,6 +29,17 @@ export interface ChatMessage {
   messageType: ConversationMessageType;
   sentAt: string;
   localStatus?: "sending" | "sent" | "failed";
+  feedback?: ChatMessageFeedbackSummary | null;
+}
+
+export enum ConversationMessageFeedbackValue {
+  Helpful = 0,
+  NotHelpful = 1
+}
+
+export interface ChatMessageFeedbackSummary {
+  feedbackValue: ConversationMessageFeedbackValue;
+  submittedAt: string;
 }
 
 export interface ChatReservationSummary {
@@ -95,6 +106,22 @@ export interface ChatStatusResponse {
   humanTakeoverEnabled: boolean;
   requiresHostAttention: boolean;
   guestSafeMessage: string;
+}
+
+export interface AddChatMessageFeedbackRequest {
+  guestId: string;
+  feedbackValue: ConversationMessageFeedbackValue;
+  comment?: string;
+}
+
+export interface ChatMessageFeedbackResponse {
+  id: string;
+  conversationId: string;
+  conversationMessageId: string;
+  guestId: string;
+  feedbackValue: ConversationMessageFeedbackValue;
+  comment?: string | null;
+  submittedAt: string;
 }
 
 export interface LoginResponse {

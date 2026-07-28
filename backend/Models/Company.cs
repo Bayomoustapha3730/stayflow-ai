@@ -18,6 +18,8 @@ public sealed class Company : AuditableEntity
     public ICollection<PropertyKnowledgeArticle> PropertyKnowledgeArticles { get; set; } = [];
     public ICollection<Conversation> Conversations { get; set; } = [];
     public ICollection<ConversationMessage> ConversationMessages { get; set; } = [];
+    public ICollection<ConversationMessageKnowledgeSource> ConversationMessageKnowledgeSources { get; set; } = [];
+    public ICollection<ConversationMessageFeedback> ConversationMessageFeedback { get; set; } = [];
     public ICollection<WhatsAppIntegration> WhatsAppIntegrations { get; set; } = [];
     public ICollection<WhatsAppTemplate> WhatsAppTemplates { get; set; } = [];
     public ICollection<ServiceProvider> ServiceProviders { get; set; } = [];

@@ -143,21 +143,15 @@ public sealed class ConversationMessageResponse
     public DateTimeOffset? DeliveredAt { get; init; }
     public DateTimeOffset? ReadAt { get; init; }
     public DateTimeOffset? FailedAt { get; init; }
-<<<<<<< HEAD
-    public string? FailureCode { get; init; }
-    public string? FailureReason { get; init; }
     public string? SafeFailureSummary { get; init; }
+    public Guid? RetryOfMessageId { get; init; }
+    public int SendAttemptNumber { get; init; }
+    public bool CanRetry { get; init; }
     public bool IsTemplateMessage { get; init; }
     public Guid? WhatsAppTemplateId { get; init; }
     public string? TemplateName { get; init; }
     public string? TemplateLanguageCode { get; init; }
     public string? TemplateRenderedPreview { get; init; }
-=======
-    public string? SafeFailureSummary { get; init; }
-    public Guid? RetryOfMessageId { get; init; }
-    public int SendAttemptNumber { get; init; }
-    public bool CanRetry { get; init; }
->>>>>>> origin/main
     public DateTimeOffset SentAt { get; init; }
 }
 
@@ -165,6 +159,24 @@ public sealed class ConversationHistoryResponse
 {
     public Guid ConversationId { get; init; }
     public PagedResult<ConversationMessageResponse> Messages { get; init; } = null!;
+}
+
+public sealed class ConversationFeedbackAnalyticsQuery
+{
+    public DateTimeOffset? SinceUtc { get; init; }
+    public DateTimeOffset? UntilUtc { get; init; }
+    public Guid? PropertyId { get; init; }
+}
+
+public sealed class ConversationFeedbackAnalyticsResponse
+{
+    public DateTimeOffset SinceUtc { get; init; }
+    public DateTimeOffset UntilUtc { get; init; }
+    public Guid? PropertyId { get; init; }
+    public int TotalFeedbackCount { get; init; }
+    public int HelpfulCount { get; init; }
+    public int NotHelpfulCount { get; init; }
+    public double HelpfulRate { get; init; }
 }
 
 public sealed class ConversationGuestSummary

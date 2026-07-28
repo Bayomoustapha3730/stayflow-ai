@@ -496,6 +496,30 @@
     right: max(16px, env(safe-area-inset-right));
   }
 
+.sf-chat-feedback {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+.sf-chat-feedback button {
+  border: 1px solid color-mix(in srgb, var(--sf-chat-primary) 35%, white);
+  background: color-mix(in srgb, var(--sf-chat-bg) 86%, var(--sf-chat-primary));
+  color: inherit;
+  font-size: 0.72rem;
+  line-height: 1;
+  border-radius: 999px;
+  padding: 0.32rem 0.6rem;
+  cursor: pointer;
+}
+.sf-chat-feedback button.is-selected {
+  background: var(--sf-chat-primary);
+  border-color: var(--sf-chat-primary);
+  color: #fff;
+}
+.sf-chat-feedback button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
   .sf-chat-panel {
     height: min(680px, calc(100vh - 104px));
     width: 100%;

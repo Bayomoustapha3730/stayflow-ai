@@ -76,9 +76,18 @@ export function ChatPanel({ chat, theme, demoEmail }: ChatPanelProps) {
             isLoadingHistory={chat.isLoadingHistory}
             showAssistantTyping={chat.isHostTyping || (!chat.requiresHostAttention && !chat.humanTakeoverEnabled && chat.isSending)}
             realtimeState={chat.realtimeState}
+            feedbackSubmittingMessageId={chat.feedbackSubmittingMessageId}
+            onSubmitFeedback={chat.submitMessageFeedback}
           />
           <EscalationPrompt
-            disabled={!chat.conversationId || chat.isEscalating || chat.conversationStatus === ConversationStatus.Closed}
+            disabled={
+              !chat.conversationId ||
+              chat.isEscalating ||
+              chat.conversationStatus === ConversationStatus.Closed ||
+              chat.requiresHostAttention ||
+              chat.humanTakeoverEnabled
+            }
+            alreadyEscalated={chat.requiresHostAttention || chat.humanTakeoverEnabled}
             onEscalate={() => void chat.escalate("Guest requested host support from the web widget.")}
           />
           <ChatComposer

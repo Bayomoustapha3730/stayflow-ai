@@ -25,6 +25,12 @@ public interface IConversationRepository
     Task<User?> GetUserAsync(Guid companyId, Guid userId, CancellationToken cancellationToken);
     Task AddConversationAsync(Conversation conversation, CancellationToken cancellationToken);
     Task AddMessageAsync(ConversationMessage message, CancellationToken cancellationToken);
+    Task AddMessageKnowledgeSourceAsync(ConversationMessageKnowledgeSource source, CancellationToken cancellationToken) => Task.CompletedTask;
+    Task<ConversationMessageFeedback?> GetMessageFeedbackAsync(Guid companyId, Guid conversationId, Guid messageId, Guid guestId, CancellationToken cancellationToken)
+        => Task.FromResult<ConversationMessageFeedback?>(null);
+    Task AddMessageFeedbackAsync(ConversationMessageFeedback feedback, CancellationToken cancellationToken) => Task.CompletedTask;
+    Task<IReadOnlyCollection<ConversationMessageFeedback>> ListMessageFeedbackAsync(Guid companyId, DateTimeOffset sinceUtc, DateTimeOffset untilUtc, Guid? propertyId, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyCollection<ConversationMessageFeedback>>([]);
     Task AddReadStateAsync(ConversationParticipantReadState state, CancellationToken cancellationToken);
     Task AddAuditLogAsync(AuditLog auditLog, CancellationToken cancellationToken);
     Task SaveChangesAsync(CancellationToken cancellationToken);

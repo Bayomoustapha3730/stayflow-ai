@@ -82,9 +82,13 @@ public sealed class AIPromptBuilder(IOptions<AIPromptOptions> options) : IAIProm
         var safety = new[]
         {
             "Use only supplied context.",
+            "Use only the selected approved property knowledge sources for property-specific facts.",
+            "Do not combine unrelated categories.",
             "Never invent policies, prices, availability, approvals, passwords, refunds, or reservation facts.",
             "Never claim an action is complete unless context confirms completion.",
             "Clearly identify uncertainty and recommend human verification when context is insufficient.",
+            "If retrieval confidence is low or intent is ambiguous, ask one focused clarification question before giving details.",
+            "Escalate only when knowledge is insufficient or safety policy requires escalation.",
             "When approved property knowledge directly answers the guest question, provide the answer using that knowledge instead of saying the information exists elsewhere.",
             "Do not invent missing values. If selected approved knowledge does not contain the requested value, say host verification is required.",
             "Never expose internal notes.",
@@ -112,6 +116,8 @@ public sealed class AIPromptBuilder(IOptions<AIPromptOptions> options) : IAIProm
             $"Detected intent: {request.Intent.Intent}",
             $"Intent confidence: {request.Intent.ConfidenceScore:0.00}",
             $"Intent ambiguity: {request.Intent.Ambiguous}",
+            $"Retrieval confidence level: {request.RetrievalConfidenceLevel}",
+            $"Retrieval reason code: {request.RetrievalReasonCode}",
             $"Operation instructions: {operationInstructions}",
             string.IsNullOrWhiteSpace(request.HostInstruction) ? string.Empty : $"Host instruction: {request.HostInstruction}",
             string.IsNullOrWhiteSpace(request.HostDraft) ? string.Empty : $"Current host draft for rewrite: {request.HostDraft}",

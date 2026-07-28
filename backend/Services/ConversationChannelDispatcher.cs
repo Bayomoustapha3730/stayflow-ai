@@ -42,16 +42,6 @@ public sealed class ConversationChannelDispatcher(
                 DeliveredAt = message.DeliveredAt,
                 ReadAt = message.ReadAt,
                 FailedAt = message.FailedAt,
-<<<<<<< HEAD
-                FailureCode = null,
-                FailureReason = null,
-                SafeFailureSummary = message.FailureReason,
-                IsTemplateMessage = message.IsTemplateMessage,
-                WhatsAppTemplateId = message.WhatsAppTemplateId,
-                TemplateName = message.TemplateName,
-                TemplateLanguageCode = message.TemplateLanguageCode,
-                TemplateRenderedPreview = message.TemplateRenderedPreview,
-=======
                 SafeFailureSummary = safeFailureSummary,
                 RetryOfMessageId = message.RetryOfMessageId,
                 SendAttemptNumber = message.SendAttemptNumber,
@@ -59,7 +49,11 @@ public sealed class ConversationChannelDispatcher(
                     && !message.IsInternal
                     && message.Provider == ConversationMessageProvider.WhatsAppCloud
                     && message.SenderType is ConversationSenderType.Host or ConversationSenderType.AI,
->>>>>>> origin/main
+                IsTemplateMessage = message.IsTemplateMessage,
+                WhatsAppTemplateId = message.WhatsAppTemplateId,
+                TemplateName = message.TemplateName,
+                TemplateLanguageCode = message.TemplateLanguageCode,
+                TemplateRenderedPreview = message.TemplateRenderedPreview,
                 SentAt = message.SentAt
             },
             timestamp = DateTimeOffset.UtcNow

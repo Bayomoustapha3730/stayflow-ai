@@ -239,7 +239,7 @@ public sealed class AIReplyOrchestratorGroundingTests
 
     private sealed class FakeRanker(IReadOnlyCollection<ConversationContextKnowledgeItem> selectedItems) : IPropertyKnowledgeRanker
     {
-        public PropertyKnowledgeRankingResult Rank(
+        public KnowledgeRetrievalResult Rank(
             ConversationContext context,
             GuestIntentResult intent,
             string latestGuestMessage,
@@ -247,10 +247,29 @@ public sealed class AIReplyOrchestratorGroundingTests
             int maxSelectedCharacters)
         {
             var ranked = selectedItems
-                .Select(item => new PropertyKnowledgeCandidate(item, 100, ["Selected in test ranker."]))
+                .Select((item, index) => new KnowledgeRetrievalCandidate(
+                    item.SourceId,
+                    item.Category,
+                    100,
+                    0.95,
+                    ["SelectedInTest"],
+                    index + 1,
+                    item))
                 .ToList();
 
-            return new PropertyKnowledgeRankingResult(ranked, selectedItems, 0, false, ["Selected in test ranker."]);
+            return new KnowledgeRetrievalResult(
+                intent,
+                ranked,
+                ranked,
+                92,
+                KnowledgeConfidenceLevel.High,
+                KnowledgeRetrievalReasonCode.StrongKeywordMatch,
+                true,
+                false,
+                false,
+                false,
+                [],
+                ["Selected in test ranker."]);
         }
     }
 

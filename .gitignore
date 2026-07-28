@@ -17,3 +17,4 @@ work/
 node_modules/
 dist/
 coverage/
+frontend/.tmp-*

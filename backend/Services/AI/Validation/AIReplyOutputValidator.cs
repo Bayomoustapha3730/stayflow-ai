@@ -106,7 +106,7 @@ public sealed class AIReplyOutputValidator : IAIReplyOutputValidator
 
         var normalizedNewLines = value.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
         var noControl = new string(normalizedNewLines.Where(ch => ch == '\n' || ch == '\t' || !char.IsControl(ch)).ToArray());
-        var trimmed = noControl.Trim().Trim('"', '\'', '`', '.', ',', ';', ':');
+        var trimmed = noControl.Trim().Trim('"', '\'', '`', ',', ';', ':');
 
         var compactedLines = trimmed
             .Split('\n')

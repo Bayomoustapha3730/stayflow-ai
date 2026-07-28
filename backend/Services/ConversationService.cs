@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIOrchestration;
+using StayFlow.Api.DTOs.Chat;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
@@ -391,11 +392,7 @@ public sealed class ConversationService(
 
     public Task<ApiResponse<ConversationDetailResponse>> ReturnToAIModeAsync(Guid conversationId, CancellationToken cancellationToken)
     {
-        return TransitionAsync(conversationId, ConversationStatus.Open, "ReturnedToAI", conversation =>
-        {
-            // Keep assignment for audit/history even after returning to AI mode.
-            conversation.HumanTakeoverEnabled = false;
-        }, cancellationToken);
+        return ReturnToAIModeInternalAsync(conversationId, cancellationToken);
     }
 
     public Task<ApiResponse<ConversationDetailResponse>> ResolveConversationAsync(Guid conversationId, CancellationToken cancellationToken)
@@ -507,6 +504,119 @@ public sealed class ConversationService(
         return await MarkReadStateAsync(conversationId, ConversationParticipantKind.Guest, guestId, cancellationToken);
     }
 
+    public async Task<ApiResponse<ChatMessageFeedbackResponse>> AddGuestMessageFeedbackAsync(
+        Guid conversationId,
+        Guid messageId,
+        AddChatMessageFeedbackRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<ChatMessageFeedbackResponse>.Fail(tenantError, [tenantError]);
+        }
+
+        if (request.GuestId == Guid.Empty)
+        {
+            return ApiResponse<ChatMessageFeedbackResponse>.Fail("GuestId is required.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Comment) && request.Comment.Trim().Length > 500)
+        {
+            return ApiResponse<ChatMessageFeedbackResponse>.Fail("Feedback comment must be 500 characters or fewer.");
+        }
+
+        var conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<ChatMessageFeedbackResponse>.Fail("Conversation was not found.");
+        }
+
+        if (conversation.GuestId != request.GuestId)
+        {
+            return ApiResponse<ChatMessageFeedbackResponse>.Fail("Conversation guest identity conflicts with the supplied guest identity.");
+        }
+
+        var message = await conversationRepository.GetMessageForConversationAsync(companyId, conversationId, messageId, cancellationToken);
+        if (message is null)
+        {
+            return ApiResponse<ChatMessageFeedbackResponse>.Fail("Conversation message was not found.");
+        }
+
+        if (message.SenderType != ConversationSenderType.AI || message.IsInternal)
+        {
+            return ApiResponse<ChatMessageFeedbackResponse>.Fail("Feedback can only be submitted for AI responses.");
+        }
+
+        var existing = await conversationRepository.GetMessageFeedbackAsync(companyId, conversationId, messageId, request.GuestId, cancellationToken);
+        if (existing is null)
+        {
+            existing = new ConversationMessageFeedback
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                ConversationId = conversationId,
+                ConversationMessageId = messageId,
+                GuestId = request.GuestId,
+                FeedbackValue = request.FeedbackValue,
+                Comment = NormalizeIdentity(request.Comment)
+            };
+
+            await conversationRepository.AddMessageFeedbackAsync(existing, cancellationToken);
+        }
+        else
+        {
+            existing.FeedbackValue = request.FeedbackValue;
+            existing.Comment = NormalizeIdentity(request.Comment);
+        }
+
+        await AuditAsync(companyId, conversationId, "ConversationMessageFeedbackSubmitted", conversation.Status, ConversationSenderType.Guest, cancellationToken);
+        await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<ChatMessageFeedbackResponse>.Ok(new ChatMessageFeedbackResponse
+        {
+            Id = existing.Id,
+            ConversationId = conversationId,
+            ConversationMessageId = messageId,
+            GuestId = request.GuestId,
+            FeedbackValue = existing.FeedbackValue,
+            Comment = existing.Comment,
+            SubmittedAt = existing.UpdatedAt
+        }, "Feedback submitted successfully.");
+    }
+
+    public async Task<ApiResponse<ConversationFeedbackAnalyticsResponse>> GetFeedbackAnalyticsAsync(
+        ConversationFeedbackAnalyticsQuery query,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<ConversationFeedbackAnalyticsResponse>.Fail(tenantError, [tenantError]);
+        }
+
+        var untilUtc = (query.UntilUtc ?? DateTimeOffset.UtcNow).ToUniversalTime();
+        var sinceUtc = (query.SinceUtc ?? untilUtc.AddDays(-30)).ToUniversalTime();
+        if (sinceUtc >= untilUtc)
+        {
+            return ApiResponse<ConversationFeedbackAnalyticsResponse>.Fail("Feedback analytics date range is invalid.");
+        }
+
+        var feedback = await conversationRepository.ListMessageFeedbackAsync(companyId, sinceUtc, untilUtc, query.PropertyId, cancellationToken);
+        var helpful = feedback.Count(item => item.FeedbackValue == ConversationMessageFeedbackValue.Helpful);
+        var notHelpful = feedback.Count(item => item.FeedbackValue == ConversationMessageFeedbackValue.NotHelpful);
+        var total = helpful + notHelpful;
+
+        return ApiResponse<ConversationFeedbackAnalyticsResponse>.Ok(new ConversationFeedbackAnalyticsResponse
+        {
+            SinceUtc = sinceUtc,
+            UntilUtc = untilUtc,
+            PropertyId = query.PropertyId,
+            TotalFeedbackCount = total,
+            HelpfulCount = helpful,
+            NotHelpfulCount = notHelpful,
+            HelpfulRate = total == 0 ? 0 : (double)helpful / total
+        });
+    }
+
     private async Task<ApiResponse<ConversationMessageResponse>> AddMessageAsync(
         Guid conversationId,
         ConversationSenderType senderType,
@@ -581,6 +691,36 @@ public sealed class ConversationService(
         }
 
         await conversationRepository.AddMessageAsync(message, cancellationToken);
+        if (senderType == ConversationSenderType.AI && aiResult is not null && aiResult.KnowledgeSources.Count > 0)
+        {
+            var rank = 1;
+            var seen = new HashSet<Guid>();
+
+            foreach (var source in aiResult.KnowledgeSources
+                         .Where(source => source.PropertyKnowledgeArticleId != Guid.Empty)
+                         .OrderBy(source => source.Rank <= 0 ? int.MaxValue : source.Rank))
+            {
+                if (!seen.Add(source.PropertyKnowledgeArticleId))
+                {
+                    continue;
+                }
+
+                await conversationRepository.AddMessageKnowledgeSourceAsync(new ConversationMessageKnowledgeSource
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyId,
+                    ConversationId = conversation.Id,
+                    ConversationMessageId = message.Id,
+                    PropertyKnowledgeArticleId = source.PropertyKnowledgeArticleId,
+                    Rank = rank,
+                    IsPrimary = rank == 1,
+                    RelevanceReason = string.IsNullOrWhiteSpace(source.RelevanceReason) ? null : source.RelevanceReason.Trim()
+                }, cancellationToken);
+
+                rank++;
+            }
+        }
+
         await AuditAsync(companyId, conversation.Id, auditAction, conversation.Status, senderType, cancellationToken);
         await conversationRepository.SaveChangesAsync(cancellationToken);
 
@@ -642,6 +782,60 @@ public sealed class ConversationService(
                 timestamp = DateTimeOffset.UtcNow
             }, cancellationToken);
         }
+
+        return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(conversation), "Conversation updated successfully.");
+    }
+
+    private async Task<ApiResponse<ConversationDetailResponse>> ReturnToAIModeInternalAsync(Guid conversationId, CancellationToken cancellationToken)
+    {
+        var conversation = await GetConversationForTenantAsync(conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<ConversationDetailResponse>.Fail("Conversation was not found.");
+        }
+
+        if (conversation.IsDeleted)
+        {
+            return ApiResponse<ConversationDetailResponse>.Fail("Conversation was not found.");
+        }
+
+        if (conversation.Status == ConversationStatus.Closed)
+        {
+            return ApiResponse<ConversationDetailResponse>.Fail("Conversation status transition failed.", ["Invalid conversation status transition."]);
+        }
+
+        if (conversation.Status == ConversationStatus.Open && !conversation.HumanTakeoverEnabled)
+        {
+            conversation.EscalationReason = null;
+            return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(conversation), "Conversation is already managed by AI.");
+        }
+
+        if (!transitionPolicy.CanTransition(conversation.Status, ConversationStatus.Open))
+        {
+            return ApiResponse<ConversationDetailResponse>.Fail("Conversation status transition failed.", ["Invalid conversation status transition."]);
+        }
+
+        conversation.Status = ConversationStatus.Open;
+        conversation.LastActivityAt = DateTimeOffset.UtcNow;
+        conversation.HumanTakeoverEnabled = false;
+        conversation.EscalationReason = null;
+
+        await AuditAsync(conversation.CompanyId, conversation.Id, "ReturnedToAI", conversation.Status, null, cancellationToken);
+        await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        var assignedUser = conversation.AssignedUserId.HasValue
+            ? await conversationRepository.GetUserAsync(conversation.CompanyId, conversation.AssignedUserId.Value, cancellationToken)
+            : null;
+        await realtimePublisher.PublishConversationAssignedAsync(conversation.CompanyId, conversation.Id, new
+        {
+            conversationId = conversation.Id,
+            assignedUser = assignedUser is null
+                ? null
+                : new { id = assignedUser.Id, fullName = assignedUser.FullName },
+            humanTakeoverEnabled = conversation.HumanTakeoverEnabled,
+            status = conversation.Status.ToString(),
+            timestamp = DateTimeOffset.UtcNow
+        }, cancellationToken);
 
         return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(conversation), "Conversation updated successfully.");
     }
@@ -955,21 +1149,15 @@ public sealed class ConversationService(
             DeliveredAt = message.DeliveredAt,
             ReadAt = message.ReadAt,
             FailedAt = message.FailedAt,
-<<<<<<< HEAD
-            FailureCode = null,
-            FailureReason = null,
-            SafeFailureSummary = message.FailureReason,
+            SafeFailureSummary = safeFailureSummary,
+            RetryOfMessageId = message.RetryOfMessageId,
+            SendAttemptNumber = message.SendAttemptNumber,
+            CanRetry = CanRetryMessage(message, conversation),
             IsTemplateMessage = message.IsTemplateMessage,
             WhatsAppTemplateId = message.WhatsAppTemplateId,
             TemplateName = message.TemplateName,
             TemplateLanguageCode = message.TemplateLanguageCode,
             TemplateRenderedPreview = message.TemplateRenderedPreview,
-=======
-            SafeFailureSummary = safeFailureSummary,
-            RetryOfMessageId = message.RetryOfMessageId,
-            SendAttemptNumber = message.SendAttemptNumber,
-            CanRetry = CanRetryMessage(message, conversation),
->>>>>>> origin/main
             SentAt = message.SentAt
         };
     }
@@ -1105,12 +1293,8 @@ public sealed class ConversationService(
                     || !string.Equals(message.FailureCategory, mapped.Category, StringComparison.Ordinal);
                 message.FailedAt = occurredAt;
                 message.FailureCode = NormalizeIdentity(failureCode);
-<<<<<<< HEAD
-                message.FailureReason = NormalizeIdentity(MapSafeFailureSummary(failureCode, failureReason));
-=======
                 message.FailureReason = NormalizeIdentity(failureReason);
                 message.FailureCategory = mapped.Category;
->>>>>>> origin/main
                 break;
             default:
                 break;
@@ -1132,34 +1316,6 @@ public sealed class ConversationService(
         };
     }
 
-<<<<<<< HEAD
-    private static string MapSafeFailureSummary(string? failureCode, string? failureReason)
-    {
-        var normalizedCode = NormalizeIdentity(failureCode)?.ToLowerInvariant();
-        var normalizedReason = NormalizeIdentity(failureReason)?.ToLowerInvariant() ?? string.Empty;
-
-        if (normalizedCode is "429" or "rate_limited" || normalizedReason.Contains("rate"))
-        {
-            return "WhatsApp is rate limited. Try again shortly.";
-        }
-
-        if (normalizedCode is "401" or "403" || normalizedReason.Contains("auth"))
-        {
-            return "WhatsApp sending is unavailable. Contact an administrator.";
-        }
-
-        if (normalizedCode is "404" or "invalid_recipient" || normalizedReason.Contains("recipient") || normalizedReason.Contains("destination"))
-        {
-            return "This WhatsApp recipient is unavailable.";
-        }
-
-        if (normalizedCode is "408" or "502" or "503" or "504" || normalizedReason.Contains("timeout") || normalizedReason.Contains("temporar"))
-        {
-            return "WhatsApp is temporarily unavailable. Try again.";
-        }
-
-        return "WhatsApp could not deliver this message.";
-=======
     private static bool CanRetryMessage(ConversationMessage message, Conversation? conversation)
     {
         if (message.IsInternal
@@ -1183,7 +1339,6 @@ public sealed class ConversationService(
         }
 
         return true;
->>>>>>> origin/main
     }
 
     private static bool IsHostAttentionConversation(Conversation conversation)

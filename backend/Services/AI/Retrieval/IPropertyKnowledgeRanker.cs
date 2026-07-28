@@ -5,7 +5,7 @@ namespace StayFlow.Api.Services.AI.Retrieval;
 
 public interface IPropertyKnowledgeRanker
 {
-    PropertyKnowledgeRankingResult Rank(
+    KnowledgeRetrievalResult Rank(
         ConversationContext context,
         GuestIntentResult intent,
         string latestGuestMessage,

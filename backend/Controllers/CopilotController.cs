@@ -77,6 +77,25 @@ public sealed class CopilotController(ICopilotService copilotService) : Controll
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
+    [HttpGet("{conversationId:guid}/retrieval-diagnostics")]
+    [RequiresPermission("conversations.read")]
+    [ProducesResponseType(
+        typeof(ApiResponse<ConversationRetrievalDiagnosticsResponse>),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        typeof(ApiResponse<ConversationRetrievalDiagnosticsResponse>),
+        StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<ConversationRetrievalDiagnosticsResponse>>> GetRetrievalDiagnostics(
+        Guid conversationId,
+        CancellationToken cancellationToken)
+    {
+        var response = await copilotService.GetRetrievalDiagnosticsAsync(
+            conversationId,
+            cancellationToken);
+
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
     private ActionResult<ApiResponse<T>> ToFailureResult<T>(
         ApiResponse<T> response)
     {

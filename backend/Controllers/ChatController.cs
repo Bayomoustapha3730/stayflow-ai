@@ -88,6 +88,20 @@ public sealed class ChatController(IChatService chatService, IConversationServic
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 
+    [HttpPost("{conversationId:guid}/messages/{messageId:guid}/feedback")]
+    [RequiresPermission("chat.send")]
+    [ProducesResponseType(typeof(ApiResponse<ChatMessageFeedbackResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ChatMessageFeedbackResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<ChatMessageFeedbackResponse>>> SubmitMessageFeedback(
+        Guid conversationId,
+        Guid messageId,
+        AddChatMessageFeedbackRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await conversationService.AddGuestMessageFeedbackAsync(conversationId, messageId, request, cancellationToken);
+        return response.Success ? Ok(response) : ToFailureResult(response);
+    }
+
     private ActionResult<ApiResponse<T>> ToFailureResult<T>(ApiResponse<T> response)
     {
         return response.Errors.Count > 0 ? BadRequest(response) : NotFound(response);

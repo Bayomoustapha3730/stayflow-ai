@@ -39,6 +39,13 @@ public sealed record MarkChatConversationReadRequest
     public Guid GuestId { get; init; }
 }
 
+public sealed record AddChatMessageFeedbackRequest
+{
+    public Guid GuestId { get; init; }
+    public ConversationMessageFeedbackValue FeedbackValue { get; init; }
+    public string? Comment { get; init; }
+}
+
 public sealed class ChatMessageResponse
 {
     public Guid ConversationId { get; init; }
@@ -82,6 +89,17 @@ public sealed class ChatStatusResponse
     public bool HumanTakeoverEnabled { get; init; }
     public bool RequiresHostAttention { get; init; }
     public string GuestSafeMessage { get; init; } = string.Empty;
+}
+
+public sealed class ChatMessageFeedbackResponse
+{
+    public Guid Id { get; init; }
+    public Guid ConversationId { get; init; }
+    public Guid ConversationMessageId { get; init; }
+    public Guid GuestId { get; init; }
+    public ConversationMessageFeedbackValue FeedbackValue { get; init; }
+    public string? Comment { get; init; }
+    public DateTimeOffset SubmittedAt { get; init; }
 }
 
 public sealed class ChatVisibleMessageDto

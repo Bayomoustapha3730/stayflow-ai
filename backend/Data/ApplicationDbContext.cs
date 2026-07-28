@@ -18,6 +18,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<PropertyKnowledgeArticle> PropertyKnowledgeArticles => Set<PropertyKnowledgeArticle>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
+    public DbSet<ConversationMessageKnowledgeSource> ConversationMessageKnowledgeSources => Set<ConversationMessageKnowledgeSource>();
+    public DbSet<ConversationMessageFeedback> ConversationMessageFeedback => Set<ConversationMessageFeedback>();
     public DbSet<ConversationParticipantReadState> ConversationParticipantReadStates => Set<ConversationParticipantReadState>();
     public DbSet<WhatsAppIntegration> WhatsAppIntegrations => Set<WhatsAppIntegration>();
     public DbSet<WhatsAppTemplate> WhatsAppTemplates => Set<WhatsAppTemplate>();

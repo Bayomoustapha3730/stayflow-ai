@@ -119,7 +119,9 @@ public sealed class AIReplyPipelineTraceTests
             NullLogger<ConversationContextBuilder>.Instance);
 
         var traceContextBuilder = new TraceConversationContextBuilder(realContextBuilder);
-        var realRanker = new PropertyKnowledgeRanker();
+        var realRanker = new PropertyKnowledgeRanker(
+            Options.Create(new KnowledgeRetrievalOptions()),
+            new DeterministicKnowledgeSimilarityScorer());
         var traceRanker = new TracePropertyKnowledgeRanker(realRanker);
         var realPromptBuilder = new AIPromptBuilder(Options.Create(new AIPromptOptions()));
         var tracePromptBuilder = new TracePromptBuilder(realPromptBuilder);
@@ -161,8 +163,8 @@ public sealed class AIReplyPipelineTraceTests
 
         var selected = traceRanker.LastRanking!.SelectedItems.ToList();
         Assert.Single(selected);
-        Assert.Equal("Guest Wi-Fi", selected[0].Title);
-        Assert.Contains(traceRanker.LastRanking.RankedItems, item => item.Item.Title == "Guest Wi-Fi" && item.Score > 0);
+        Assert.Equal("Guest Wi-Fi", selected[0].Item.Title);
+        Assert.Contains(traceRanker.LastRanking!.Candidates, item => item.Item.Title == "Guest Wi-Fi" && item.Score > 0);
 
         Assert.Equal(GuestIntent.WiFi, result!.DetectedIntent!.Intent);
 
@@ -202,9 +204,9 @@ public sealed class AIReplyPipelineTraceTests
 
     private sealed class TracePropertyKnowledgeRanker(IPropertyKnowledgeRanker inner) : IPropertyKnowledgeRanker
     {
-        public PropertyKnowledgeRankingResult? LastRanking { get; private set; }
+        public KnowledgeRetrievalResult? LastRanking { get; private set; }
 
-        public PropertyKnowledgeRankingResult Rank(
+        public KnowledgeRetrievalResult Rank(
             ConversationContext context,
             GuestIntentResult intent,
             string latestGuestMessage,

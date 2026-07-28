@@ -429,6 +429,47 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
         await dbContext.ConversationMessages.AddAsync(message, cancellationToken);
     }
 
+    public async Task AddMessageKnowledgeSourceAsync(ConversationMessageKnowledgeSource source, CancellationToken cancellationToken)
+    {
+        await dbContext.ConversationMessageKnowledgeSources.AddAsync(source, cancellationToken);
+    }
+
+    public Task<ConversationMessageFeedback?> GetMessageFeedbackAsync(Guid companyId, Guid conversationId, Guid messageId, Guid guestId, CancellationToken cancellationToken)
+    {
+        return dbContext.ConversationMessageFeedback
+            .FirstOrDefaultAsync(feedback => feedback.CompanyId == companyId
+                && feedback.ConversationId == conversationId
+                && feedback.ConversationMessageId == messageId
+                && feedback.GuestId == guestId,
+                cancellationToken);
+    }
+
+    public async Task AddMessageFeedbackAsync(ConversationMessageFeedback feedback, CancellationToken cancellationToken)
+    {
+        await dbContext.ConversationMessageFeedback.AddAsync(feedback, cancellationToken);
+    }
+
+    public async Task<IReadOnlyCollection<ConversationMessageFeedback>> ListMessageFeedbackAsync(
+        Guid companyId,
+        DateTimeOffset sinceUtc,
+        DateTimeOffset untilUtc,
+        Guid? propertyId,
+        CancellationToken cancellationToken)
+    {
+        var query = dbContext.ConversationMessageFeedback
+            .AsNoTracking()
+            .Where(feedback => feedback.CompanyId == companyId
+                && feedback.CreatedAt >= sinceUtc
+                && feedback.CreatedAt <= untilUtc);
+
+        if (propertyId is { } requestedPropertyId)
+        {
+            query = query.Where(feedback => feedback.Conversation.PropertyId == requestedPropertyId);
+        }
+
+        return await query.ToListAsync(cancellationToken);
+    }
+
     public async Task AddReadStateAsync(ConversationParticipantReadState state, CancellationToken cancellationToken)
     {
         await dbContext.ConversationParticipantReadStates.AddAsync(state, cancellationToken);

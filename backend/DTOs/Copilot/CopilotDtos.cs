@@ -91,3 +91,33 @@ public sealed class CopilotSuggestReplyResponse
     public bool ContextTruncated { get; init; }
     public DateTimeOffset GeneratedAt { get; init; }
 }
+
+public sealed class CopilotRetrievalDiagnosticsDto
+{
+    public string DetectedIntent { get; init; } = string.Empty;
+    public bool IntentAmbiguous { get; init; }
+    public int IntentConfidenceScore { get; init; }
+    public int SecondaryIntentCount { get; init; }
+    public int CandidateCount { get; init; }
+    public int SelectedCount { get; init; }
+    public string ConfidenceLevel { get; init; } = string.Empty;
+    public string ReasonCode { get; init; } = string.Empty;
+    public bool ClarificationRequired { get; init; }
+    public bool EscalationRecommended { get; init; }
+    public IReadOnlyCollection<string> SelectedCategories { get; init; } = [];
+    public IReadOnlyCollection<string> ClarificationChoices { get; init; } = [];
+    public IReadOnlyCollection<string> WarningCodes { get; init; } = [];
+    public IReadOnlyDictionary<string, string> EvaluationMetadata { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+}
+
+public sealed class ConversationRetrievalDiagnosticsResponse
+{
+    public Guid ConversationId { get; init; }
+    public CopilotRetrievalDiagnosticsDto Diagnostics { get; init; } = null!;
+    public bool ContextTruncated { get; init; }
+    public bool FallbackUsed { get; init; }
+    public bool RequiresHumanReview { get; init; }
+    public string Provider { get; init; } = string.Empty;
+    public long DurationMilliseconds { get; init; }
+    public DateTimeOffset GeneratedAt { get; init; }
+}

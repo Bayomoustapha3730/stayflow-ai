@@ -1,5 +1,7 @@
 import type {
+  AddChatMessageFeedbackRequest,
   ChatConversation,
+  ChatMessageFeedbackResponse,
   ChatHistoryResponse,
   ChatMessageResponse,
   ChatStatusResponse,
@@ -26,6 +28,9 @@ export function createChatApi(http: HttpClient) {
     },
     markConversationRead(conversationId: string, guestId: string) {
       return http.post<boolean>(`/chat/conversations/${conversationId}/read`, { guestId });
+    },
+    submitMessageFeedback(conversationId: string, messageId: string, request: AddChatMessageFeedbackRequest) {
+      return http.post<ChatMessageFeedbackResponse>(`/chat/${conversationId}/messages/${messageId}/feedback`, request);
     }
   };
 }

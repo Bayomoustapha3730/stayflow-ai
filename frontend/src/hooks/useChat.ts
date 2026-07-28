@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { createAuthApi, createChatApi, HttpClient, ApiError } from "../api";
 import { useConversationRealtime } from "./useConversationRealtime";
 import type {
+  ConversationMessageFeedbackValue,
   ChatConversation,
   ChatMessage,
   ChatStatusResponse,
@@ -29,6 +30,7 @@ export interface UseChatResult {
   isSending: boolean;
   isEscalating: boolean;
   isEnding: boolean;
+  feedbackSubmittingMessageId: string | null;
   error: string | null;
   unreadCount: number;
   conversationId: string | null;
@@ -45,6 +47,7 @@ export interface UseChatResult {
   loadHistory: () => Promise<void>;
   escalate: (reason?: string) => Promise<void>;
   endConversation: () => Promise<void>;
+  submitMessageFeedback: (messageId: string, feedbackValue: ConversationMessageFeedbackValue) => Promise<void>;
   startNewConversation: () => void;
   clearError: () => void;
   isHostTyping: boolean;
@@ -65,6 +68,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
   const [isSending, setIsSending] = useState(false);
   const [isEscalating, setIsEscalating] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
+  const [feedbackSubmittingMessageId, setFeedbackSubmittingMessageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isHostTyping, setIsHostTyping] = useState(false);
@@ -381,6 +385,38 @@ export function useChat(options: UseChatOptions): UseChatResult {
     }
   }, [chatApi, conversationId, handleError, options.guestId, updateConversationState]);
 
+  const submitMessageFeedback = useCallback(async (messageId: string, feedbackValue: ConversationMessageFeedbackValue) => {
+    if (!conversationId || !options.guestId || !messageId) {
+      return;
+    }
+
+    setFeedbackSubmittingMessageId(messageId);
+    try {
+      const response = await chatApi.submitMessageFeedback(conversationId, messageId, {
+        guestId: options.guestId,
+        feedbackValue
+      });
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === messageId
+            ? {
+                ...message,
+                feedback: {
+                  feedbackValue: response.feedbackValue,
+                  submittedAt: response.submittedAt
+                }
+              }
+            : message
+        )
+      );
+    } catch (failure) {
+      handleError(failure);
+    } finally {
+      setFeedbackSubmittingMessageId(null);
+    }
+  }, [chatApi, conversationId, handleError, options.guestId]);
+
   const startNewConversation = useCallback(() => {
     sessionStorage.removeItem(conversationStorageKey);
     setConversationId(null);
@@ -406,6 +442,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
     isSending,
     isEscalating,
     isEnding,
+    feedbackSubmittingMessageId,
     error,
     unreadCount,
     conversationId,
@@ -422,6 +459,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
     loadHistory,
     escalate,
     endConversation,
+    submitMessageFeedback,
     startNewConversation,
     clearError: () => setError(null),
     isHostTyping,

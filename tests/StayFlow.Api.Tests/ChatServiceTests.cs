@@ -204,8 +204,63 @@ public sealed class ChatServiceTests
 
         Assert.True(response.Success);
         Assert.Equal(ConversationStatus.AwaitingHost, response.Data!.ConversationStatus);
-        Assert.True(response.Data.HumanTakeoverEnabled);
+        Assert.False(response.Data.HumanTakeoverEnabled);
+        Assert.True(response.Data.RequiresHostAttention);
         Assert.Equal("I need a host or support team member to help with this request.", response.Data.AssistantMessage!.Content);
+    }
+
+    [Fact]
+    public async Task SendGuestMessageAsync_AwaitingHostFromAutoReview_DoesNotBypassGroundedAI()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.AwaitingHost, humanTakeover: true);
+        conversation.EscalationReason = "RequiresHumanReview";
+        conversation.AssignedUserId = null;
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("What is the Wi-Fi password?") with { ConversationId = conversation.Id }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.True(fixture.ReplyOrchestrator.WasCalled);
+        Assert.Equal(ConversationSenderType.AI, response.Data!.AssistantMessage!.SenderType);
+        Assert.Equal(ConversationStatus.Open, response.Data.ConversationStatus);
+        Assert.False(response.Data.HumanTakeoverEnabled);
+    }
+
+    [Fact]
+    public async Task EscalateGuestConversationAsync_AlreadyEscalatedReturnsSuccessWithoutDuplicateHostMessage()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.AwaitingHost, humanTakeover: false);
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.ChatService.EscalateGuestConversationAsync(
+            conversation.Id,
+            new EscalateChatRequest { GuestId = fixture.Guest.Id, Reason = "Help" },
+            CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal("A host has already been notified.", response.Message);
+        Assert.Equal(ConversationStatus.AwaitingHost, response.Data!.Status);
+        Assert.False(response.Data.HumanTakeoverEnabled);
+        Assert.Equal("A host has already been notified.", response.Data.GuestSafeMessage);
+        Assert.Empty(fixture.Repository.Messages);
+    }
+
+    [Fact]
+    public async Task EscalateGuestConversationAsync_ClosedConversationRejectsMessage()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.Closed);
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.ChatService.EscalateGuestConversationAsync(
+            conversation.Id,
+            new EscalateChatRequest { GuestId = fixture.Guest.Id, Reason = "Help" },
+            CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Conversation state does not allow this message.", response.Message);
     }
 
     [Fact]

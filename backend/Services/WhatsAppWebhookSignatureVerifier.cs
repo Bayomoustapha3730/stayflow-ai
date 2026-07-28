@@ -1,64 +1,154 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
+using StayFlow.Api.Repositories;
 
 namespace StayFlow.Api.Services;
 
-public sealed class WhatsAppWebhookSignatureVerifier(IOptions<WhatsAppCloudOptions> options) : IWhatsAppWebhookSignatureVerifier
+public sealed class WhatsAppWebhookSignatureVerifier(
+    IOptions<WhatsAppCloudOptions> options,
+    IWhatsAppRepository whatsAppRepository,
+    IWhatsAppCredentialResolver credentialResolver) : IWhatsAppWebhookSignatureVerifier
 {
-    public bool IsWebhookVerificationTokenValid(string? providedToken)
+    public async Task<bool> IsWebhookVerificationTokenValidAsync(string? providedToken, CancellationToken cancellationToken)
     {
-        return FixedTimeEquals(options.Value.WebhookVerifyToken, providedToken);
+        if (string.IsNullOrWhiteSpace(providedToken))
+        {
+            return false;
+        }
+
+        var expectedTokens = await ResolveCandidateWebhookTokensAsync(cancellationToken);
+        if (expectedTokens.Count == 0)
+        {
+            return false;
+        }
+
+        var providedBytes = Encoding.UTF8.GetBytes(providedToken.Trim());
+        var matched = false;
+
+        foreach (var expected in expectedTokens)
+        {
+            var expectedBytes = Encoding.UTF8.GetBytes(expected);
+            var isLengthMatch = expectedBytes.Length == providedBytes.Length;
+            var comparison = isLengthMatch && CryptographicOperations.FixedTimeEquals(expectedBytes, providedBytes);
+            matched |= comparison;
+        }
+
+        return matched;
     }
 
-    public bool TryValidateSignature(byte[] rawBody, string? signatureHeader, out string failureReason)
+    public async Task<WhatsAppWebhookSignatureValidationResult> ValidateSignatureAsync(byte[] rawBody, string? signatureHeader, CancellationToken cancellationToken)
     {
-        failureReason = string.Empty;
         if (string.IsNullOrWhiteSpace(signatureHeader))
         {
-            failureReason = "MissingSignature";
-            return false;
+            return new WhatsAppWebhookSignatureValidationResult
+            {
+                IsValid = false,
+                FailureReason = "MissingSignature"
+            };
         }
 
         const string prefix = "sha256=";
         if (!signatureHeader.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
-            failureReason = "InvalidSignatureFormat";
-            return false;
+            return new WhatsAppWebhookSignatureValidationResult
+            {
+                IsValid = false,
+                FailureReason = "InvalidSignatureFormat"
+            };
         }
 
-        var signatureHex = signatureHeader[prefix.Length..].Trim();
         byte[] providedSignature;
         try
         {
-            providedSignature = Convert.FromHexString(signatureHex);
+            providedSignature = Convert.FromHexString(signatureHeader[prefix.Length..].Trim());
         }
         catch (FormatException)
         {
-            failureReason = "InvalidSignatureFormat";
-            return false;
+            return new WhatsAppWebhookSignatureValidationResult
+            {
+                IsValid = false,
+                FailureReason = "InvalidSignatureFormat"
+            };
         }
 
-        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(options.Value.AppSecret));
-        var computedSignature = hmac.ComputeHash(rawBody);
-        if (!CryptographicOperations.FixedTimeEquals(computedSignature, providedSignature))
+        var candidates = await ResolveCandidateAppSecretsAsync(cancellationToken);
+        if (candidates.Count == 0)
         {
-            failureReason = "InvalidSignature";
-            return false;
+            return new WhatsAppWebhookSignatureValidationResult
+            {
+                IsValid = false,
+                FailureReason = "NoConfiguredAppSecret"
+            };
         }
 
-        return true;
+        var matched = false;
+        foreach (var secret in candidates)
+        {
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+            var computed = hmac.ComputeHash(rawBody);
+            var isMatch = computed.Length == providedSignature.Length && CryptographicOperations.FixedTimeEquals(computed, providedSignature);
+            matched |= isMatch;
+        }
+
+        return new WhatsAppWebhookSignatureValidationResult
+        {
+            IsValid = matched,
+            FailureReason = matched ? string.Empty : "InvalidSignature"
+        };
     }
 
-    private static bool FixedTimeEquals(string? expected, string? provided)
+    private async Task<IReadOnlyCollection<string>> ResolveCandidateAppSecretsAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(expected) || string.IsNullOrWhiteSpace(provided))
+        var integrations = await whatsAppRepository.ListActiveIntegrationsAsync(cancellationToken);
+        var limit = Math.Max(1, options.Value.WebhookSignatureSecretCandidateLimit);
+        var candidates = new HashSet<string>(StringComparer.Ordinal);
+
+        var defaultResolution = await credentialResolver.ResolveAsync(new Models.WhatsAppIntegration
         {
-            return false;
+            CredentialReference = options.Value.DefaultCredentialReference
+        }, cancellationToken);
+        if (defaultResolution.Success && !string.IsNullOrWhiteSpace(defaultResolution.AppSecret))
+        {
+            candidates.Add(defaultResolution.AppSecret.Trim());
         }
 
-        var left = Encoding.UTF8.GetBytes(expected.Trim());
-        var right = Encoding.UTF8.GetBytes(provided.Trim());
-        return left.Length == right.Length && CryptographicOperations.FixedTimeEquals(left, right);
+        foreach (var integration in integrations.Take(limit))
+        {
+            var resolution = await credentialResolver.ResolveAsync(integration, cancellationToken);
+            if (resolution.Success && !string.IsNullOrWhiteSpace(resolution.AppSecret))
+            {
+                candidates.Add(resolution.AppSecret.Trim());
+            }
+        }
+
+        return candidates.ToList();
+    }
+
+    private async Task<IReadOnlyCollection<string>> ResolveCandidateWebhookTokensAsync(CancellationToken cancellationToken)
+    {
+        var integrations = await whatsAppRepository.ListActiveIntegrationsAsync(cancellationToken);
+        var limit = Math.Max(1, options.Value.WebhookSignatureSecretCandidateLimit);
+        var candidates = new HashSet<string>(StringComparer.Ordinal);
+
+        var defaultResolution = await credentialResolver.ResolveAsync(new Models.WhatsAppIntegration
+        {
+            CredentialReference = options.Value.DefaultCredentialReference
+        }, cancellationToken);
+        if (defaultResolution.Success && !string.IsNullOrWhiteSpace(defaultResolution.WebhookVerifyToken))
+        {
+            candidates.Add(defaultResolution.WebhookVerifyToken.Trim());
+        }
+
+        foreach (var integration in integrations.Take(limit))
+        {
+            var resolution = await credentialResolver.ResolveAsync(integration, cancellationToken);
+            if (resolution.Success && !string.IsNullOrWhiteSpace(resolution.WebhookVerifyToken))
+            {
+                candidates.Add(resolution.WebhookVerifyToken.Trim());
+            }
+        }
+
+        return candidates.ToList();
     }
 }

@@ -331,6 +331,14 @@ namespace backend.Data.Migrations
                     b.Property<DateTimeOffset?>("ReadAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("RetryOfMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SendAttemptNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<string>("SenderType")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -369,11 +377,15 @@ namespace backend.Data.Migrations
 
                     b.HasIndex("IsDeleted");
 
+                    b.HasIndex("RetryOfMessageId");
+
                     b.HasIndex("SentAt");
 
                     b.HasIndex("CompanyId", "WhatsAppTemplateId");
 
                     b.HasIndex("ConversationId", "SentAt");
+
+                    b.HasIndex("CompanyId", "ConversationId", "DeliveryStatus");
 
                     b.HasIndex("CompanyId", "ConversationId", "SentAt");
 
@@ -382,6 +394,111 @@ namespace backend.Data.Migrations
                         .HasFilter("\"ExternalMessageId\" IS NOT NULL");
 
                     b.ToTable("ConversationMessages", (string)null);
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.ConversationMessageFeedback", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Comment")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConversationMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FeedbackValue")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<Guid>("GuestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("ConversationMessageId");
+
+                    b.HasIndex("GuestId");
+
+                    b.HasIndex("CompanyId", "CreatedAt");
+
+                    b.HasIndex("ConversationMessageId", "GuestId")
+                        .IsUnique();
+
+                    b.ToTable("ConversationMessageFeedback", (string)null);
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.ConversationMessageKnowledgeSource", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConversationMessageId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsPrimary")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("PropertyKnowledgeArticleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Rank")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RelevanceReason")
+                        .HasMaxLength(240)
+                        .HasColumnType("character varying(240)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("ConversationMessageId");
+
+                    b.HasIndex("PropertyKnowledgeArticleId");
+
+                    b.HasIndex("ConversationMessageId", "PropertyKnowledgeArticleId")
+                        .IsUnique();
+
+                    b.HasIndex("ConversationMessageId", "Rank");
+
+                    b.HasIndex("CompanyId", "ConversationId", "ConversationMessageId");
+
+                    b.ToTable("ConversationMessageKnowledgeSources", (string)null);
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.ConversationParticipantReadState", b =>
@@ -1677,9 +1794,78 @@ namespace backend.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("StayFlow.Api.Models.ConversationMessage", "RetryOfMessage")
+                        .WithMany("RetryAttempts")
+                        .HasForeignKey("RetryOfMessageId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Company");
 
                     b.Navigation("Conversation");
+
+                    b.Navigation("RetryOfMessage");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.ConversationMessageFeedback", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("ConversationMessageFeedback")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.Conversation", "Conversation")
+                        .WithMany("MessageFeedback")
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.ConversationMessage", "ConversationMessage")
+                        .WithMany("Feedback")
+                        .HasForeignKey("ConversationMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Conversation");
+
+                    b.Navigation("ConversationMessage");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.ConversationMessageKnowledgeSource", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("ConversationMessageKnowledgeSources")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.Conversation", "Conversation")
+                        .WithMany("MessageKnowledgeSources")
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.ConversationMessage", "ConversationMessage")
+                        .WithMany("KnowledgeSources")
+                        .HasForeignKey("ConversationMessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.PropertyKnowledgeArticle", "PropertyKnowledgeArticle")
+                        .WithMany("ConversationMessageSources")
+                        .HasForeignKey("PropertyKnowledgeArticleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Conversation");
+
+                    b.Navigation("ConversationMessage");
+
+                    b.Navigation("PropertyKnowledgeArticle");
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.ConversationParticipantReadState", b =>
@@ -2059,6 +2245,10 @@ namespace backend.Data.Migrations
 
             modelBuilder.Entity("StayFlow.Api.Models.Company", b =>
                 {
+                    b.Navigation("ConversationMessageFeedback");
+
+                    b.Navigation("ConversationMessageKnowledgeSources");
+
                     b.Navigation("ConversationMessages");
 
                     b.Navigation("Conversations");
@@ -2088,9 +2278,22 @@ namespace backend.Data.Migrations
 
             modelBuilder.Entity("StayFlow.Api.Models.Conversation", b =>
                 {
+                    b.Navigation("MessageFeedback");
+
+                    b.Navigation("MessageKnowledgeSources");
+
                     b.Navigation("Messages");
 
                     b.Navigation("ServiceRequests");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.ConversationMessage", b =>
+                {
+                    b.Navigation("Feedback");
+
+                    b.Navigation("KnowledgeSources");
+
+                    b.Navigation("RetryAttempts");
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.Guest", b =>
@@ -2128,6 +2331,11 @@ namespace backend.Data.Migrations
                     b.Navigation("Reservations");
 
                     b.Navigation("ServiceRequests");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.PropertyKnowledgeArticle", b =>
+                {
+                    b.Navigation("ConversationMessageSources");
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.Reservation", b =>

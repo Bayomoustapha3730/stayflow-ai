@@ -12,6 +12,7 @@ public sealed class AIOrchestrationResult
     public IReadOnlyCollection<ReservationCandidateLabel> CandidateLabels { get; init; } = [];
     public IReadOnlyCollection<QuestionContextCategory> QuestionCategories { get; init; } = [];
     public IReadOnlyCollection<AIResponseViolationCode> ValidationViolations { get; init; } = [];
+    public IReadOnlyCollection<AIKnowledgeSourceReference> KnowledgeSources { get; init; } = [];
     public AIProviderMetadata? ProviderMetadata { get; init; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

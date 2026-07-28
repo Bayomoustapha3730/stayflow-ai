@@ -9,7 +9,6 @@ namespace StayFlow.Api.Hubs;
 [Authorize]
 public sealed class ConversationHub(
     IConversationRepository conversationRepository,
-    Services.ICurrentTenantContext currentTenantContext,
     Services.IConversationRealtimePublisher realtimePublisher,
     ILogger<ConversationHub> logger) : Hub
 {
@@ -68,7 +67,7 @@ public sealed class ConversationHub(
 
         EnsureTypingPermission(normalizedContext);
 
-        var actorId = currentTenantContext.UserId?.ToString("D") ?? string.Empty;
+        var actorId = GetCurrentUserId()?.ToString("D") ?? string.Empty;
         var actorName = Context.User?.FindFirstValue(ClaimTypes.Name) ?? string.Empty;
         var key = $"{companyId:D}:{conversationId:D}:{normalizedContext}:{actorId}";
 
@@ -111,7 +110,7 @@ public sealed class ConversationHub(
             return;
         }
 
-        var actorId = currentTenantContext.UserId?.ToString("D") ?? string.Empty;
+        var actorId = GetCurrentUserId()?.ToString("D") ?? string.Empty;
         var actorName = Context.User?.FindFirstValue(ClaimTypes.Name) ?? string.Empty;
         var key = $"{companyId:D}:{conversationId:D}:{normalizedContext}:{actorId}";
 
@@ -206,7 +205,15 @@ public sealed class ConversationHub(
 
     private bool TryGetTenantContext(out Guid companyId)
     {
-        if (!currentTenantContext.IsAuthenticated || currentTenantContext.CompanyId is not { } currentCompanyId || currentCompanyId == Guid.Empty)
+        var user = Context.User;
+        if (user?.Identity?.IsAuthenticated != true)
+        {
+            companyId = Guid.Empty;
+            return false;
+        }
+
+        var claimValue = user.FindFirstValue("company_id");
+        if (!Guid.TryParse(claimValue, out var currentCompanyId) || currentCompanyId == Guid.Empty)
         {
             companyId = Guid.Empty;
             return false;
@@ -214,5 +221,13 @@ public sealed class ConversationHub(
 
         companyId = currentCompanyId;
         return true;
+    }
+
+    private Guid? GetCurrentUserId()
+    {
+        var claimValue = Context.User?.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(claimValue, out var userId) && userId != Guid.Empty
+            ? userId
+            : null;
     }
 }

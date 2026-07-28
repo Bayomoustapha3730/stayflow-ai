@@ -8,6 +8,14 @@ namespace StayFlow.Api.Repositories;
 
 public sealed class WhatsAppRepository(ApplicationDbContext dbContext) : IWhatsAppRepository
 {
+    public async Task<IReadOnlyCollection<WhatsAppIntegration>> ListActiveIntegrationsAsync(CancellationToken cancellationToken)
+    {
+        return await dbContext.WhatsAppIntegrations
+            .Where(integration => integration.IsActive)
+            .OrderBy(integration => integration.CreatedAt)
+            .ToListAsync(cancellationToken);
+    }
+
     public Task<WhatsAppIntegration?> GetActiveIntegrationByPhoneNumberIdAsync(string phoneNumberId, CancellationToken cancellationToken)
     {
         return dbContext.WhatsAppIntegrations

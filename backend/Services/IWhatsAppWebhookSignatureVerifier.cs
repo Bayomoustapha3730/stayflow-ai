@@ -1,7 +1,13 @@
 namespace StayFlow.Api.Services;
 
+public sealed class WhatsAppWebhookSignatureValidationResult
+{
+    public bool IsValid { get; init; }
+    public string FailureReason { get; init; } = string.Empty;
+}
+
 public interface IWhatsAppWebhookSignatureVerifier
 {
-    bool IsWebhookVerificationTokenValid(string? providedToken);
-    bool TryValidateSignature(byte[] rawBody, string? signatureHeader, out string failureReason);
+    Task<bool> IsWebhookVerificationTokenValidAsync(string? providedToken, CancellationToken cancellationToken);
+    Task<WhatsAppWebhookSignatureValidationResult> ValidateSignatureAsync(byte[] rawBody, string? signatureHeader, CancellationToken cancellationToken);
 }
