@@ -227,6 +227,7 @@ export function PropertyKnowledgePage({ propertyId }: PropertyKnowledgePageProps
 
         <HostConsoleNav
           conversationsHref="/host/conversations"
+          copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={propertyKnowledgeHref}
           whatsappSettingsHref="/host/settings/whatsapp"
           current="knowledge"

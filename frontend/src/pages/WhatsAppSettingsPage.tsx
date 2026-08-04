@@ -113,6 +113,7 @@ export function WhatsAppSettingsPage() {
 
         <HostConsoleNav
           conversationsHref="/host/conversations"
+          copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={null}
           whatsappSettingsHref="/host/settings/whatsapp"
           current="settings"

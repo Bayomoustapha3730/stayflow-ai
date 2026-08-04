@@ -402,14 +402,6 @@ public sealed class AIReplyOrchestrator(
             : string.IsNullOrWhiteSpace(latestGuestMessage)
                 || (string.IsNullOrWhiteSpace(output) && ranking.SelectedItems.Count == 0 && !ranking.RequiresClarification);
 
-        if (request.Operation == AIReplyOperation.FutureGuestReply)
-        {
-            warnings.Add(new AIReplyOrchestrationWarning(
-                "FutureGuestReplyNotEnabled",
-                "Future guest replies are not enabled for autonomous dispatch.",
-                "info"));
-        }
-
         if (orchestratorOptions.EnableFallback && (providerFailed || validationFailed || safetyBlocked || contextInsufficient))
         {
             fallbackUsed = true;
@@ -470,11 +462,6 @@ public sealed class AIReplyOrchestrator(
             confidence = Math.Min(confidence, 35);
         }
 
-        if (request.Operation == AIReplyOperation.FutureGuestReply)
-        {
-            confidence = Math.Min(confidence, 40);
-        }
-
         completedStages.Add(AIReplyOrchestrationStage.ResultAssembled);
         stopwatch.Stop();
 
@@ -487,9 +474,7 @@ public sealed class AIReplyOrchestrator(
             fallbackUsed,
             sources.Count,
             warnings.Count,
-            conflictRequiresReview
-                || safetyAfterFallback.RequiresHumanReview
-                || request.Operation == AIReplyOperation.FutureGuestReply);
+            conflictRequiresReview || safetyAfterFallback.RequiresHumanReview);
 
         return new AIReplyOrchestrationResult
         {
@@ -509,9 +494,7 @@ public sealed class AIReplyOrchestrator(
             FallbackUsed = fallbackUsed,
             CompletedStages = completedStages,
             DurationMilliseconds = stopwatch.ElapsedMilliseconds,
-            RequiresHumanReview = conflictRequiresReview
-                || safetyAfterFallback.RequiresHumanReview
-                || request.Operation == AIReplyOperation.FutureGuestReply,
+            RequiresHumanReview = conflictRequiresReview || safetyAfterFallback.RequiresHumanReview,
             RetrievalDiagnostics = new RetrievalDiagnosticsSnapshot
             {
                 DetectedIntent = intent.Intent.ToString(),

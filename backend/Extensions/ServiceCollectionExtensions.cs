@@ -106,6 +106,13 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.MaximumVehicleCount is >= 1 and <= 10, "Concierge action maximum vehicle count must be between 1 and 10.")
             .Validate(options => options.MaximumNoteLength is >= 20 and <= 500, "Concierge action note length must be between 20 and 500 characters.")
             .ValidateOnStart();
+        services.AddOptions<Services.HostCopilot.HostCopilotOptions>()
+            .Bind(configuration.GetSection(Services.HostCopilot.HostCopilotOptions.SectionName))
+            .Validate(options => options.NormalPrioritySlaMinutes is >= 1 and <= 240, "Host copilot normal SLA must be between 1 and 240 minutes.")
+            .Validate(options => options.HighPrioritySlaMinutes is >= 1 and <= 240, "Host copilot high SLA must be between 1 and 240 minutes.")
+            .Validate(options => options.UrgentPrioritySlaMinutes is >= 1 and <= 240, "Host copilot urgent SLA must be between 1 and 240 minutes.")
+            .Validate(options => options.MaximumTimelineEvents is >= 3 and <= 50, "Host copilot timeline event limit must be between 3 and 50.")
+            .ValidateOnStart();
         services.AddOptions<Services.WhatsAppCloudOptions>()
             .Bind(configuration.GetSection(Services.WhatsAppCloudOptions.SectionName))
             .ValidateOnStart();
@@ -221,6 +228,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.ConciergeActions.IConciergeActionExecutor, Services.ConciergeActions.ConciergeActionExecutor>();
         services.AddScoped<Services.ConciergeActions.IConciergeActionOrchestrator, Services.ConciergeActions.ConciergeActionOrchestrator>();
         services.AddScoped<Services.ConciergeActions.IConciergeHostActionService, Services.ConciergeActions.ConciergeHostActionService>();
+        services.AddScoped<Services.HostCopilot.IHostCopilotWorkspaceService, Services.HostCopilot.HostCopilotWorkspaceService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();
         services.AddSingleton<Services.IQuestionRelevanceClassifier, Services.KeywordQuestionRelevanceClassifier>();

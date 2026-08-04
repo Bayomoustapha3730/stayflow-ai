@@ -135,6 +135,38 @@ public sealed class AIReplyOrchestratorGroundingTests
         Assert.DoesNotContain("Conflicting approved Wi-Fi information was found", result.Output, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task OrchestrateAsync_FutureGuestReply_WithGroundedContext_DoesNotForceHumanReview()
+    {
+        var selected = new ConversationContextKnowledgeItem(
+            "wifi-source-1",
+            "Guest Wi-Fi",
+            "Network: StayFlowGuest\nPassword: DemoStay2026",
+            PropertyKnowledgeCategory.WiFi,
+            DateTimeOffset.UtcNow,
+            10,
+            true,
+            ["wifi", "network"],
+            "Guest wireless details");
+
+        var context = BuildContext([selected], [selected]);
+        var provider = new SpyDevelopmentProvider();
+        var orchestrator = BuildOrchestrator(context, provider, selectedItems: [selected]);
+
+        var result = await orchestrator.OrchestrateAsync(Guid.NewGuid(), new AIReplyOrchestrationRequest
+        {
+            ConversationId = context.ConversationId,
+            Operation = AIReplyOperation.FutureGuestReply,
+            RequestedTone = "friendly"
+        }, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(AIReplyOperation.FutureGuestReply, result!.Operation);
+        Assert.False(result.RequiresHumanReview);
+        Assert.DoesNotContain(result.Warnings, warning => warning.Code == "FutureGuestReplyNotEnabled");
+        Assert.NotNull(result.Output);
+    }
+
     private static AIReplyOrchestrator BuildOrchestrator(
         ConversationContext context,
         SpyDevelopmentProvider provider,

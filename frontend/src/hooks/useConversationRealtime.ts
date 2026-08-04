@@ -13,7 +13,8 @@ import {
   ConversationUnreadCountChangedEvent,
   ConversationAssignedEvent,
   ConversationReadStateChangedEvent,
-  ConversationStateChangedEvent
+  ConversationStateChangedEvent,
+  HostCopilotWorkspaceUpdatedEvent
 } from "../realtime/conversationConnection";
 
 interface UseConversationRealtimeOptions {
@@ -28,6 +29,7 @@ interface UseConversationRealtimeOptions {
   onAssigned?: (event: ConversationAssignedEvent) => void;
   onReadStateChanged?: (event: ConversationReadStateChangedEvent) => void;
   onStateChanged?: (event: ConversationStateChangedEvent) => void;
+  onHostCopilotWorkspaceUpdated?: (event: HostCopilotWorkspaceUpdatedEvent) => void;
 }
 
 export interface UseConversationRealtimeResult {
@@ -53,7 +55,8 @@ export function useConversationRealtime({
   onUnreadChanged,
   onAssigned,
   onReadStateChanged,
-  onStateChanged
+  onStateChanged,
+  onHostCopilotWorkspaceUpdated
 }: UseConversationRealtimeOptions): UseConversationRealtimeResult {
   const isTestMode = import.meta.env.MODE === "test" && import.meta.env.VITE_ENABLE_REALTIME_IN_TESTS !== "true";
 
@@ -71,7 +74,8 @@ export function useConversationRealtime({
     onUnreadChanged,
     onAssigned,
     onReadStateChanged,
-    onStateChanged
+    onStateChanged,
+    onHostCopilotWorkspaceUpdated
   });
 
   useEffect(() => {
@@ -83,9 +87,10 @@ export function useConversationRealtime({
       onUnreadChanged,
       onAssigned,
       onReadStateChanged,
-      onStateChanged
+      onStateChanged,
+      onHostCopilotWorkspaceUpdated
     };
-  }, [onAssigned, onMessageCreated, onReadStateChanged, onStateChanged, onTypingStarted, onTypingStopped, onUnreadChanged]);
+  }, [onAssigned, onHostCopilotWorkspaceUpdated, onMessageCreated, onReadStateChanged, onStateChanged, onTypingStarted, onTypingStopped, onUnreadChanged]);
 
   useEffect(() => {
     latestConversationIdRef.current = conversationId;
@@ -204,6 +209,9 @@ export function useConversationRealtime({
       }),
       onConversationRealtimeEvent(connection, "ConversationStateChanged", (event: ConversationStateChangedEvent) => {
         callbacksRef.current.onStateChanged?.(event);
+      }),
+      onConversationRealtimeEvent(connection, "HostCopilotWorkspaceUpdated", (event: HostCopilotWorkspaceUpdatedEvent) => {
+        callbacksRef.current.onHostCopilotWorkspaceUpdated?.(event);
       })
     ];
 

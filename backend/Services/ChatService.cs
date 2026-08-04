@@ -189,7 +189,7 @@ public sealed class ChatService(
         var replyResult = await aiReplyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
         {
             ConversationId = conversation.Id,
-            Operation = AIReplyOperation.GeneratedHostReply,
+            Operation = AIReplyOperation.FutureGuestReply,
             CorrelationId = currentTenantContext.CorrelationId
         }, cancellationToken);
 
