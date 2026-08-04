@@ -162,6 +162,7 @@ export function HostInboxPage() {
 
         <HostConsoleNav
           conversationsHref="/host/conversations"
+          copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={resolvedKnowledgePropertyId ? `/host/properties/${resolvedKnowledgePropertyId}/knowledge` : null}
           whatsappSettingsHref="/host/settings/whatsapp"
           current="conversations"

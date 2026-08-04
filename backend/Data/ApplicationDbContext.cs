@@ -31,6 +31,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ParkingRequest> ParkingRequests => Set<ParkingRequest>();
     public DbSet<HostNotificationRecord> HostNotificationRecords => Set<HostNotificationRecord>();
     public DbSet<ActionNotificationOutbox> ActionNotificationOutbox => Set<ActionNotificationOutbox>();
+    public DbSet<HostCopilotSlaAlert> HostCopilotSlaAlerts => Set<HostCopilotSlaAlert>();
     public DbSet<WhatsAppIntegration> WhatsAppIntegrations => Set<WhatsAppIntegration>();
     public DbSet<WhatsAppTemplate> WhatsAppTemplates => Set<WhatsAppTemplate>();
     public DbSet<Models.ServiceProvider> ServiceProviders => Set<Models.ServiceProvider>();

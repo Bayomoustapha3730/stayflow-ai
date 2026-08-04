@@ -1127,6 +1127,7 @@ public sealed class ConversationServiceTests
     private sealed class RecordingConversationRealtimePublisher : IConversationRealtimePublisher
     {
         public List<(Guid CompanyId, Guid ConversationId, object Payload)> DeliveryUpdates { get; } = [];
+        public List<(Guid CompanyId, object Payload)> HostCopilotWorkspaceUpdates { get; } = [];
 
         public Task PublishMessageCreatedAsync(Guid companyId, Guid conversationId, object payload, bool internalOnly, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishMessageUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
@@ -1139,6 +1140,12 @@ public sealed class ConversationServiceTests
         public Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
         {
             DeliveryUpdates.Add((companyId, conversationId, payload));
+            return Task.CompletedTask;
+        }
+
+        public Task PublishHostCopilotWorkspaceUpdatedAsync(Guid companyId, object payload, CancellationToken cancellationToken)
+        {
+            HostCopilotWorkspaceUpdates.Add((companyId, payload));
             return Task.CompletedTask;
         }
     }

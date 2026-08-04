@@ -75,7 +75,7 @@ public sealed class AIPromptBuilder(IOptions<AIPromptOptions> options) : IAIProm
             AIReplyOperation.SuggestedHostReplies =>
                 "Return one concise anchor reply that can be adapted into three unique host suggestions.",
             AIReplyOperation.FutureGuestReply =>
-                "Return one safe draft guest reply, but do not imply autonomous dispatch.",
+                "Return one safe, guest-ready reply suitable for autonomous dispatch when context is sufficient.",
             _ => "Return one safe host draft reply."
         };
 

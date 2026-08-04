@@ -78,4 +78,10 @@ public sealed class ConversationRealtimePublisher(IHubContext<ConversationHub> h
         await hubContext.Clients.Group(ConversationHubChannels.ConversationGroup(conversationId))
             .SendCoreAsync("ConversationMessageDeliveryUpdated", [payload], cancellationToken);
     }
+
+    public Task PublishHostCopilotWorkspaceUpdatedAsync(Guid companyId, object payload, CancellationToken cancellationToken)
+    {
+        return hubContext.Clients.Group(ConversationHubChannels.HostCompanyGroup(companyId))
+            .SendCoreAsync("HostCopilotWorkspaceUpdated", [payload], cancellationToken);
+    }
 }

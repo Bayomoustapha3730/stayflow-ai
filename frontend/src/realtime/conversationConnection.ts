@@ -139,6 +139,13 @@ export interface ConversationStateChangedEvent {
   timestamp?: string;
 }
 
+export interface HostCopilotWorkspaceUpdatedEvent {
+  conversationId?: string;
+  actionId?: string;
+  eventType?: string;
+  timestamp?: string;
+}
+
 export type RealtimeEventMap = {
   ConversationMessageCreated: RealtimeMessageEvent;
   ConversationMessageUpdated: ConversationMessageUpdatedEvent;
@@ -148,6 +155,7 @@ export type RealtimeEventMap = {
   ConversationAssigned: ConversationAssignedEvent;
   ConversationReadStateChanged: ConversationReadStateChangedEvent;
   ConversationStateChanged: ConversationStateChangedEvent;
+  HostCopilotWorkspaceUpdated: HostCopilotWorkspaceUpdatedEvent;
 };
 
 export type RealtimeConnectionState = "offline" | "connecting" | "online" | "reconnecting";
@@ -168,6 +176,7 @@ interface SharedConnection {
 
 const sharedConnections = new Map<string, SharedConnection>();
 const sharedByConnection = new WeakMap<HubConnection, SharedConnection>();
+const eventListenerRefCounts = new WeakMap<HubConnection, Map<string, Map<(payload: object) => void, number>>>();
 
 function connectionKey(baseUrl: string): string {
   return normalizeBaseUrl(baseUrl);
@@ -392,8 +401,47 @@ export function onConversationRealtimeEvent<K extends keyof RealtimeEventMap>(
   listener: RealtimeListener<K>
 ): () => void {
   const typedListener = listener as (payload: object) => void;
-  connection.on(eventName, typedListener);
+  let byEvent = eventListenerRefCounts.get(connection);
+  if (!byEvent) {
+    byEvent = new Map<string, Map<(payload: object) => void, number>>();
+    eventListenerRefCounts.set(connection, byEvent);
+  }
+
+  let eventCounts = byEvent.get(eventName);
+  if (!eventCounts) {
+    eventCounts = new Map<(payload: object) => void, number>();
+    byEvent.set(eventName, eventCounts);
+  }
+
+  const previousCount = eventCounts.get(typedListener) ?? 0;
+  if (previousCount === 0) {
+    connection.on(eventName, typedListener);
+  }
+
+  eventCounts.set(typedListener, previousCount + 1);
+
   return () => {
-    connection.off(eventName, typedListener);
+    const activeByEvent = eventListenerRefCounts.get(connection);
+    if (!activeByEvent) {
+      connection.off(eventName, typedListener);
+      return;
+    }
+
+    const activeEventCounts = activeByEvent.get(eventName);
+    if (!activeEventCounts) {
+      connection.off(eventName, typedListener);
+      return;
+    }
+
+    const currentCount = activeEventCounts.get(typedListener) ?? 0;
+    if (currentCount <= 1) {
+      activeEventCounts.delete(typedListener);
+      if (activeEventCounts.size == 0) {
+        activeByEvent.delete(eventName);
+      }
+      connection.off(eventName, typedListener);
+    } else {
+      activeEventCounts.set(typedListener, currentCount - 1);
+    }
   };
 }

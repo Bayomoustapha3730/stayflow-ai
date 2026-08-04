@@ -1,4 +1,5 @@
 import { DemoPage } from "./pages/DemoPage";
+import { HostCopilotWorkspacePage } from "./pages/HostCopilotWorkspacePage";
 import { HostInboxPage } from "./pages/HostInboxPage";
 import { PropertyKnowledgePage } from "./pages/PropertyKnowledgePage";
 import { WhatsAppSettingsPage } from "./pages/WhatsAppSettingsPage";
@@ -11,6 +12,10 @@ export default function App() {
 
   if (/^\/host\/settings\/whatsapp\/?$/.test(path)) {
     return <WhatsAppSettingsPage />;
+  }
+
+  if (path === "/host/copilot" || path === "/host/copilot/") {
+    return <HostCopilotWorkspacePage />;
   }
 
   if (path === "/host" || path.startsWith("/host/conversations")) {

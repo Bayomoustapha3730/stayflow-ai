@@ -771,6 +771,9 @@ public sealed class GuestWidgetGroundedReplyTests
 
         public Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
             => Task.CompletedTask;
+
+        public Task PublishHostCopilotWorkspaceUpdatedAsync(Guid companyId, object payload, CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 
     private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher

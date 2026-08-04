@@ -9,6 +9,10 @@ vi.mock("../src/pages/HostInboxPage", () => ({
   HostInboxPage: () => <div data-testid="host-inbox-page">host</div>
 }));
 
+vi.mock("../src/pages/HostCopilotWorkspacePage", () => ({
+  HostCopilotWorkspacePage: () => <div data-testid="host-copilot-workspace-page">host-copilot</div>
+}));
+
 vi.mock("../src/pages/PropertyKnowledgePage", () => ({
   PropertyKnowledgePage: ({ propertyId }: { propertyId: string | null }) => (
     <div data-testid="property-knowledge-page">{propertyId ?? "(none)"}</div>
@@ -53,6 +57,14 @@ describe("App routing", () => {
     render(<App />);
 
     expect(screen.getByTestId("whatsapp-settings-page")).toBeInTheDocument();
+  });
+
+  it("renders the host copilot workspace route", () => {
+    window.history.pushState({}, "", "/host/copilot");
+
+    render(<App />);
+
+    expect(screen.getByTestId("host-copilot-workspace-page")).toBeInTheDocument();
   });
 
   it("passes a null property ID when no valid demo fallback is configured", () => {

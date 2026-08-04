@@ -25,6 +25,7 @@ public sealed class ChatServiceTests
         Assert.Single(fixture.Repository.Conversations);
         Assert.Equal(2, fixture.Repository.Messages.Count);
         Assert.True(fixture.ReplyOrchestrator.WasCalled);
+        Assert.Equal(AIReplyOperation.FutureGuestReply, fixture.ReplyOrchestrator.LastOperation);
         Assert.Equal(ConversationSenderType.AI, response.Data!.AssistantMessage!.SenderType);
         Assert.Equal("Development", response.Data.ProviderMetadata!.ProviderName);
     }
@@ -380,6 +381,7 @@ public sealed class ChatServiceTests
     private sealed class FakeAIReplyOrchestrator : IAIReplyOrchestrator
     {
         public bool WasCalled { get; set; }
+        public AIReplyOperation? LastOperation { get; private set; }
         public AIReplyOrchestrationResult Result { get; set; } = new()
         {
             ConversationId = Guid.NewGuid(),
@@ -396,6 +398,7 @@ public sealed class ChatServiceTests
         public Task<AIReplyOrchestrationResult?> OrchestrateAsync(Guid companyId, AIReplyOrchestrationRequest request, CancellationToken cancellationToken)
         {
             WasCalled = true;
+            LastOperation = request.Operation;
             return Task.FromResult<AIReplyOrchestrationResult?>(new AIReplyOrchestrationResult
             {
                 ConversationId = request.ConversationId,
@@ -617,6 +620,7 @@ public sealed class ChatServiceTests
         public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishHostCopilotWorkspaceUpdatedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher

@@ -107,6 +107,10 @@ vi.mock("@microsoft/signalr", () => {
       this.state = HubConnectionState.Connected;
       this.reconnectedHandler?.();
     }
+
+    public getEventHandlerCount(eventName: string): number {
+      return this.eventHandlers.get(eventName)?.size ?? 0;
+    }
   }
 
   class HubConnectionBuilder {
@@ -309,5 +313,29 @@ describe("conversationConnection", () => {
     connection.startImpl = () => Promise.reject(new Error("startup exploded"));
 
     await expect(mod.ensureConversationConnectionStarted("http://localhost:5243")).rejects.toThrow("startup exploded");
+  });
+
+  it("deduplicates event subscriptions for the same listener", async () => {
+    const { mod, signalR } = await loadModule();
+
+    const connection = mod.acquireConversationConnection("http://localhost:5243", "token");
+    const testConnection = connection as unknown as {
+      getEventHandlerCount: (eventName: string) => number;
+    };
+
+    const listener = vi.fn();
+    const unsubscribeOne = mod.onConversationRealtimeEvent(connection, "HostCopilotWorkspaceUpdated", listener);
+    const unsubscribeTwo = mod.onConversationRealtimeEvent(connection, "HostCopilotWorkspaceUpdated", listener);
+
+    expect(testConnection.getEventHandlerCount("HostCopilotWorkspaceUpdated")).toBe(1);
+
+    unsubscribeOne();
+    expect(testConnection.getEventHandlerCount("HostCopilotWorkspaceUpdated")).toBe(1);
+
+    unsubscribeTwo();
+    expect(testConnection.getEventHandlerCount("HostCopilotWorkspaceUpdated")).toBe(0);
+
+    await mod.releaseConversationConnection("http://localhost:5243");
+    expect(signalR.__testing.createdConnections.length).toBeGreaterThan(0);
   });
 });
