@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Auth;
 using StayFlow.Api.Services;
@@ -12,6 +13,7 @@ namespace StayFlow.Api.Controllers;
 [ApiController]
 [Route("auth")]
 [Produces("application/json")]
+[EnableRateLimiting("public-auth")]
 public sealed class AuthController(IAuthService authService) : ControllerBase
 {
     /// <summary>

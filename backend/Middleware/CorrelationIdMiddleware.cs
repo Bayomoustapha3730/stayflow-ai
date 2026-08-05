@@ -3,6 +3,7 @@ namespace StayFlow.Api.Middleware;
 public sealed class CorrelationIdMiddleware(RequestDelegate next)
 {
     public const string HeaderName = "X-Correlation-Id";
+    private const int MaximumLength = 64;
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -18,9 +19,33 @@ public sealed class CorrelationIdMiddleware(RequestDelegate next)
         if (context.Request.Headers.TryGetValue(HeaderName, out var values)
             && !string.IsNullOrWhiteSpace(values.FirstOrDefault()))
         {
-            return values.First()!;
+            var candidate = values.First()!.Trim();
+            if (IsValidCorrelationId(candidate))
+            {
+                return candidate;
+            }
         }
 
-        return context.TraceIdentifier;
+        return Guid.NewGuid().ToString("N");
+    }
+
+    private static bool IsValidCorrelationId(string value)
+    {
+        if (value.Length is 0 or > MaximumLength)
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            var isAllowed = char.IsLetterOrDigit(character)
+                || character is '-' or '_' or '.';
+            if (!isAllowed)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.ConciergeActions;
@@ -14,6 +15,7 @@ namespace StayFlow.Api.Controllers;
 [Route("host/copilot")]
 [Produces("application/json")]
 [Authorize]
+[EnableRateLimiting("host-api")]
 public sealed class HostCopilotController(IHostCopilotWorkspaceService workspaceService) : ControllerBase
 {
     [HttpGet("workspace")]

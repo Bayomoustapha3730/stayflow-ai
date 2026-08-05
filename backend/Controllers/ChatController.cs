@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Chat;
@@ -15,6 +16,7 @@ namespace StayFlow.Api.Controllers;
 [Route("chat")]
 [Produces("application/json")]
 [Authorize]
+[EnableRateLimiting("guest-chat")]
 public sealed class ChatController(IChatService chatService, IConversationService conversationService) : ControllerBase
 {
     [HttpPost("message")]

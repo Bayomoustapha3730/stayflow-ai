@@ -1,4 +1,5 @@
 using StayFlow.Api.Authorization;
+using StayFlow.Api.Exceptions;
 
 namespace StayFlow.Api.Middleware;
 
@@ -9,9 +10,7 @@ public sealed class PermissionAuthorizationMiddleware(RequestDelegate next)
         var permission = context.GetEndpoint()?.Metadata.GetMetadata<RequiresPermissionAttribute>()?.Permission;
         if (permission is not null && !context.User.Claims.Any(claim => claim.Type == "permission" && claim.Value == permission))
         {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsJsonAsync(Common.ApiResponse<object>.Fail("Permission denied."));
-            return;
+            throw new ForbiddenOperationException("Permission denied.", "permission_denied");
         }
 
         await next(context);
