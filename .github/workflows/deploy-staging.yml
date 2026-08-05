@@ -1,0 +1,103 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: stayflow-staging-deployment
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_CONTAINER_REGISTRY: ${{ vars.AZURE_CONTAINER_REGISTRY }}
+      AZURE_CONTAINER_APPS_ENVIRONMENT: ${{ vars.AZURE_CONTAINER_APPS_ENVIRONMENT }}
+      AZURE_BACKEND_CONTAINER_APP: ${{ vars.AZURE_BACKEND_CONTAINER_APP }}
+      AZURE_FRONTEND_CONTAINER_APP: ${{ vars.AZURE_FRONTEND_CONTAINER_APP }}
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+      JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+      WHATSAPP_WEBHOOK_SECRET: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}
+      PRODUCTION_MIGRATION_APPROVED: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve ACR login server
+        id: acr
+        run: |
+          set -euo pipefail
+          LOGIN_SERVER="$(az acr show --name "$AZURE_CONTAINER_REGISTRY" --resource-group "$AZURE_RESOURCE_GROUP" --query loginServer -o tsv)"
+          echo "login_server=$LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend image
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${GITHUB_SHA}"
+          docker build -f backend/Dockerfile -t "${{ steps.acr.outputs.login_server }}/stayflow-api:${IMAGE_TAG}" .
+          docker push "${{ steps.acr.outputs.login_server }}/stayflow-api:${IMAGE_TAG}"
+
+      - name: Build and push frontend image
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${GITHUB_SHA}"
+          docker build -f frontend/Dockerfile -t "${{ steps.acr.outputs.login_server }}/stayflow-web:${IMAGE_TAG}" .
+          docker push "${{ steps.acr.outputs.login_server }}/stayflow-web:${IMAGE_TAG}"
+
+      - name: Deploy infrastructure
+        run: |
+          set -euo pipefail
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters @infra/parameters/staging.json \
+            --parameters imageSha="${GITHUB_SHA}" \
+            --parameters backendImage="${{ steps.acr.outputs.login_server }}/stayflow-api:${GITHUB_SHA}" \
+            --parameters frontendImage="${{ steps.acr.outputs.login_server }}/stayflow-web:${GITHUB_SHA}" \
+            --parameters postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
+            --parameters jwtSigningKey="$JWT_SIGNING_KEY" \
+            --parameters openAiApiKey="$OPENAI_API_KEY" \
+            --parameters whatsappAccessToken="$WHATSAPP_ACCESS_TOKEN" \
+            --parameters whatsappWebhookSecret="$WHATSAPP_WEBHOOK_SECRET"
+
+      - name: Generate migration script
+        run: ./scripts/generate-migration-script.sh /tmp/stayflow-staging.sql
+
+      - name: Apply staging migrations
+        env:
+          DATABASE_URL: ${{ env.STAGING_DATABASE_URL }}
+        run: ./scripts/apply-migrations.sh /tmp/stayflow-staging.sql
+
+      - name: Smoke test deployment
+        env:
+          STAYFLOW_BACKEND_URL: ${{ vars.STAGING_BACKEND_URL }}
+          STAYFLOW_FRONTEND_URL: ${{ vars.STAGING_FRONTEND_URL }}
+        run: ./tests/deployment/smoke.sh
+
+      - name: Deployment summary
+        run: |
+          set -euo pipefail
+          echo "Staging deployment complete for SHA ${GITHUB_SHA}"
+          echo "Backend URL: ${{ vars.STAGING_BACKEND_URL }}"
+          echo "Frontend URL: ${{ vars.STAGING_FRONTEND_URL }}"

@@ -202,6 +202,8 @@ builder.Services.AddApplicationHealthChecks();
  */
 var app = builder.Build();
 
+Program.ValidateProductionConfiguration(app.Configuration, app.Environment);
+
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseExceptionHandler();
 app.UseMiddleware<RequestLoggingMiddleware>();
@@ -268,4 +270,46 @@ app.MapHealthChecks("/health", new HealthCheckOptions
 
 app.Run();
 
-public partial class Program;
+public partial class Program
+{
+    internal static void ValidateProductionConfiguration(IConfiguration configuration, IHostEnvironment environment)
+    {
+        if (environment.IsDevelopment())
+        {
+            return;
+        }
+
+        var signingKey = configuration["Jwt:SigningKey"] ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(signingKey)
+            || signingKey.Contains("replace-with", StringComparison.OrdinalIgnoreCase)
+            || signingKey.Contains("development-only", StringComparison.OrdinalIgnoreCase)
+            || signingKey.Length < 32)
+        {
+            throw new InvalidOperationException("Jwt:SigningKey must be configured with a strong production value.");
+        }
+
+        var connectionString = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
+        if (connectionString.Contains("localhost", StringComparison.OrdinalIgnoreCase)
+            || connectionString.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("ConnectionStrings:DefaultConnection must not point to localhost in production.");
+        }
+
+        var origins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+        if (origins.Length == 0)
+        {
+            throw new InvalidOperationException("Cors:AllowedOrigins must contain at least one production origin.");
+        }
+
+        var allowLocalOrigins = configuration.GetValue<bool>("ProductionHardening:Security:AllowLocalOrigins");
+        if (!allowLocalOrigins && origins.Any(origin => origin.Contains("localhost", StringComparison.OrdinalIgnoreCase) || origin.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("Cors:AllowedOrigins must not contain localhost origins in production.");
+        }
+
+        if (configuration.GetValue<bool>("WhatsAppCloud:DevelopmentMode"))
+        {
+            throw new InvalidOperationException("WhatsAppCloud:DevelopmentMode must be disabled in production.");
+        }
+    }
+}

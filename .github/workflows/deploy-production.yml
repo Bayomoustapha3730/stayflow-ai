@@ -1,0 +1,102 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: Immutable git SHA image tag to promote
+        required: true
+        type: string
+  release:
+    types:
+      - published
+
+concurrency:
+  group: stayflow-production-deployment
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      AZURE_CONTAINER_REGISTRY: ${{ vars.AZURE_CONTAINER_REGISTRY }}
+      AZURE_BACKEND_CONTAINER_APP: ${{ vars.AZURE_BACKEND_CONTAINER_APP }}
+      AZURE_FRONTEND_CONTAINER_APP: ${{ vars.AZURE_FRONTEND_CONTAINER_APP }}
+      PRODUCTION_DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+      JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+      WHATSAPP_WEBHOOK_SECRET: ${{ secrets.WHATSAPP_WEBHOOK_SECRET }}
+      IMAGE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.image_sha || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve ACR login server
+        id: acr
+        run: |
+          set -euo pipefail
+          LOGIN_SERVER="$(az acr show --name "$AZURE_CONTAINER_REGISTRY" --resource-group "$AZURE_RESOURCE_GROUP" --query loginServer -o tsv)"
+          echo "login_server=$LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+
+      - name: Promote immutable images
+        run: |
+          set -euo pipefail
+          BACKEND_IMAGE="${{ steps.acr.outputs.login_server }}/stayflow-api:${IMAGE_SHA}"
+          FRONTEND_IMAGE="${{ steps.acr.outputs.login_server }}/stayflow-web:${IMAGE_SHA}"
+          az containerapp update --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_BACKEND_CONTAINER_APP" --image "$BACKEND_IMAGE"
+          az containerapp update --resource-group "$AZURE_RESOURCE_GROUP" --name "$AZURE_FRONTEND_CONTAINER_APP" --image "$FRONTEND_IMAGE"
+
+      - name: Update platform configuration
+        run: |
+          set -euo pipefail
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters @infra/parameters/production.json \
+            --parameters imageSha="$IMAGE_SHA" \
+            --parameters backendImage="${{ steps.acr.outputs.login_server }}/stayflow-api:${IMAGE_SHA}" \
+            --parameters frontendImage="${{ steps.acr.outputs.login_server }}/stayflow-web:${IMAGE_SHA}" \
+            --parameters postgresAdminPassword="$POSTGRES_ADMIN_PASSWORD" \
+            --parameters jwtSigningKey="$JWT_SIGNING_KEY" \
+            --parameters openAiApiKey="$OPENAI_API_KEY" \
+            --parameters whatsappAccessToken="$WHATSAPP_ACCESS_TOKEN" \
+            --parameters whatsappWebhookSecret="$WHATSAPP_WEBHOOK_SECRET"
+
+      - name: Generate migration script
+        run: ./scripts/generate-migration-script.sh /tmp/stayflow-production.sql
+
+      - name: Apply production migrations
+        env:
+          DATABASE_URL: ${{ env.PRODUCTION_DATABASE_URL }}
+          PRODUCTION_MIGRATION_APPROVED: true
+        run: ./scripts/apply-migrations.sh /tmp/stayflow-production.sql
+
+      - name: Smoke test deployment
+        env:
+          STAYFLOW_BACKEND_URL: ${{ vars.PRODUCTION_BACKEND_URL }}
+          STAYFLOW_FRONTEND_URL: ${{ vars.PRODUCTION_FRONTEND_URL }}
+        run: ./tests/deployment/smoke.sh
+
+      - name: Deployment summary
+        run: |
+          set -euo pipefail
+          echo "Production promotion complete for SHA ${IMAGE_SHA}"
+          echo "Backend URL: ${{ vars.PRODUCTION_BACKEND_URL }}"
+          echo "Frontend URL: ${{ vars.PRODUCTION_FRONTEND_URL }}"

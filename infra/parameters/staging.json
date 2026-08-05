@@ -1,0 +1,68 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "staging"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "imageSha": {
+      "value": "staging-sha-placeholder"
+    },
+    "backendImage": {
+      "value": "staging-backend-image"
+    },
+    "frontendImage": {
+      "value": "staging-frontend-image"
+    },
+    "containerRegistryName": {
+      "value": "stgstayflowacr"
+    },
+    "logAnalyticsName": {
+      "value": "stg-stayflow-law"
+    },
+    "applicationInsightsName": {
+      "value": "stg-stayflow-ai"
+    },
+    "keyVaultName": {
+      "value": "stg-stayflow-kv"
+    },
+    "containerAppsEnvironmentName": {
+      "value": "stg-stayflow-cae"
+    },
+    "backendContainerAppName": {
+      "value": "stg-stayflow-backend"
+    },
+    "frontendContainerAppName": {
+      "value": "stg-stayflow-frontend"
+    },
+    "postgresServerName": {
+      "value": "stg-stayflow-pg"
+    },
+    "postgresDatabaseName": {
+      "value": "stayflow_ai"
+    },
+    "postgresAdminUser": {
+      "value": "stayflowadmin"
+    },
+    "backendMinReplicas": {
+      "value": 1
+    },
+    "backendMaxReplicas": {
+      "value": 2
+    },
+    "frontendMinReplicas": {
+      "value": 1
+    },
+    "frontendMaxReplicas": {
+      "value": 2
+    },
+    "allowedOrigins": {
+      "value": [
+        "https://staging.app.example.com"
+      ]
+    }
+  }
+}
