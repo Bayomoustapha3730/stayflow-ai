@@ -5,8 +5,12 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddApplicationServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddHttpContextAccessor();
-        services.AddSignalR();
+        services.AddSignalR(options =>
+        {
+            options.MaximumReceiveMessageSize = 64 * 1024;
+        });
         services.AddHttpClient();
+        services.AddTransient<Services.OutboundCorrelationHandler>();
         services.AddOptions<Services.ReservationContextOptions>()
             .Bind(configuration.GetSection(Services.ReservationContextOptions.SectionName))
             .Validate(options => options.PreArrivalWindowDays >= 0 && options.PreArrivalWindowDays <= 365, "Reservation context pre-arrival window must be between 0 and 365 days.")
@@ -172,6 +176,7 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(cloudOptions.RequestTimeoutSeconds);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("StayFlow-WhatsAppCloud/1.0");
         })
+        .AddHttpMessageHandler<Services.OutboundCorrelationHandler>()
         .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
         {
             AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate

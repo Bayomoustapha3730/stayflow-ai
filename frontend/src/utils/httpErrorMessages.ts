@@ -27,6 +27,10 @@ export function getGenericHttpErrorMessage(status: number): string {
     return "Too many requests. Please try again shortly.";
   }
 
+  if (status === 503) {
+    return "A required dependency is temporarily unavailable. Please try again shortly.";
+  }
+
   if (status >= 500) {
     return "The server encountered an unexpected error.";
   }

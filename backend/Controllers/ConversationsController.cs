@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Conversations;
@@ -15,6 +16,7 @@ namespace StayFlow.Api.Controllers;
 [Route("conversations")]
 [Produces("application/json")]
 [Authorize]
+[EnableRateLimiting("host-api")]
 public sealed class ConversationsController(
     IConversationService conversationService,
     IWhatsAppTemplateService whatsAppTemplateService) : ControllerBase

@@ -9,8 +9,8 @@ ASP.NET Core Web API foundation for StayFlow AI, an AI-powered WhatsApp concierg
 - Entity Framework Core
 - PostgreSQL via Npgsql
 - OpenAPI enabled in development
-- Health checks at `/health`
-- Global exception handling middleware
+- Health checks at `/health/live`, `/health/ready`, and `/health`
+- Global exception handling with RFC 7807 ProblemDetails
 
 ## Project Structure
 
@@ -40,7 +40,9 @@ dotnet run
 
 ## Useful Endpoints
 
-- `GET /health` - health check endpoint
+- `GET /health/live` - process liveness endpoint
+- `GET /health/ready` - readiness endpoint (database + dependencies)
+- `GET /health` - aggregate health endpoint
 - `GET /openapi/v1.json` - OpenAPI document in development
 - `GET /api/status` - lightweight backend status endpoint
 - `GET /webhooks/whatsapp` - Meta webhook verification endpoint
@@ -80,6 +82,8 @@ dotnet tool run dotnet-ef database update --project backend/backend.csproj --sta
 ```
 
 WhatsApp foundation configuration is documented in [`/docs/developer/WhatsAppCloudIntegration.md`](../docs/developer/WhatsAppCloudIntegration.md).
+
+Sprint 17 production hardening behavior is documented in [`/docs/developer/ProductionHardening.md`](../docs/developer/ProductionHardening.md).
 
 Run tests:
 

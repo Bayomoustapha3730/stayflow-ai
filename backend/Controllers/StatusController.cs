@@ -7,6 +7,7 @@ namespace StayFlow.Api.Controllers;
 public sealed class StatusController : ControllerBase
 {
     [HttpGet]
+    [ResponseCache(Duration = 30, Location = ResponseCacheLocation.Any)]
     public IActionResult Get()
     {
         return Ok(new

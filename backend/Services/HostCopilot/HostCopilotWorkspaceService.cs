@@ -103,17 +103,39 @@ public sealed class HostCopilotWorkspaceService(
             .Where(alert => alert.CompanyId == companyId && conversationIds.Contains(alert.ConversationId) && alert.Status == HostCopilotSlaAlertStatus.Open)
             .ToListAsync(cancellationToken);
 
+        var messagesByConversation = messages
+            .GroupBy(message => message.ConversationId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<ConversationMessage>)group.ToList());
+
+        var pendingActionsByConversation = pendingActions
+            .GroupBy(action => action.ConversationId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<PendingConciergeAction>)group.ToList());
+
+        var auditEventsByConversation = auditEvents
+            .GroupBy(audit => audit.ConversationId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<ConciergeActionAuditLog>)group.ToList());
+
+        var openAlertsByConversation = activeAlerts
+            .GroupBy(alert => alert.ConversationId)
+            .ToDictionary(group => group.Key, group => group.First());
+
         var workItems = new List<HostCopilotWorkItemDto>(conversations.Count);
         var now = DateTimeOffset.UtcNow;
 
         foreach (var conversation in conversations)
         {
-            var conversationMessages = messages.Where(message => message.ConversationId == conversation.Id).ToList();
+            var conversationMessages = messagesByConversation.TryGetValue(conversation.Id, out var messageItems)
+                ? messageItems
+                : [];
             var visibleMessages = conversationMessages.Where(message => !message.IsInternal && message.MessageType != ConversationMessageType.InternalNote).ToList();
             var latestGuestMessage = visibleMessages.LastOrDefault(message => message.SenderType == ConversationSenderType.Guest);
             var latestHostMessage = visibleMessages.LastOrDefault(message => message.SenderType == ConversationSenderType.Host);
-            var conversationActions = pendingActions.Where(action => action.ConversationId == conversation.Id).ToList();
-            var conversationAudits = auditEvents.Where(audit => audit.ConversationId == conversation.Id).Take(options.Value.MaximumTimelineEvents).ToList();
+            var conversationActions = pendingActionsByConversation.TryGetValue(conversation.Id, out var actionItems)
+                ? actionItems
+                : [];
+            var conversationAudits = auditEventsByConversation.TryGetValue(conversation.Id, out var auditItems)
+                ? auditItems
+                : [];
 
             var safety = ClassifySafety(latestGuestMessage?.Content, conversationActions.Count);
             var priority = ClassifyPriority(latestGuestMessage?.Content, safety.IsEmergency, conversationActions.Count, conversation.LastActivityAt);
@@ -126,6 +148,7 @@ public sealed class HostCopilotWorkspaceService(
                 safety.IsEmergency,
                 sla,
                 latestGuestMessage?.SentAt,
+                openAlertsByConversation,
                 cancellationToken);
 
             var workItem = new HostCopilotWorkItemDto
@@ -142,7 +165,7 @@ public sealed class HostCopilotWorkspaceService(
                 PriorityReason = priority.Reason,
                 Sla = sla,
                 Summary = BuildOperationalSummary(conversation, latestGuestMessage, conversationActions.Count, visibleMessages.Count),
-                Timeline = BuildTimeline(visibleMessages, conversationAudits, options.Value.MaximumTimelineEvents),
+                Timeline = BuildTimeline(visibleMessages, conversationAudits.Take(options.Value.MaximumTimelineEvents).ToList(), options.Value.MaximumTimelineEvents),
                 Recommendations = BuildRecommendations(conversation, safety, priority, latestGuestMessage?.Content, conversationActions.Count),
                 PendingActions = conversationActions.Select(action => new HostCopilotPendingActionDto
                 {
@@ -399,6 +422,7 @@ public sealed class HostCopilotWorkspaceService(
         bool isEmergency,
         HostCopilotSlaStatusDto sla,
         DateTimeOffset? latestGuestAt,
+        IDictionary<Guid, HostCopilotSlaAlert> openAlertsByConversation,
         CancellationToken cancellationToken)
     {
         if (latestGuestAt is null || !sla.IsBreached || sla.ResponseDueAt is null)
@@ -406,11 +430,7 @@ public sealed class HostCopilotWorkspaceService(
             return;
         }
 
-        var existing = await dbContext.HostCopilotSlaAlerts
-            .FirstOrDefaultAsync(alert => alert.CompanyId == companyId
-                && alert.ConversationId == conversation.Id
-                && alert.Status == HostCopilotSlaAlertStatus.Open,
-                cancellationToken);
+        openAlertsByConversation.TryGetValue(conversation.Id, out var existing);
 
         if (existing is not null)
         {
@@ -422,7 +442,7 @@ public sealed class HostCopilotWorkspaceService(
             return;
         }
 
-        await dbContext.HostCopilotSlaAlerts.AddAsync(new HostCopilotSlaAlert
+        var created = new HostCopilotSlaAlert
         {
             Id = Guid.NewGuid(),
             CompanyId = companyId,
@@ -436,7 +456,10 @@ public sealed class HostCopilotWorkspaceService(
             LastGuestMessageAt = latestGuestAt.Value,
             Reason = sla.AlertMessage,
             Status = HostCopilotSlaAlertStatus.Open
-        }, cancellationToken);
+        };
+
+        await dbContext.HostCopilotSlaAlerts.AddAsync(created, cancellationToken);
+        openAlertsByConversation[conversation.Id] = created;
     }
 
     private HostCopilotOperationalSummaryDto BuildOperationalSummary(

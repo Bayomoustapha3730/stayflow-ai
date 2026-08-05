@@ -1,13 +1,17 @@
 import type { ApiResponse } from "../models/chat";
 import { extractSafeBackendErrorMessage, getGenericHttpErrorMessage } from "../utils/httpErrorMessages";
+import { parseProblemDetails } from "../utils/problemDetails";
 
 export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
-    public readonly errors: string[] = []
+    public readonly errors: string[] = [],
+    public readonly correlationId?: string,
+    public readonly traceId?: string,
+    public readonly retryAfterSeconds?: number
   ) {
-    super(message);
+    super(correlationId ? `${message} (Reference: ${correlationId})` : message);
   }
 }
 
@@ -73,12 +77,25 @@ export class HttpClient {
 
       const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
       if (!response.ok || !payload?.success) {
+        const problem = parseProblemDetails(payload);
+        const retryAfterHeader = response.headers?.get?.("retry-after") ?? null;
+        const retryAfterSeconds = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : undefined;
+        const correlationId = response.headers?.get?.("x-correlation-id") ?? problem?.correlationId;
         const safeMessage = extractSafeBackendErrorMessage(payload?.message, payload?.errors);
         const message = response.status === 401
           ? getGenericHttpErrorMessage(response.status)
-          : safeMessage ?? getGenericHttpErrorMessage(response.status);
+          : problem?.detail
+            ?? safeMessage
+            ?? getGenericHttpErrorMessage(response.status);
 
-        throw new ApiError(message, response.status, payload?.errors ?? []);
+        throw new ApiError(
+          message,
+          response.status,
+          payload?.errors ?? [],
+          correlationId ?? undefined,
+          problem?.traceId,
+          Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined
+        );
       }
 
       if (payload.data === undefined) {
