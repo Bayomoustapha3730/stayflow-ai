@@ -81,7 +81,7 @@ jobs:
     - name: Frontend Docker build
       run: docker build -f frontend/Dockerfile -t stayflow-web:ci .
     - name: Scan backend image
-      uses: aquasecurity/trivy-action@0.28.0
+      uses: aquasecurity/trivy-action@v0.35.0
       with:
         image-ref: stayflow-api:ci
         format: table
@@ -90,7 +90,7 @@ jobs:
         vuln-type: os,library
         severity: CRITICAL,HIGH
     - name: Scan frontend image
-      uses: aquasecurity/trivy-action@0.28.0
+      uses: aquasecurity/trivy-action@v0.35.0
       with:
         image-ref: stayflow-web:ci
         format: table
