@@ -4,6 +4,7 @@ import { createHostCopilotApi } from "./hostCopilotApi";
 import { createHostCopilotWorkspaceApi } from "./hostCopilotWorkspaceApi";
 import { createPropertyKnowledgeApi } from "./propertyKnowledgeApi";
 import { HttpClient } from "./httpClient";
+import { getRuntimeApiUrl } from "../runtimeConfig";
 
 export { createAuthApi } from "./authApi";
 export { createChatApi } from "./chatApi";
@@ -14,7 +15,7 @@ export { ApiError, HttpClient } from "./httpClient";
 
 export function createStayFlowApi(getAccessToken: () => string | null) {
   const http = new HttpClient({
-    baseUrl: import.meta.env.VITE_STAYFLOW_API_URL || "http://localhost:5243",
+    baseUrl: getRuntimeApiUrl(),
     getAccessToken
   });
 

@@ -27,6 +27,7 @@ public sealed class ProductionHardeningOptions
     {
         public bool EnableHsts { get; init; } = true;
         public int MaximumRequestBodyBytes { get; init; } = 1_048_576;
+        public bool AllowLocalOrigins { get; init; }
         public string[] AllowedOrigins { get; init; } = [];
     }
 

@@ -9,6 +9,9 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
 
@@ -32,6 +35,10 @@ jobs:
       run: dotnet build --no-restore
     - name: Test
       run: dotnet test --no-build --verbosity normal
+    - name: Generate idempotent migration script
+      run: ./scripts/generate-migration-script.sh /tmp/stayflow-migrations.sql
+    - name: Vulnerability audit
+      run: dotnet list package --vulnerable --include-transitive
     - name: Install frontend dependencies
       working-directory: frontend
       run: npm ci
@@ -44,3 +51,86 @@ jobs:
     - name: Frontend build
       working-directory: frontend
       run: npm run build
+    - name: Frontend dependency audit
+      working-directory: frontend
+      continue-on-error: true
+      run: npm audit --omit=dev
+    - name: Frontend full audit
+      working-directory: frontend
+      continue-on-error: true
+      run: npm audit
+    - name: Validate deployment scripts
+      shell: bash
+      run: |
+        set -euo pipefail
+        find scripts -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+        bash -n tests/deployment/smoke.sh
+    - name: Install ShellCheck
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y shellcheck
+    - name: ShellCheck
+      shell: bash
+      run: |
+        set -euo pipefail
+        find scripts -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -r shellcheck
+        shellcheck tests/deployment/smoke.sh
+    - name: Backend Docker build
+      run: docker build -f backend/Dockerfile -t stayflow-api:ci .
+    - name: Frontend Docker build
+      run: docker build -f frontend/Dockerfile -t stayflow-web:ci .
+    - name: Scan backend image
+      uses: aquasecurity/trivy-action@v0.35.0
+      with:
+        image-ref: stayflow-api:ci
+        format: table
+        exit-code: "1"
+        ignore-unfixed: true
+        vuln-type: os,library
+        severity: CRITICAL,HIGH
+    - name: Scan frontend image
+      uses: aquasecurity/trivy-action@v0.35.0
+      with:
+        image-ref: stayflow-web:ci
+        format: table
+        exit-code: "1"
+        ignore-unfixed: true
+        vuln-type: os,library
+        severity: CRITICAL,HIGH
+    - name: Validate production Compose
+      env:
+        POSTGRES_DB: stayflow_ci
+        POSTGRES_USER: stayflow_ci
+        POSTGRES_PASSWORD: ci-placeholder-only
+        JWT_SIGNING_KEY: ci-placeholder-signing-key-at-least-32-characters
+        FRONTEND_ORIGIN: http://localhost:8081
+        FRONTEND_ORIGIN_ALT: http://127.0.0.1:8081
+        FRONTEND_PORT: "8081"
+        BACKEND_PORT: "8080"
+      run: |
+        set -euo pipefail
+        docker compose -f compose.production.yml config
+        docker compose -f compose.production.yml build
+    - name: Validate Bicep
+      uses: azure/cli@v2
+      with:
+        inlineScript: |
+          set -euo pipefail
+          az bicep version
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+          if az bicep --help | grep -q '\blint\b'; then
+            az bicep lint --file infra/main.bicep
+          else
+            echo "az bicep lint is unavailable in this environment; validating parameter files via build-params"
+          fi
+          az bicep build-params --file infra/parameters/staging.json --stdout > /dev/null
+          az bicep build-params --file infra/parameters/production.json --stdout > /dev/null
+    - name: Secret scan
+      shell: bash
+      run: |
+        set -euo pipefail
+        if git grep -n -I -E '(AKIA[0-9A-Z]{16}|BEGIN [A-Z ]+PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})' -- .; then
+          echo "Potential committed secret detected."
+          exit 1
+        fi
