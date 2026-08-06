@@ -166,6 +166,7 @@ export function HostInboxPage() {
           propertyKnowledgeHref={resolvedKnowledgePropertyId ? `/host/properties/${resolvedKnowledgePropertyId}/knowledge` : null}
           whatsappSettingsHref="/host/settings/whatsapp"
           organizationSettingsHref="/host/settings/organization"
+          accountSettingsHref="/host/settings/account"
           current="conversations"
         />
 

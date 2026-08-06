@@ -12,14 +12,17 @@ public sealed class JwtTokenService(IConfiguration configuration, IPasswordHashe
     public AuthTokenResponse CreateTokenResponse(
         User user,
         IReadOnlyCollection<string> roles,
-        IReadOnlyCollection<string> permissions)
+        IReadOnlyCollection<string> permissions,
+        Guid sessionId)
     {
         var expiresAt = DateTimeOffset.UtcNow.AddMinutes(GetAccessTokenMinutes());
         var claims = new List<Claim>
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             new("company_id", user.CompanyId.ToString()),
             new("tenant_id", user.CompanyId.ToString()),
+            new("session_id", sessionId.ToString("D")),
             new(JwtRegisteredClaimNames.Email, user.Email),
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.FullName)
@@ -50,6 +53,7 @@ public sealed class JwtTokenService(IConfiguration configuration, IPasswordHashe
         {
             AccessToken = new JwtSecurityTokenHandler().WriteToken(token),
             RefreshToken = passwordHasher.GenerateSecureToken(),
+            SessionId = sessionId,
             ExpiresAt = expiresAt
         };
     }

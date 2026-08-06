@@ -134,8 +134,34 @@ public static class ServiceCollectionExtensions
                 && !string.IsNullOrWhiteSpace(options.BillingPortalReturnUrl),
                 "Billing URLs must be configured.")
             .ValidateOnStart();
+        services.AddOptions<StayFlow.Api.Configuration.EmailDeliveryOptions>()
+            .Bind(configuration.GetSection(StayFlow.Api.Configuration.EmailDeliveryOptions.SectionName))
+            .Validate(options => options.Provider.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                || options.Provider.Equals("Smtp", StringComparison.OrdinalIgnoreCase)
+                || options.Provider.Equals("SendGrid", StringComparison.OrdinalIgnoreCase)
+                || options.Provider.Equals("AzureCommunicationServices", StringComparison.OrdinalIgnoreCase),
+                "Email provider must be Development, Smtp, SendGrid, or AzureCommunicationServices.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.FromAddress), "Email from address must be configured.")
+            .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.WhatsAppCloudOptions>, Services.WhatsAppCloudOptionsValidator>();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.OpenAIOptions>, Services.OpenAIOptionsValidator>();
+        services.AddSingleton<Services.Email.DevelopmentEmailInbox>();
+        services.AddSingleton<Services.Email.DevelopmentEmailSender>();
+        services.AddScoped<Services.Email.SmtpEmailSender>();
+        services.AddScoped<Services.Email.SendGridCompatibleEmailSender>();
+        services.AddScoped<Services.Email.AzureCommunicationServicesCompatibleEmailSender>();
+        services.AddScoped<Services.Email.IEmailSender>(serviceProvider =>
+        {
+            var provider = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<StayFlow.Api.Configuration.EmailDeliveryOptions>>().Value.Provider;
+            return provider.ToUpperInvariant() switch
+            {
+                "SMTP" => serviceProvider.GetRequiredService<Services.Email.SmtpEmailSender>(),
+                "SENDGRID" => serviceProvider.GetRequiredService<Services.Email.SendGridCompatibleEmailSender>(),
+                "AZURECOMMUNICATIONSERVICES" => serviceProvider.GetRequiredService<Services.Email.AzureCommunicationServicesCompatibleEmailSender>(),
+                _ => serviceProvider.GetRequiredService<Services.Email.DevelopmentEmailSender>()
+            };
+        });
+        services.AddScoped<Services.Email.IIdentityEmailService, Services.Email.IdentityEmailService>();
         services.AddScoped<Services.ITenantExecutionContextAccessor, Services.TenantExecutionContextAccessor>();
         services.AddScoped<Services.TenantContext>();
         services.AddScoped<Services.ITenantContext>(serviceProvider => serviceProvider.GetRequiredService<Services.TenantContext>());

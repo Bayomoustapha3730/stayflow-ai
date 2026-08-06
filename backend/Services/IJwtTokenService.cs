@@ -5,5 +5,5 @@ namespace StayFlow.Api.Services;
 
 public interface IJwtTokenService
 {
-    AuthTokenResponse CreateTokenResponse(User user, IReadOnlyCollection<string> roles, IReadOnlyCollection<string> permissions);
+    AuthTokenResponse CreateTokenResponse(User user, IReadOnlyCollection<string> roles, IReadOnlyCollection<string> permissions, Guid sessionId);
 }

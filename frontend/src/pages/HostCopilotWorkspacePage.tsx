@@ -84,6 +84,7 @@ export function HostCopilotWorkspacePage() {
           propertyKnowledgeHref={null}
           whatsappSettingsHref="/host/settings/whatsapp"
           organizationSettingsHref="/host/settings/organization"
+          accountSettingsHref="/host/settings/account"
           current="copilot"
         />
 
