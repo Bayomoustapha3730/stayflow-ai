@@ -61,11 +61,19 @@ dotnet run
 - `POST /auth/refresh` - refresh token rotation
 - `POST /auth/password-reset` - generate password reset token
 - `POST /auth/password-reset/confirm` - reset password
+- `POST /auth/change-password` - change the authenticated user's password
+- `POST /auth/email-verification` - generate a verification token for the authenticated user
+- `POST /auth/email-verification/resend` - resend the authenticated user's verification email
 - `POST /auth/email-verification/confirm` - verify email
 - `GET /auth/me` - current authenticated user
+- `PUT /auth/me` - update the authenticated user's profile
+- `GET /auth/sessions` - list active refresh-token sessions for the authenticated user
+- `POST /auth/sessions/{sessionId}/revoke` - revoke one refresh-token session
+- `POST /auth/sessions/revoke-all` - revoke all refresh-token sessions
 - `GET /roles` - role list
 - `POST /roles` - create role
 - `POST /roles/{roleId}/permissions` - assign permission to role
+- `POST /api/organization/invitations/reject` - reject an organization invitation by token
 
 ## Database
 
@@ -84,6 +92,8 @@ dotnet tool run dotnet-ef database update --project backend/backend.csproj --sta
 WhatsApp foundation configuration is documented in [`/docs/developer/WhatsAppCloudIntegration.md`](../docs/developer/WhatsAppCloudIntegration.md).
 
 Sprint 17 production hardening behavior is documented in [`/docs/developer/ProductionHardening.md`](../docs/developer/ProductionHardening.md).
+
+Sprint 20A identity and self-service now includes profile preferences, password reset, email verification, invitation rejection, session revocation, and provider-backed email delivery through development, SMTP, SendGrid-compatible, and Azure Communication Services-compatible senders.
 
 Run tests:
 

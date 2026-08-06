@@ -10,4 +10,5 @@ public interface IOrganizationInvitationService
     Task<ApiResponse<object>> RevokeAsync(Guid invitationId, CancellationToken cancellationToken);
     Task<ApiResponse<ResentOrganizationInvitationDto>> ResendAsync(Guid invitationId, CancellationToken cancellationToken);
     Task<ApiResponse<object>> AcceptAsync(AcceptOrganizationInvitationRequest request, CancellationToken cancellationToken);
+    Task<ApiResponse<object>> RejectAsync(RejectOrganizationInvitationRequest request, CancellationToken cancellationToken);
 }

@@ -33,7 +33,12 @@ function currentUserSuccessResponse() {
         fullName: "Host User",
         email: "host@example.com",
         phoneNumber: "+254700000000",
+          preferredLanguage: "en",
+          timeZone: "UTC",
         isEmailVerified: true,
+          emailNotificationsEnabled: true,
+          securityNotificationsEnabled: true,
+          productUpdatesEnabled: false,
         organizationRole: "Administrator",
         roles: ["Host"],
         permissions: ["conversations.read"]

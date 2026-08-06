@@ -54,4 +54,12 @@ public sealed class OrganizationInvitationsController(IOrganizationInvitationSer
         var response = await invitationService.AcceptAsync(request, cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
     }
+
+    [AllowAnonymous]
+    [HttpPost("reject")]
+    public async Task<ActionResult<ApiResponse<object>>> Reject([FromBody] RejectOrganizationInvitationRequest request, CancellationToken cancellationToken)
+    {
+        var response = await invitationService.RejectAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
 }

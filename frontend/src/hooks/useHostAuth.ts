@@ -4,6 +4,7 @@ import { ApiError, HttpClient } from "../api/httpClient";
 import type { CurrentUserProfile } from "../models/organization";
 
 const hostTokenStorageKey = "stayflow.host.accessToken";
+const hostRefreshTokenStorageKey = "stayflow.host.refreshToken";
 
 export interface UseHostAuthResult {
   accessToken: string | null;
@@ -14,10 +15,13 @@ export interface UseHostAuthResult {
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   clearError: () => void;
+  refreshCurrentUser: () => Promise<void>;
+  setCurrentUserProfile: (profile: CurrentUserProfile | null) => void;
 }
 
 export function useHostAuth(): UseHostAuthResult {
   const [accessToken, setAccessToken] = useState<string | null>(() => sessionStorage.getItem(hostTokenStorageKey));
+  const [, setRefreshToken] = useState<string | null>(() => sessionStorage.getItem(hostRefreshTokenStorageKey));
   const [currentUser, setCurrentUser] = useState<CurrentUserProfile | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,8 +36,9 @@ export function useHostAuth(): UseHostAuthResult {
 
   const authApi = useMemo(() => createAuthApi(http), [http]);
 
-  useEffect(() => {
+  const refreshCurrentUser = useCallback(async () => {
     if (!accessToken) {
+      setCurrentUser(null);
       return;
     }
 
@@ -43,14 +48,17 @@ export function useHostAuth(): UseHostAuthResult {
     });
     const authenticatedAuthApi = createAuthApi(authenticatedHttp);
 
-    void authenticatedAuthApi.getCurrentUser()
-      .then((profile) => {
-        setCurrentUser(profile);
-      })
-      .catch(() => {
-        setCurrentUser(null);
-      });
+    try {
+      const profile = await authenticatedAuthApi.getCurrentUser();
+      setCurrentUser(profile);
+    } catch {
+      setCurrentUser(null);
+    }
   }, [accessToken]);
+
+  useEffect(() => {
+    void refreshCurrentUser();
+  }, [refreshCurrentUser]);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -60,7 +68,9 @@ export function useHostAuth(): UseHostAuthResult {
       try {
         const response = await authApi.loginForDevelopment(email.trim(), password);
         setAccessToken(response.accessToken);
+        setRefreshToken(response.refreshToken);
         sessionStorage.setItem(hostTokenStorageKey, response.accessToken);
+        sessionStorage.setItem(hostRefreshTokenStorageKey, response.refreshToken);
       } catch (failure) {
         const message = failure instanceof Error ? failure.message : "Unable to sign in.";
         setError(message);
@@ -75,8 +85,10 @@ export function useHostAuth(): UseHostAuthResult {
 
   const logout = useCallback(() => {
     setAccessToken(null);
+    setRefreshToken(null);
     setCurrentUser(null);
     sessionStorage.removeItem(hostTokenStorageKey);
+    sessionStorage.removeItem(hostRefreshTokenStorageKey);
     setError(null);
   }, []);
 
@@ -90,7 +102,9 @@ export function useHostAuth(): UseHostAuthResult {
     error,
     login,
     logout,
-    clearError
+    clearError,
+    refreshCurrentUser,
+    setCurrentUserProfile: setCurrentUser
   };
 }
 

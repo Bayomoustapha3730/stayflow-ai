@@ -281,7 +281,7 @@ public sealed class SignalRTestAppFactory : WebApplicationFactory<Program>
     public const string JwtAudience = "StayFlow.Clients";
     public const string JwtSigningKey = "development-only-secret-key-change-before-production";
     private static readonly InMemoryDatabaseRoot DatabaseRoot = new();
-    private int _seeded;
+    private static int _seeded;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

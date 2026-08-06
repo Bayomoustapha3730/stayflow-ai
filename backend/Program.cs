@@ -32,6 +32,8 @@ builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
 var authPerMinute = builder.Configuration.GetValue<int?>("ProductionHardening:RateLimits:AuthPerMinute") ?? 10;
+var passwordResetPerHour = builder.Configuration.GetValue<int?>("ProductionHardening:RateLimits:PasswordResetPerHour") ?? 5;
+var verificationResendPerHour = builder.Configuration.GetValue<int?>("ProductionHardening:RateLimits:VerificationResendPerHour") ?? 6;
 var guestChatTokenLimit = builder.Configuration.GetValue<int?>("ProductionHardening:RateLimits:GuestChatTokenLimit") ?? 40;
 var guestChatTokensPerPeriod = builder.Configuration.GetValue<int?>("ProductionHardening:RateLimits:GuestChatTokensPerPeriod") ?? 20;
 var hostApiPerMinute = builder.Configuration.GetValue<int?>("ProductionHardening:RateLimits:HostApiPerMinute") ?? 120;
@@ -94,6 +96,33 @@ builder.Services.AddRateLimiter(options =>
         {
             PermitLimit = authPerMinute,
             Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        });
+    });
+
+    options.AddPolicy("password-reset-request", context =>
+    {
+        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var partitionKey = $"{ip}:password-reset";
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = passwordResetPerHour,
+            Window = TimeSpan.FromHours(1),
+            QueueLimit = 0
+        });
+    });
+
+    options.AddPolicy("verification-resend", context =>
+    {
+        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var partitionKey = $"{userId ?? ip}:verification-resend";
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = verificationResendPerHour,
+            Window = TimeSpan.FromHours(1),
             QueueLimit = 0
         });
     });

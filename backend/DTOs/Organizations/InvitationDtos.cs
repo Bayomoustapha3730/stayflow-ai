@@ -12,6 +12,11 @@ public sealed class AcceptOrganizationInvitationRequest
     public string Token { get; init; } = string.Empty;
 }
 
+public sealed class RejectOrganizationInvitationRequest
+{
+    public string Token { get; init; } = string.Empty;
+}
+
 public sealed class OrganizationInvitationDto
 {
     public Guid Id { get; init; }
@@ -19,6 +24,7 @@ public sealed class OrganizationInvitationDto
     public string Role { get; init; } = string.Empty;
     public DateTimeOffset ExpiresAtUtc { get; init; }
     public DateTimeOffset? AcceptedAtUtc { get; init; }
+    public DateTimeOffset? RejectedAtUtc { get; init; }
     public DateTimeOffset? RevokedAtUtc { get; init; }
     public DateTimeOffset? LastSentAtUtc { get; init; }
     public int SendCount { get; init; }
