@@ -6,9 +6,14 @@ public sealed class User : AuditableEntity
     public string FullName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string PhoneNumber { get; set; } = string.Empty;
+    public string PreferredLanguage { get; set; } = "en";
+    public string TimeZone { get; set; } = "UTC";
     public string Role { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
     public bool IsEmailVerified { get; set; }
+    public bool EmailNotificationsEnabled { get; set; } = true;
+    public bool SecurityNotificationsEnabled { get; set; } = true;
+    public bool ProductUpdatesEnabled { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndAt { get; set; }
     public DateTimeOffset? LastLoginAt { get; set; }

@@ -82,8 +82,10 @@ export function HostCopilotWorkspacePage() {
           conversationsHref="/host/conversations"
           copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={null}
+          billingHref="/host/settings/billing"
           whatsappSettingsHref="/host/settings/whatsapp"
           organizationSettingsHref="/host/settings/organization"
+          accountSettingsHref="/host/settings/account"
           current="copilot"
         />
 

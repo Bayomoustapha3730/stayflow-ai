@@ -2,12 +2,14 @@ interface HostConsoleNavProps {
   conversationsHref: string;
   copilotWorkspaceHref?: string | null;
   propertyKnowledgeHref?: string | null;
+  billingHref?: string | null;
   whatsappSettingsHref?: string | null;
   organizationSettingsHref?: string | null;
-  current: "conversations" | "copilot" | "knowledge" | "settings" | "organization";
+  accountSettingsHref?: string | null;
+  current: "conversations" | "copilot" | "knowledge" | "billing" | "settings" | "organization" | "account";
 }
 
-export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, propertyKnowledgeHref, whatsappSettingsHref, organizationSettingsHref, current }: HostConsoleNavProps) {
+export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, propertyKnowledgeHref, billingHref, whatsappSettingsHref, organizationSettingsHref, accountSettingsHref, current }: HostConsoleNavProps) {
   return (
     <nav className="sf-host-console-nav" aria-label="Host console navigation">
       <a className={current === "conversations" ? "active" : ""} href={conversationsHref}>
@@ -27,6 +29,13 @@ export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, proper
       ) : (
         <span className="disabled" aria-disabled="true">Property Knowledge</span>
       )}
+      {billingHref ? (
+        <a className={current === "billing" ? "active" : ""} href={billingHref}>
+          Billing
+        </a>
+      ) : (
+        <span className="disabled" aria-disabled="true">Billing</span>
+      )}
       {whatsappSettingsHref ? (
         <a className={current === "settings" ? "active" : ""} href={whatsappSettingsHref}>
           WhatsApp Settings
@@ -40,6 +49,13 @@ export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, proper
         </a>
       ) : (
         <span className="disabled" aria-disabled="true">Organization</span>
+      )}
+      {accountSettingsHref ? (
+        <a className={current === "account" ? "active" : ""} href={accountSettingsHref}>
+          Account
+        </a>
+      ) : (
+        <span className="disabled" aria-disabled="true">Account</span>
       )}
     </nav>
   );

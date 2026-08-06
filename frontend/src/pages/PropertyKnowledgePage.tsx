@@ -229,8 +229,10 @@ export function PropertyKnowledgePage({ propertyId }: PropertyKnowledgePageProps
           conversationsHref="/host/conversations"
           copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={propertyKnowledgeHref}
+          billingHref="/host/settings/billing"
           whatsappSettingsHref="/host/settings/whatsapp"
           organizationSettingsHref="/host/settings/organization"
+          accountSettingsHref="/host/settings/account"
           current="knowledge"
         />
 

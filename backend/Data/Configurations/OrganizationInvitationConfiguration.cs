@@ -36,6 +36,6 @@ public sealed class OrganizationInvitationConfiguration : IEntityTypeConfigurati
         builder.HasIndex(invitation => invitation.TokenHash).IsUnique();
         builder.HasIndex(invitation => invitation.ExpiresAtUtc);
         builder.HasIndex(invitation => new { invitation.CompanyId, invitation.NormalizedEmail })
-            .HasFilter("\"AcceptedAtUtc\" IS NULL AND \"RevokedAtUtc\" IS NULL");
+            .HasFilter("\"AcceptedAtUtc\" IS NULL AND \"RejectedAtUtc\" IS NULL AND \"RevokedAtUtc\" IS NULL");
     }
 }

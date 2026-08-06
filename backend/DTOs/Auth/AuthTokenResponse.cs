@@ -4,5 +4,6 @@ public sealed class AuthTokenResponse
 {
     public string AccessToken { get; init; } = string.Empty;
     public string RefreshToken { get; init; } = string.Empty;
+    public Guid SessionId { get; init; }
     public DateTimeOffset ExpiresAt { get; init; }
 }
