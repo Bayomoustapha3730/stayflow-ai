@@ -9,6 +9,11 @@ public interface IBillingProvider
     Task<string> EnsureCustomerAsync(BillingCustomerRequest request, CancellationToken cancellationToken);
     Task<string> CreateCheckoutSessionAsync(CheckoutSessionRequest request, CancellationToken cancellationToken);
     Task<string> CreateBillingPortalSessionAsync(BillingPortalRequest request, CancellationToken cancellationToken);
+    Task<string> CreatePaymentMethodPortalSessionAsync(BillingPortalRequest request, CancellationToken cancellationToken);
+    Task<BillingProviderSubscriptionSnapshot> ChangeSubscriptionPlanAsync(ChangeSubscriptionPlanProviderRequest request, CancellationToken cancellationToken);
+    Task<BillingProviderSubscriptionSnapshot> CancelSubscriptionAsync(CancelSubscriptionProviderRequest request, CancellationToken cancellationToken);
+    Task<BillingProviderSubscriptionSnapshot> ResumeSubscriptionAsync(ResumeSubscriptionProviderRequest request, CancellationToken cancellationToken);
+    Task<BillingProviderSubscriptionSnapshot> GetSubscriptionSnapshotAsync(string subscriptionId, CancellationToken cancellationToken);
     BillingWebhookEnvelope ValidateAndParseWebhook(string rawBody, string signatureHeader);
 }
 
@@ -35,13 +40,38 @@ public sealed record CheckoutSessionRequest(
     string PriceId,
     string SuccessUrl,
     string CancelUrl,
-    string? CorrelationId);
+    string? CorrelationId,
+    int? TrialDays);
 
 public sealed record BillingPortalRequest(
     Guid CompanyId,
     string CustomerId,
     string ReturnUrl,
     string? CorrelationId);
+
+public sealed record ChangeSubscriptionPlanProviderRequest(
+    string SubscriptionId,
+    string NewPriceId,
+    string? CorrelationId);
+
+public sealed record CancelSubscriptionProviderRequest(
+    string SubscriptionId,
+    bool AtPeriodEnd,
+    string? CorrelationId);
+
+public sealed record ResumeSubscriptionProviderRequest(
+    string SubscriptionId,
+    string? CorrelationId);
+
+public sealed record BillingProviderSubscriptionSnapshot(
+    string SubscriptionId,
+    string Status,
+    string? PriceId,
+    DateTimeOffset CurrentPeriodStartUtc,
+    DateTimeOffset CurrentPeriodEndUtc,
+    DateTimeOffset? TrialEndsAtUtc,
+    bool CancelAtPeriodEnd,
+    DateTimeOffset EventCreatedAtUtc);
 
 public sealed record BillingWebhookEnvelope(
     string EventId,

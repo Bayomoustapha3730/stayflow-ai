@@ -36,19 +36,63 @@ public sealed class BillingController(
         return response.Success ? Ok(response) : BadRequest(response);
     }
 
+    [HttpPost("portal/payment-method")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<CreateBillingPortalSessionResponse>>> CreatePaymentMethodPortal(CancellationToken cancellationToken)
+    {
+        var response = await billingService.CreatePaymentMethodManagementSessionAsync(cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
     [HttpGet("subscription")]
-    [Authorize(Policy = OrganizationPolicyNames.ReadOnly)]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
     public async Task<ActionResult<ApiResponse<BillingSubscriptionResponse>>> GetSubscription(CancellationToken cancellationToken)
     {
         var response = await billingService.GetSubscriptionAsync(cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
     }
 
+    [HttpPost("subscription/change-plan")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<BillingSubscriptionResponse>>> ChangePlan(
+        [FromBody] ChangeSubscriptionPlanRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await billingService.ChangeSubscriptionPlanAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("subscription/cancel")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<BillingSubscriptionResponse>>> CancelSubscription(
+        [FromBody] CancelSubscriptionRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await billingService.CancelSubscriptionAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("subscription/resume")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<BillingSubscriptionResponse>>> ResumeSubscription(CancellationToken cancellationToken)
+    {
+        var response = await billingService.ResumeSubscriptionAsync(cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
     [HttpGet("invoices")]
-    [Authorize(Policy = OrganizationPolicyNames.ReadOnly)]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
     public async Task<ActionResult<ApiResponse<IReadOnlyCollection<TenantInvoiceDto>>>> GetInvoices(CancellationToken cancellationToken)
     {
         var response = await billingService.GetInvoicesAsync(cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpGet("usage")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<UsageSummaryResponse>>> GetUsage(CancellationToken cancellationToken)
+    {
+        var response = await billingService.GetUsageSummaryAsync(cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
     }
 

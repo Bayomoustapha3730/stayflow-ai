@@ -1,10 +1,13 @@
 import { DemoPage } from "./pages/DemoPage";
 import { AccountSettingsPage } from "./pages/AccountSettingsPage";
+import { BillingDashboardPage } from "./pages/BillingDashboardPage";
+import { CurrentSubscriptionPage } from "./pages/CurrentSubscriptionPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { HostCopilotWorkspacePage } from "./pages/HostCopilotWorkspacePage";
 import { HostInboxPage } from "./pages/HostInboxPage";
 import { InvitationDecisionPage } from "./pages/InvitationDecisionPage";
 import { OrganizationSettingsPage } from "./pages/OrganizationSettingsPage";
+import { PlanComparisonPage } from "./pages/PlanComparisonPage";
 import { PropertyKnowledgePage } from "./pages/PropertyKnowledgePage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage";
@@ -34,6 +37,18 @@ export default function App() {
 
   if (/^\/host\/settings\/account\/?$/.test(path)) {
     return <AccountSettingsPage />;
+  }
+
+  if (/^\/host\/settings\/billing\/?$/.test(path)) {
+    return <BillingDashboardPage />;
+  }
+
+  if (/^\/host\/settings\/billing\/subscription\/?$/.test(path)) {
+    return <CurrentSubscriptionPage />;
+  }
+
+  if (/^\/host\/settings\/billing\/plans\/?$/.test(path)) {
+    return <PlanComparisonPage />;
   }
 
   if (/^\/host\/settings\/whatsapp\/?$/.test(path)) {
