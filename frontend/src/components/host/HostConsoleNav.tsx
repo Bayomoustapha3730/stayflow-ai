@@ -2,13 +2,14 @@ interface HostConsoleNavProps {
   conversationsHref: string;
   copilotWorkspaceHref?: string | null;
   propertyKnowledgeHref?: string | null;
+  billingHref?: string | null;
   whatsappSettingsHref?: string | null;
   organizationSettingsHref?: string | null;
   accountSettingsHref?: string | null;
-  current: "conversations" | "copilot" | "knowledge" | "settings" | "organization" | "account";
+  current: "conversations" | "copilot" | "knowledge" | "billing" | "settings" | "organization" | "account";
 }
 
-export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, propertyKnowledgeHref, whatsappSettingsHref, organizationSettingsHref, accountSettingsHref, current }: HostConsoleNavProps) {
+export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, propertyKnowledgeHref, billingHref, whatsappSettingsHref, organizationSettingsHref, accountSettingsHref, current }: HostConsoleNavProps) {
   return (
     <nav className="sf-host-console-nav" aria-label="Host console navigation">
       <a className={current === "conversations" ? "active" : ""} href={conversationsHref}>
@@ -27,6 +28,13 @@ export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, proper
         </a>
       ) : (
         <span className="disabled" aria-disabled="true">Property Knowledge</span>
+      )}
+      {billingHref ? (
+        <a className={current === "billing" ? "active" : ""} href={billingHref}>
+          Billing
+        </a>
+      ) : (
+        <span className="disabled" aria-disabled="true">Billing</span>
       )}
       {whatsappSettingsHref ? (
         <a className={current === "settings" ? "active" : ""} href={whatsappSettingsHref}>

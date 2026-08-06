@@ -7,6 +7,8 @@ namespace StayFlow.Api.Services.Billing;
 
 public sealed class DevelopmentBillingProvider(IOptions<BillingOptions> options) : IBillingProvider
 {
+    private static readonly JsonElement EmptyObject = JsonDocument.Parse("{}").RootElement.Clone();
+
     public string ProviderName => "Development";
 
     public Task<string> EnsureCustomerAsync(BillingCustomerRequest request, CancellationToken cancellationToken)
@@ -27,10 +29,72 @@ public sealed class DevelopmentBillingProvider(IOptions<BillingOptions> options)
         return Task.FromResult($"{options.Value.BillingPortalReturnUrl}?portal=dev_{request.CompanyId:N}");
     }
 
+    public Task<string> CreatePaymentMethodPortalSessionAsync(BillingPortalRequest request, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        return Task.FromResult($"{options.Value.BillingPortalReturnUrl}?portal=payment_method_update&customer={request.CustomerId}");
+    }
+
+    public Task<BillingProviderSubscriptionSnapshot> ChangeSubscriptionPlanAsync(ChangeSubscriptionPlanProviderRequest request, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        return Task.FromResult(new BillingProviderSubscriptionSnapshot(
+            request.SubscriptionId,
+            "active",
+            request.NewPriceId,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddMonths(1),
+            null,
+            false,
+            DateTimeOffset.UtcNow));
+    }
+
+    public Task<BillingProviderSubscriptionSnapshot> CancelSubscriptionAsync(CancelSubscriptionProviderRequest request, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        return Task.FromResult(new BillingProviderSubscriptionSnapshot(
+            request.SubscriptionId,
+            request.AtPeriodEnd ? "active" : "canceled",
+            null,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddDays(request.AtPeriodEnd ? 14 : 0),
+            null,
+            request.AtPeriodEnd,
+            DateTimeOffset.UtcNow));
+    }
+
+    public Task<BillingProviderSubscriptionSnapshot> ResumeSubscriptionAsync(ResumeSubscriptionProviderRequest request, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        return Task.FromResult(new BillingProviderSubscriptionSnapshot(
+            request.SubscriptionId,
+            "active",
+            null,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddMonths(1),
+            null,
+            false,
+            DateTimeOffset.UtcNow));
+    }
+
+    public Task<BillingProviderSubscriptionSnapshot> GetSubscriptionSnapshotAsync(string subscriptionId, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        return Task.FromResult(new BillingProviderSubscriptionSnapshot(
+            subscriptionId,
+            "active",
+            null,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddMonths(1),
+            null,
+            false,
+            DateTimeOffset.UtcNow));
+    }
+
     public BillingWebhookEnvelope ValidateAndParseWebhook(string rawBody, string signatureHeader)
     {
         _ = signatureHeader;
-        var document = JsonDocument.Parse(rawBody);
+        using var document = JsonDocument.Parse(rawBody);
         var root = document.RootElement;
         var eventId = root.TryGetProperty("id", out var idElement) ? idElement.GetString() ?? Guid.NewGuid().ToString("N") : Guid.NewGuid().ToString("N");
         var eventType = root.TryGetProperty("type", out var typeElement) ? typeElement.GetString() ?? "unknown" : "unknown";
@@ -39,8 +103,8 @@ public sealed class DevelopmentBillingProvider(IOptions<BillingOptions> options)
             : DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var dataObject = root.TryGetProperty("data", out var dataElement)
             && dataElement.TryGetProperty("object", out var objectElement)
-            ? objectElement
-            : default;
+            ? objectElement.Clone()
+            : EmptyObject;
 
         var customerId = dataObject.ValueKind != JsonValueKind.Undefined && dataObject.TryGetProperty("customer", out var customerElement)
             ? customerElement.GetString()
@@ -57,6 +121,6 @@ public sealed class DevelopmentBillingProvider(IOptions<BillingOptions> options)
             customerId,
             subscriptionId,
             payloadHash,
-            dataObject.ValueKind == JsonValueKind.Undefined ? JsonDocument.Parse("{}").RootElement : dataObject);
+            dataObject);
     }
 }

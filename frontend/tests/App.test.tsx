@@ -9,6 +9,10 @@ vi.mock("../src/pages/AccountSettingsPage", () => ({
   AccountSettingsPage: () => <div data-testid="account-settings-page">account</div>
 }));
 
+vi.mock("../src/pages/BillingDashboardPage", () => ({
+  BillingDashboardPage: () => <div data-testid="billing-dashboard-page">billing</div>
+}));
+
 vi.mock("../src/pages/ForgotPasswordPage", () => ({
   ForgotPasswordPage: () => <div data-testid="forgot-password-page">forgot</div>
 }));
@@ -85,6 +89,14 @@ describe("App routing", () => {
     render(<App />);
 
     expect(screen.getByTestId("account-settings-page")).toBeInTheDocument();
+  });
+
+  it("renders the billing dashboard for billing route", () => {
+    window.history.pushState({}, "", "/host/settings/billing");
+
+    render(<App />);
+
+    expect(screen.getByTestId("billing-dashboard-page")).toBeInTheDocument();
   });
 
   it("renders the forgot password page for auth route", () => {

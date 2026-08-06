@@ -12,6 +12,7 @@ public sealed class StripeBillingProvider(
     IOptions<BillingOptions> options) : IBillingProvider
 {
     private const string StripeApiBase = "https://api.stripe.com/v1";
+    private const int MaxHttpRetryAttempts = 3;
 
     public string ProviderName => "Stripe";
 
@@ -47,6 +48,11 @@ public sealed class StripeBillingProvider(
             ["metadata[company_id]"] = request.CompanyId.ToString("D")
         };
 
+        if (request.TrialDays is > 0)
+        {
+            form["subscription_data[trial_period_days]"] = request.TrialDays.Value.ToString();
+        }
+
         var document = await PostFormAsync("checkout/sessions", form, cancellationToken);
         var url = document.RootElement.TryGetProperty("url", out var element) ? element.GetString() : null;
         if (string.IsNullOrWhiteSpace(url))
@@ -73,6 +79,79 @@ public sealed class StripeBillingProvider(
         }
 
         return url;
+    }
+
+    public async Task<string> CreatePaymentMethodPortalSessionAsync(BillingPortalRequest request, CancellationToken cancellationToken)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["customer"] = request.CustomerId,
+            ["return_url"] = request.ReturnUrl,
+            ["flow_data[type]"] = "payment_method_update"
+        };
+
+        var document = await PostFormAsync("billing_portal/sessions", form, cancellationToken);
+        var url = document.RootElement.TryGetProperty("url", out var element) ? element.GetString() : null;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            throw new ExternalDependencyException("Stripe payment method portal session creation failed.", "stripe_payment_method_portal_failed");
+        }
+
+        return url;
+    }
+
+    public async Task<BillingProviderSubscriptionSnapshot> ChangeSubscriptionPlanAsync(ChangeSubscriptionPlanProviderRequest request, CancellationToken cancellationToken)
+    {
+        var subscription = await GetSubscriptionDocumentAsync(request.SubscriptionId, cancellationToken);
+        var itemId = GetSubscriptionItemId(subscription);
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            throw new ExternalDependencyException("Stripe subscription item was not found.", "stripe_subscription_item_missing");
+        }
+
+        var form = new Dictionary<string, string>
+        {
+            ["items[0][id]"] = itemId,
+            ["items[0][price]"] = request.NewPriceId,
+            ["proration_behavior"] = "always_invoice"
+        };
+
+        var updated = await PostFormAsync($"subscriptions/{request.SubscriptionId}", form, cancellationToken);
+        return ParseSubscriptionSnapshot(updated.RootElement);
+    }
+
+    public async Task<BillingProviderSubscriptionSnapshot> CancelSubscriptionAsync(CancelSubscriptionProviderRequest request, CancellationToken cancellationToken)
+    {
+        if (request.AtPeriodEnd)
+        {
+            var form = new Dictionary<string, string>
+            {
+                ["cancel_at_period_end"] = "true"
+            };
+
+            var updated = await PostFormAsync($"subscriptions/{request.SubscriptionId}", form, cancellationToken);
+            return ParseSubscriptionSnapshot(updated.RootElement);
+        }
+
+        var deleted = await DeleteAsync($"subscriptions/{request.SubscriptionId}", cancellationToken);
+        return ParseSubscriptionSnapshot(deleted.RootElement);
+    }
+
+    public async Task<BillingProviderSubscriptionSnapshot> ResumeSubscriptionAsync(ResumeSubscriptionProviderRequest request, CancellationToken cancellationToken)
+    {
+        var form = new Dictionary<string, string>
+        {
+            ["cancel_at_period_end"] = "false"
+        };
+
+        var updated = await PostFormAsync($"subscriptions/{request.SubscriptionId}", form, cancellationToken);
+        return ParseSubscriptionSnapshot(updated.RootElement);
+    }
+
+    public async Task<BillingProviderSubscriptionSnapshot> GetSubscriptionSnapshotAsync(string subscriptionId, CancellationToken cancellationToken)
+    {
+        var document = await GetSubscriptionDocumentAsync(subscriptionId, cancellationToken);
+        return ParseSubscriptionSnapshot(document.RootElement);
     }
 
     public BillingWebhookEnvelope ValidateAndParseWebhook(string rawBody, string signatureHeader)
@@ -134,7 +213,7 @@ public sealed class StripeBillingProvider(
         }
 
         var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawBody)));
-        var clonedObject = JsonDocument.Parse(dataObject.GetRawText()).RootElement;
+        var clonedObject = dataObject.Clone();
         return new BillingWebhookEnvelope(
             eventId,
             eventType,
@@ -147,6 +226,97 @@ public sealed class StripeBillingProvider(
 
     private async Task<JsonDocument> PostFormAsync(string path, IReadOnlyDictionary<string, string> form, CancellationToken cancellationToken)
     {
+        var client = CreateAuthorizedClient();
+        for (var attempt = 1; attempt <= MaxHttpRetryAttempts; attempt++)
+        {
+            try
+            {
+                using var content = new FormUrlEncodedContent(form);
+                using var response = await client.PostAsync(path, content, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    return JsonDocument.Parse(body);
+                }
+
+                if (attempt == MaxHttpRetryAttempts || !IsRetryableStatusCode((int)response.StatusCode))
+                {
+                    throw new ExternalDependencyException("Stripe request failed.", "stripe_http_error");
+                }
+
+                await Task.Delay(ComputeRetryDelay(attempt), cancellationToken);
+            }
+            catch (HttpRequestException) when (attempt < MaxHttpRetryAttempts)
+            {
+                await Task.Delay(ComputeRetryDelay(attempt), cancellationToken);
+            }
+        }
+
+        throw new ExternalDependencyException("Stripe request failed.", "stripe_http_error");
+    }
+
+    private async Task<JsonDocument> DeleteAsync(string path, CancellationToken cancellationToken)
+    {
+        var client = CreateAuthorizedClient();
+        for (var attempt = 1; attempt <= MaxHttpRetryAttempts; attempt++)
+        {
+            try
+            {
+                using var response = await client.DeleteAsync(path, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    return JsonDocument.Parse(body);
+                }
+
+                if (attempt == MaxHttpRetryAttempts || !IsRetryableStatusCode((int)response.StatusCode))
+                {
+                    throw new ExternalDependencyException("Stripe request failed.", "stripe_http_error");
+                }
+
+                await Task.Delay(ComputeRetryDelay(attempt), cancellationToken);
+            }
+            catch (HttpRequestException) when (attempt < MaxHttpRetryAttempts)
+            {
+                await Task.Delay(ComputeRetryDelay(attempt), cancellationToken);
+            }
+        }
+
+        throw new ExternalDependencyException("Stripe request failed.", "stripe_http_error");
+    }
+
+    private async Task<JsonDocument> GetSubscriptionDocumentAsync(string subscriptionId, CancellationToken cancellationToken)
+    {
+        var client = CreateAuthorizedClient();
+        for (var attempt = 1; attempt <= MaxHttpRetryAttempts; attempt++)
+        {
+            try
+            {
+                using var response = await client.GetAsync($"subscriptions/{subscriptionId}", cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    return JsonDocument.Parse(body);
+                }
+
+                if (attempt == MaxHttpRetryAttempts || !IsRetryableStatusCode((int)response.StatusCode))
+                {
+                    throw new ExternalDependencyException("Stripe request failed.", "stripe_http_error");
+                }
+
+                await Task.Delay(ComputeRetryDelay(attempt), cancellationToken);
+            }
+            catch (HttpRequestException) when (attempt < MaxHttpRetryAttempts)
+            {
+                await Task.Delay(ComputeRetryDelay(attempt), cancellationToken);
+            }
+        }
+
+        throw new ExternalDependencyException("Stripe request failed.", "stripe_http_error");
+    }
+
+    private HttpClient CreateAuthorizedClient()
+    {
         var key = options.Value.StripeSecretKey;
         if (string.IsNullOrWhiteSpace(key))
         {
@@ -156,16 +326,83 @@ public sealed class StripeBillingProvider(
         var client = httpClientFactory.CreateClient(nameof(StripeBillingProvider));
         client.BaseAddress = new Uri(StripeApiBase + "/", UriKind.Absolute);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        return client;
+    }
 
-        using var content = new FormUrlEncodedContent(form);
-        using var response = await client.PostAsync(path, content, cancellationToken);
-        var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        if (!response.IsSuccessStatusCode)
+    private static string? GetSubscriptionItemId(JsonDocument subscription)
+    {
+        if (!subscription.RootElement.TryGetProperty("items", out var items))
         {
-            throw new ExternalDependencyException("Stripe request failed.", "stripe_http_error");
+            return null;
         }
 
-        return JsonDocument.Parse(body);
+        if (!items.TryGetProperty("data", out var itemData) || itemData.ValueKind != JsonValueKind.Array || itemData.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var first = itemData[0];
+        if (!first.TryGetProperty("id", out var idElement))
+        {
+            return null;
+        }
+
+        return idElement.GetString();
+    }
+
+    private static BillingProviderSubscriptionSnapshot ParseSubscriptionSnapshot(JsonElement root)
+    {
+        var id = root.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            throw new ExternalDependencyException("Stripe subscription response was invalid.", "stripe_subscription_invalid");
+        }
+
+        var status = root.TryGetProperty("status", out var statusElement) ? statusElement.GetString() ?? "active" : "active";
+        var currentStart = root.TryGetProperty("current_period_start", out var startElement) && startElement.ValueKind == JsonValueKind.Number
+            ? DateTimeOffset.FromUnixTimeSeconds(startElement.GetInt64())
+            : DateTimeOffset.UtcNow;
+        var currentEnd = root.TryGetProperty("current_period_end", out var endElement) && endElement.ValueKind == JsonValueKind.Number
+            ? DateTimeOffset.FromUnixTimeSeconds(endElement.GetInt64())
+            : currentStart;
+
+        DateTimeOffset? trialEnd = null;
+        if (root.TryGetProperty("trial_end", out var trialEndElement) && trialEndElement.ValueKind == JsonValueKind.Number)
+        {
+            trialEnd = DateTimeOffset.FromUnixTimeSeconds(trialEndElement.GetInt64());
+        }
+
+        var cancelAtPeriodEnd = root.TryGetProperty("cancel_at_period_end", out var cancelElement)
+            && cancelElement.ValueKind is JsonValueKind.True or JsonValueKind.False
+            && cancelElement.GetBoolean();
+
+        string? priceId = null;
+        if (root.TryGetProperty("items", out var items)
+            && items.TryGetProperty("data", out var itemData)
+            && itemData.ValueKind == JsonValueKind.Array
+            && itemData.GetArrayLength() > 0)
+        {
+            var first = itemData[0];
+            if (first.TryGetProperty("price", out var priceElement)
+                && priceElement.TryGetProperty("id", out var priceIdElement))
+            {
+                priceId = priceIdElement.GetString();
+            }
+        }
+
+        var createdAt = root.TryGetProperty("created", out var createdElement) && createdElement.ValueKind == JsonValueKind.Number
+            ? DateTimeOffset.FromUnixTimeSeconds(createdElement.GetInt64())
+            : DateTimeOffset.UtcNow;
+
+        return new BillingProviderSubscriptionSnapshot(
+            id,
+            status,
+            priceId,
+            currentStart,
+            currentEnd,
+            trialEnd,
+            cancelAtPeriodEnd,
+            createdAt);
     }
 
     private static bool TryParseStripeSignature(string header, out long timestamp, out List<string> signatures)
@@ -214,5 +451,16 @@ public sealed class StripeBillingProvider(
         var leftBytes = Encoding.UTF8.GetBytes(left);
         var rightBytes = Encoding.UTF8.GetBytes(right);
         return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+    }
+
+    private static bool IsRetryableStatusCode(int statusCode)
+    {
+        return statusCode == 408 || statusCode == 409 || statusCode == 429 || statusCode >= 500;
+    }
+
+    private static TimeSpan ComputeRetryDelay(int attempt)
+    {
+        var jitterMs = Random.Shared.Next(25, 75);
+        return TimeSpan.FromMilliseconds((attempt * 200) + jitterMs);
     }
 }
