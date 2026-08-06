@@ -19,10 +19,20 @@ public sealed class JwtTokenService(IConfiguration configuration, IPasswordHashe
         {
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new("company_id", user.CompanyId.ToString()),
+            new("tenant_id", user.CompanyId.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email),
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.FullName)
         };
+
+        var organizationRole = user.OrganizationMemberships
+            .Where(membership => membership.CompanyId == user.CompanyId && membership.Status == Models.OrganizationMemberStatus.Active.ToStorageValue())
+            .Select(membership => membership.Role)
+            .FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(organizationRole))
+        {
+            claims.Add(new Claim("org_role", organizationRole));
+        }
 
         claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
         claims.AddRange(permissions.Select(permission => new Claim("permission", permission)));

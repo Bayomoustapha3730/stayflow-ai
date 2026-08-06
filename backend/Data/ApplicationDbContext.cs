@@ -1,12 +1,30 @@
 using Microsoft.EntityFrameworkCore;
+using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
+using StayFlow.Api.Data.Configurations;
+using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Data;
 
-public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options)
+public sealed class ApplicationDbContext(
+    DbContextOptions<ApplicationDbContext> options,
+    ITenantContext? tenantContext = null) : DbContext(options)
 {
+    private readonly ITenantContext? _tenantContext = tenantContext;
+
     public DbSet<Company> Companies => Set<Company>();
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+    public DbSet<TenantSubscription> TenantSubscriptions => Set<TenantSubscription>();
+    public DbSet<PlanEntitlement> PlanEntitlements => Set<PlanEntitlement>();
+    public DbSet<UsageRecord> UsageRecords => Set<UsageRecord>();
+    public DbSet<UsageOperation> UsageOperations => Set<UsageOperation>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
+    public DbSet<OrganizationInvitation> OrganizationInvitations => Set<OrganizationInvitation>();
+    public DbSet<OnboardingProgress> OnboardingProgressRecords => Set<OnboardingProgress>();
+    public DbSet<BillingWebhookEvent> BillingWebhookEvents => Set<BillingWebhookEvent>();
+    public DbSet<TenantInvoice> TenantInvoices => Set<TenantInvoice>();
+    public DbSet<TenantApiKey> TenantApiKeys => Set<TenantApiKey>();
     public DbSet<Property> Properties => Set<Property>();
     public DbSet<PropertyAmenity> PropertyAmenities => Set<PropertyAmenity>();
     public DbSet<PropertyHouseRule> PropertyHouseRules => Set<PropertyHouseRule>();
@@ -48,12 +66,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 
     public override int SaveChanges()
     {
+        ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChanges();
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChangesAsync(cancellationToken);
     }
@@ -61,6 +81,16 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(ApplicationDbContext).Assembly);
+        modelBuilder.ApplyConfiguration(new SubscriptionPlanConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantSubscriptionConfiguration());
+        modelBuilder.ApplyConfiguration(new PlanEntitlementConfiguration());
+        modelBuilder.ApplyConfiguration(new UsageRecordConfiguration());
+        modelBuilder.ApplyConfiguration(new UsageOperationConfiguration());
+        modelBuilder.ApplyConfiguration(new OnboardingProgressConfiguration());
+        modelBuilder.ApplyConfiguration(new OrganizationInvitationConfiguration());
+        modelBuilder.ApplyConfiguration(new BillingWebhookEventConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantInvoiceConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantApiKeyConfiguration());
         SeedData.Apply(modelBuilder);
     }
 
@@ -80,6 +110,86 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             {
                 entry.Property(entity => entity.CreatedAt).IsModified = false;
                 entry.Entity.UpdatedAt = utcNow;
+            }
+        }
+    }
+
+    private void ValidateTenantOwnership()
+    {
+        var changedEntries = ChangeTracker.Entries()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified)
+            .ToList();
+
+        foreach (var entry in changedEntries)
+        {
+            if (entry.Entity is SubscriptionPlan or PlanEntitlement)
+            {
+                continue;
+            }
+
+            var companyProperty = entry.Properties.FirstOrDefault(property => string.Equals(property.Metadata.Name, nameof(User.CompanyId), StringComparison.Ordinal));
+            if (companyProperty is null)
+            {
+                continue;
+            }
+
+            if (companyProperty.CurrentValue is not Guid companyId || companyId == Guid.Empty)
+            {
+                throw new DomainValidationException("Tenant-owned records must include a valid CompanyId.", "tenant_company_required");
+            }
+
+            if (_tenantContext?.IsAuthenticated == true && _tenantContext.CompanyId is { } tenantCompanyId && tenantCompanyId != Guid.Empty)
+            {
+                if (companyId != tenantCompanyId)
+                {
+                    throw new DomainValidationException("Cross-tenant write was blocked.", "tenant_write_mismatch");
+                }
+
+                if (entry.State == EntityState.Modified
+                    && entry.Properties.Any(property => string.Equals(property.Metadata.Name, nameof(User.CompanyId), StringComparison.Ordinal) && property.IsModified))
+                {
+                    throw new DomainValidationException("CompanyId updates are not allowed on tenant-owned records.", "tenant_company_immutable");
+                }
+            }
+
+            ValidateTenantForeignKeys(entry, companyId);
+        }
+    }
+
+    private void ValidateTenantForeignKeys(Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry, Guid companyId)
+    {
+        foreach (var foreignKey in entry.Metadata.GetForeignKeys())
+        {
+            if (foreignKey.PrincipalEntityType.ClrType == typeof(Company))
+            {
+                continue;
+            }
+
+            var principalCompanyProperty = foreignKey.PrincipalEntityType.FindProperty(nameof(User.CompanyId));
+            if (principalCompanyProperty is null)
+            {
+                continue;
+            }
+
+            var foreignKeyValues = foreignKey.Properties
+                .Select(property => entry.Property(property.Name).CurrentValue)
+                .ToArray();
+
+            if (foreignKeyValues.Any(value => value is null))
+            {
+                continue;
+            }
+
+            var principalEntity = Find(foreignKey.PrincipalEntityType.ClrType, foreignKeyValues!);
+            if (principalEntity is null)
+            {
+                continue;
+            }
+
+            var principalCompanyValue = principalEntity.GetType().GetProperty(nameof(User.CompanyId))?.GetValue(principalEntity);
+            if (principalCompanyValue is Guid principalCompanyId && principalCompanyId != companyId)
+            {
+                throw new DomainValidationException("Cross-tenant foreign key relationship was blocked.", "tenant_foreign_key_mismatch");
             }
         }
     }

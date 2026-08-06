@@ -1,5 +1,6 @@
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Copilot;
+using StayFlow.Api.Models;
 using StayFlow.Api.Services.AI.Context;
 using StayFlow.Api.Services.AI.Orchestration;
 
@@ -9,8 +10,11 @@ public sealed class CopilotService(
     IConversationContextBuilder conversationContextBuilder,
     IContextConfidenceEvaluator confidenceEvaluator,
     ICurrentTenantContext currentTenantContext,
-    IAIReplyOrchestrator replyOrchestrator) : ICopilotService
+    IAIReplyOrchestrator replyOrchestrator,
+    ISubscriptionEntitlementService? subscriptionEntitlementService = null) : ICopilotService
 {
+    private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService ?? NoOpSubscriptionEntitlementService.Instance;
+
     public async Task<ApiResponse<ConversationCopilotSummaryResponse>> GetSummaryAsync(
         Guid conversationId,
         CancellationToken cancellationToken)
@@ -19,6 +23,8 @@ public sealed class CopilotService(
         {
             return ApiResponse<ConversationCopilotSummaryResponse>.Fail(tenantError, [tenantError]);
         }
+
+        await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.HostCopilot, cancellationToken);
 
         var context = await conversationContextBuilder.BuildAsync(companyId, conversationId, cancellationToken);
         if (context is null)
@@ -53,6 +59,14 @@ public sealed class CopilotService(
         {
             return ApiResponse<ConversationCopilotSuggestionsResponse>.Fail(tenantError, [tenantError]);
         }
+
+        await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.HostCopilot, cancellationToken);
+        await _subscriptionEntitlementService.ConsumeQuotaAsync(
+            companyId,
+            UsageMetric.AiRequests,
+            1,
+            $"copilot:suggestions:{conversationId:D}:{currentTenantContext.CorrelationId ?? "none"}",
+            cancellationToken);
 
         var result = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
         {
@@ -95,6 +109,14 @@ public sealed class CopilotService(
         {
             return ApiResponse<CopilotSuggestReplyResponse>.Fail(tenantError, [tenantError]);
         }
+
+        await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.HostCopilot, cancellationToken);
+        await _subscriptionEntitlementService.ConsumeQuotaAsync(
+            companyId,
+            UsageMetric.AiRequests,
+            1,
+            $"copilot:draft:{conversationId:D}:{currentTenantContext.CorrelationId ?? "none"}",
+            cancellationToken);
 
         var result = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
         {
@@ -149,6 +171,8 @@ public sealed class CopilotService(
         {
             return ApiResponse<ConversationRetrievalDiagnosticsResponse>.Fail(tenantError, [tenantError]);
         }
+
+        await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.HostCopilot, cancellationToken);
 
         var result = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
         {

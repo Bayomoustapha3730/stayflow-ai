@@ -6,6 +6,7 @@ using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.Copilot;
+using StayFlow.Api.Models;
 using StayFlow.Api.Services.ConciergeActions;
 using StayFlow.Api.Services.HostCopilot;
 
@@ -16,6 +17,7 @@ namespace StayFlow.Api.Controllers;
 [Produces("application/json")]
 [Authorize]
 [EnableRateLimiting("host-api")]
+[RequireFeature(FeatureKeys.HostCopilot)]
 public sealed class HostCopilotController(IHostCopilotWorkspaceService workspaceService) : ControllerBase
 {
     [HttpGet("workspace")]

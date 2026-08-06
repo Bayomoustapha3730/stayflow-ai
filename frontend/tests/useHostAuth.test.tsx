@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useHostAuth } from "../src/hooks/useHostAuth";
 
@@ -13,6 +13,30 @@ function loginSuccessResponse() {
         accessToken: "host-access-token",
         refreshToken: "refresh-token",
         expiresAt: "2026-07-22T12:00:00Z"
+      },
+      errors: [],
+      correlationId: "cid"
+    })
+  };
+}
+
+function currentUserSuccessResponse() {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      success: true,
+      message: "ok",
+      data: {
+        id: "user-1",
+        companyId: "company-1",
+        fullName: "Host User",
+        email: "host@example.com",
+        phoneNumber: "+254700000000",
+        isEmailVerified: true,
+        organizationRole: "Administrator",
+        roles: ["Host"],
+        permissions: ["conversations.read"]
       },
       errors: [],
       correlationId: "cid"
@@ -40,12 +64,19 @@ describe("useHostAuth", () => {
   });
 
   it("stores host access token after successful login", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(loginSuccessResponse()));
+    vi.stubGlobal("fetch", vi
+      .fn()
+      .mockResolvedValueOnce(loginSuccessResponse())
+      .mockResolvedValueOnce(currentUserSuccessResponse()));
 
     const { result } = renderHook(() => useHostAuth());
 
     await act(async () => {
       await result.current.login("host@example.com", "Password123!");
+    });
+
+    await waitFor(() => {
+      expect(result.current.currentUser?.organizationRole).toBe("Administrator");
     });
 
     expect(result.current.isAuthenticated).toBe(true);
@@ -67,7 +98,10 @@ describe("useHostAuth", () => {
   });
 
   it("logout clears token and auth state", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(loginSuccessResponse()));
+    vi.stubGlobal("fetch", vi
+      .fn()
+      .mockResolvedValueOnce(loginSuccessResponse())
+      .mockResolvedValueOnce(currentUserSuccessResponse()));
 
     const { result } = renderHook(() => useHostAuth());
 
@@ -80,6 +114,7 @@ describe("useHostAuth", () => {
     });
 
     expect(result.current.isAuthenticated).toBe(false);
+    expect(result.current.currentUser).toBeNull();
     expect(sessionStorage.getItem("stayflow.host.accessToken")).toBeNull();
   });
 });

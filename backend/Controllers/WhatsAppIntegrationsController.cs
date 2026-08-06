@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.WhatsApp;
+using StayFlow.Api.Models;
 using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Controllers;
@@ -11,6 +12,7 @@ namespace StayFlow.Api.Controllers;
 [Authorize]
 [Route("whatsapp/integrations")]
 [Produces("application/json")]
+[RequireFeature(FeatureKeys.WhatsApp)]
 public sealed class WhatsAppIntegrationsController(IWhatsAppTemplateService whatsAppTemplateService) : ControllerBase
 {
     [HttpGet]

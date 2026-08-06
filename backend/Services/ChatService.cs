@@ -9,6 +9,7 @@ using StayFlow.Api.DTOs.Chat;
 using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
+using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services.AI.Context;
@@ -24,10 +25,12 @@ public sealed class ChatService(
     ICurrentTenantContext currentTenantContext,
     IOptions<ConversationOptions> options,
     IConciergeActionOrchestrator? conciergeActionOrchestrator = null,
-    ILogger<ChatService>? logger = null) : IChatService
+    ILogger<ChatService>? logger = null,
+    ISubscriptionEntitlementService? subscriptionEntitlementService = null) : IChatService
 {
     private const string HostWillRespondMessage = "Thanks, your message has been received. A host or support team member will respond shortly.";
     private readonly ILogger<ChatService> logger = logger ?? NullLogger<ChatService>.Instance;
+    private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService ?? NoOpSubscriptionEntitlementService.Instance;
 
     public async Task<ApiResponse<ChatMessageResponse>> SendGuestMessageAsync(SendChatMessageRequest request, CancellationToken cancellationToken)
     {
@@ -186,12 +189,39 @@ public sealed class ChatService(
             }
         }
 
-        var replyResult = await aiReplyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+        AIReplyOrchestrationResult? replyResult;
+        try
         {
-            ConversationId = conversation.Id,
-            Operation = AIReplyOperation.FutureGuestReply,
-            CorrelationId = currentTenantContext.CorrelationId
-        }, cancellationToken);
+            await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.AiConcierge, cancellationToken);
+            await _subscriptionEntitlementService.ConsumeQuotaAsync(
+                companyId,
+                UsageMetric.AiRequests,
+                1,
+                $"chat:ai-reply:{conversation.Id:D}:{guestMessage.Data.Id:D}",
+                cancellationToken);
+
+            replyResult = await aiReplyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+            {
+                ConversationId = conversation.Id,
+                Operation = AIReplyOperation.FutureGuestReply,
+                CorrelationId = currentTenantContext.CorrelationId
+            }, cancellationToken);
+        }
+        catch (QuotaExceededException)
+        {
+            replyResult = new AIReplyOrchestrationResult
+            {
+                Confidence = 30,
+                Output = AIOrchestrationSafeMessages.HostAssistanceRequired,
+                Provider = "QuotaGuard",
+                RequiresHumanReview = true,
+                FallbackUsed = true,
+                ContextMessageCount = conversation.Messages.Count,
+                GeneratedAt = DateTimeOffset.UtcNow,
+                DurationMilliseconds = 0,
+                IsMock = true
+            };
+        }
 
         if (replyResult is null)
         {

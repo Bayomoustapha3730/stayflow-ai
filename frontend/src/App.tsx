@@ -1,6 +1,7 @@
 import { DemoPage } from "./pages/DemoPage";
 import { HostCopilotWorkspacePage } from "./pages/HostCopilotWorkspacePage";
 import { HostInboxPage } from "./pages/HostInboxPage";
+import { OrganizationSettingsPage } from "./pages/OrganizationSettingsPage";
 import { PropertyKnowledgePage } from "./pages/PropertyKnowledgePage";
 import { WhatsAppSettingsPage } from "./pages/WhatsAppSettingsPage";
 import { normalizePropertyId, resolvePropertyKnowledgePropertyId } from "./utils/propertyRouting";
@@ -12,6 +13,10 @@ export default function App() {
 
   if (/^\/host\/settings\/whatsapp\/?$/.test(path)) {
     return <WhatsAppSettingsPage />;
+  }
+
+  if (/^\/host\/settings\/organization\/?$/.test(path)) {
+    return <OrganizationSettingsPage />;
   }
 
   if (path === "/host/copilot" || path === "/host/copilot/") {

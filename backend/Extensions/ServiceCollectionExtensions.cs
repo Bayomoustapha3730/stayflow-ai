@@ -120,12 +120,43 @@ public static class ServiceCollectionExtensions
         services.AddOptions<Services.WhatsAppCloudOptions>()
             .Bind(configuration.GetSection(Services.WhatsAppCloudOptions.SectionName))
             .ValidateOnStart();
+        services.AddOptions<Services.Billing.BillingOptions>()
+            .Bind(configuration.GetSection(Services.Billing.BillingOptions.SectionName))
+            .Validate(options => options.Provider.Equals("Development", StringComparison.OrdinalIgnoreCase)
+                || options.Provider.Equals("Stripe", StringComparison.OrdinalIgnoreCase),
+                "Billing provider must be either Development or Stripe.")
+            .Validate(options => options.WebhookToleranceSeconds is >= 30 and <= 3600,
+                "Billing webhook tolerance must be between 30 and 3600 seconds.")
+            .Validate(options => options.WebhookMaxBodyBytes is >= 16 * 1024 and <= 1024 * 1024,
+                "Billing webhook max body size must be between 16KB and 1MB.")
+            .Validate(options => !string.IsNullOrWhiteSpace(options.CheckoutSuccessUrl)
+                && !string.IsNullOrWhiteSpace(options.CheckoutCancelUrl)
+                && !string.IsNullOrWhiteSpace(options.BillingPortalReturnUrl),
+                "Billing URLs must be configured.")
+            .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.WhatsAppCloudOptions>, Services.WhatsAppCloudOptionsValidator>();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.OpenAIOptions>, Services.OpenAIOptionsValidator>();
         services.AddScoped<Services.ITenantExecutionContextAccessor, Services.TenantExecutionContextAccessor>();
-        services.AddScoped<Services.ICurrentTenantContext, Services.CurrentTenantContext>();
+        services.AddScoped<Services.TenantContext>();
+        services.AddScoped<Services.ITenantContext>(serviceProvider => serviceProvider.GetRequiredService<Services.TenantContext>());
+        services.AddScoped<Services.ICurrentTenantContext>(serviceProvider => serviceProvider.GetRequiredService<Services.TenantContext>());
         services.AddScoped<Repositories.ICompanyRepository, Repositories.CompanyRepository>();
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
+        services.AddScoped<Services.IOrganizationService, Services.OrganizationService>();
+        services.AddScoped<Services.ISubscriptionEntitlementService, Services.SubscriptionEntitlementService>();
+        services.AddScoped<Services.IOnboardingService, Services.OnboardingService>();
+        services.AddScoped<Services.IOrganizationInvitationService, Services.OrganizationInvitationService>();
+        services.AddScoped<Services.ITenantApiKeyService, Services.TenantApiKeyService>();
+        services.AddScoped<Services.IBillingService, Services.BillingService>();
+        services.AddScoped<Services.Billing.DevelopmentBillingProvider>();
+        services.AddScoped<Services.Billing.StripeBillingProvider>();
+        services.AddScoped<Services.Billing.IBillingProvider>(serviceProvider =>
+        {
+            var provider = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.Billing.BillingOptions>>().Value.Provider;
+            return provider.Equals("Stripe", StringComparison.OrdinalIgnoreCase)
+                ? serviceProvider.GetRequiredService<Services.Billing.StripeBillingProvider>()
+                : serviceProvider.GetRequiredService<Services.Billing.DevelopmentBillingProvider>();
+        });
         services.AddScoped<Repositories.IPropertyRepository, Repositories.PropertyRepository>();
         services.AddScoped<Services.IPropertyService, Services.PropertyService>();
         services.AddScoped<Repositories.IPropertyKnowledgeRepository, Repositories.PropertyKnowledgeRepository>();

@@ -6,8 +6,13 @@ using StayFlow.Api.Repositories;
 
 namespace StayFlow.Api.Services;
 
-public sealed class PropertyService(IPropertyRepository propertyRepository, ICurrentTenantContext currentTenantContext) : IPropertyService
+public sealed class PropertyService(
+    IPropertyRepository propertyRepository,
+    ICurrentTenantContext currentTenantContext,
+    ISubscriptionEntitlementService? subscriptionEntitlementService = null) : IPropertyService
 {
+    private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService ?? NoOpSubscriptionEntitlementService.Instance;
+
     public async Task<ApiResponse<PagedResult<PropertySummaryDto>>> GetAsync(PropertyQueryParameters query, CancellationToken cancellationToken)
     {
         if (!TryGetCompanyId(out var companyId, out var tenantError))
@@ -56,6 +61,14 @@ public sealed class PropertyService(IPropertyRepository propertyRepository, ICur
         {
             return ApiResponse<PropertyDto>.Fail("Company was not found.");
         }
+
+        await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.MultiProperty, cancellationToken);
+        await _subscriptionEntitlementService.ConsumeQuotaAsync(
+            companyId,
+            UsageMetric.Properties,
+            1,
+            $"property:create:{companyId:D}:{currentTenantContext.CorrelationId ?? "none"}:{request.Name.Trim().ToUpperInvariant()}",
+            cancellationToken);
 
         var property = new Property
         {

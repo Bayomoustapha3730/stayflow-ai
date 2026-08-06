@@ -18,6 +18,7 @@ public sealed class WhatsAppTemplateService(
     IWhatsAppCredentialResolver credentialResolver,
     IWhatsAppIntegrationHealthService healthService,
     IWhatsAppTemplateVariableValidator variableValidator,
+    ISubscriptionEntitlementService subscriptionEntitlementService,
     IWhatsAppCustomerServiceWindowEvaluator windowEvaluator,
     IPhoneNumberNormalizer phoneNumberNormalizer,
     IHostEnvironment hostEnvironment,
@@ -320,6 +321,13 @@ public sealed class WhatsAppTemplateService(
         {
             return ApiResponse<ConversationMessageResponse>.Fail("Conversation channel identity is not a valid WhatsApp destination.");
         }
+
+        await subscriptionEntitlementService.ConsumeQuotaAsync(
+            companyId,
+            UsageMetric.WhatsAppMessages,
+            1,
+            $"whatsapp:template-send:{conversation.Id:D}:{template.Id:D}:{request.LanguageCode?.Trim() ?? template.LanguageCode}",
+            cancellationToken);
 
         var credentials = await credentialResolver.ResolveAsync(integration, cancellationToken);
         if (!credentials.Success || string.IsNullOrWhiteSpace(credentials.AccessToken))

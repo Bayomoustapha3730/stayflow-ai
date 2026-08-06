@@ -26,6 +26,8 @@ public sealed class AuthRepository(ApplicationDbContext dbContext) : IAuthReposi
             .ThenInclude(userRole => userRole.Role)
             .ThenInclude(role => role.RolePermissions)
             .ThenInclude(rolePermission => rolePermission.Permission)
+            .Include(token => token.User)
+            .ThenInclude(user => user.OrganizationMemberships)
             .FirstOrDefaultAsync(token => token.TokenHash == tokenHash, cancellationToken);
     }
 
@@ -69,6 +71,7 @@ public sealed class AuthRepository(ApplicationDbContext dbContext) : IAuthReposi
             .Include(user => user.UserRoles)
             .ThenInclude(userRole => userRole.Role)
             .ThenInclude(role => role.RolePermissions)
-            .ThenInclude(rolePermission => rolePermission.Permission);
+            .ThenInclude(rolePermission => rolePermission.Permission)
+            .Include(user => user.OrganizationMemberships);
     }
 }

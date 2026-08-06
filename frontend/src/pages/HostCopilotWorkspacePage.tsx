@@ -83,6 +83,7 @@ export function HostCopilotWorkspacePage() {
           copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={null}
           whatsappSettingsHref="/host/settings/whatsapp"
+          organizationSettingsHref="/host/settings/organization"
           current="copilot"
         />
 

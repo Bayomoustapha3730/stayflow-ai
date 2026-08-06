@@ -3,10 +3,11 @@ interface HostConsoleNavProps {
   copilotWorkspaceHref?: string | null;
   propertyKnowledgeHref?: string | null;
   whatsappSettingsHref?: string | null;
-  current: "conversations" | "copilot" | "knowledge" | "settings";
+  organizationSettingsHref?: string | null;
+  current: "conversations" | "copilot" | "knowledge" | "settings" | "organization";
 }
 
-export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, propertyKnowledgeHref, whatsappSettingsHref, current }: HostConsoleNavProps) {
+export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, propertyKnowledgeHref, whatsappSettingsHref, organizationSettingsHref, current }: HostConsoleNavProps) {
   return (
     <nav className="sf-host-console-nav" aria-label="Host console navigation">
       <a className={current === "conversations" ? "active" : ""} href={conversationsHref}>
@@ -32,6 +33,13 @@ export function HostConsoleNav({ conversationsHref, copilotWorkspaceHref, proper
         </a>
       ) : (
         <span className="disabled" aria-disabled="true">WhatsApp Settings</span>
+      )}
+      {organizationSettingsHref ? (
+        <a className={current === "organization" ? "active" : ""} href={organizationSettingsHref}>
+          Organization
+        </a>
+      ) : (
+        <span className="disabled" aria-disabled="true">Organization</span>
       )}
     </nav>
   );

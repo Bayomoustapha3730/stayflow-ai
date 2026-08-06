@@ -145,6 +145,10 @@ public sealed class AuthService(
                 Email = user.Email,
                 PhoneNumber = user.PhoneNumber,
                 IsEmailVerified = user.IsEmailVerified,
+                OrganizationRole = user.OrganizationMemberships
+                    .Where(membership => membership.CompanyId == user.CompanyId && membership.Status == OrganizationMemberStatus.Active.ToStorageValue())
+                    .Select(membership => membership.Role)
+                    .FirstOrDefault(),
                 Roles = GetRoles(user),
                 Permissions = GetPermissions(user)
             });

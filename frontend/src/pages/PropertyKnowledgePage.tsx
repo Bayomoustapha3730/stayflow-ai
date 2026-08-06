@@ -230,6 +230,7 @@ export function PropertyKnowledgePage({ propertyId }: PropertyKnowledgePageProps
           copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={propertyKnowledgeHref}
           whatsappSettingsHref="/host/settings/whatsapp"
+          organizationSettingsHref="/host/settings/organization"
           current="knowledge"
         />
 
