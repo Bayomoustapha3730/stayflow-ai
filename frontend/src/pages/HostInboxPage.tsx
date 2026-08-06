@@ -6,6 +6,7 @@ import {
   HostInboxSummary,
   HostLoginPanel
 } from "../components/host";
+import { createOnboardingApi } from "../api/onboardingApi";
 import { CopilotPanel } from "../components/copilot";
 import { useHostAuth } from "../hooks/useHostAuth";
 import { useConversationCopilot } from "../hooks/useConversationCopilot";
@@ -13,6 +14,8 @@ import { useHostConversations } from "../hooks/useHostConversations";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ConversationSenderType } from "../models/enums";
 import { HostConsoleNav } from "../components/host/HostConsoleNav";
+import { HttpClient } from "../api/httpClient";
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { normalizePropertyId, resolvePropertyKnowledgePropertyId } from "../utils/propertyRouting";
 import "../styles/host-inbox.css";
 
@@ -40,6 +43,7 @@ export function HostInboxPage() {
   const [notificationPreferenceEnabled, setNotificationPreferenceEnabled] = useState(
     () => localStorage.getItem(notificationsPreferenceKey) === "true"
   );
+  const [showOnboardingPrompt, setShowOnboardingPrompt] = useState(false);
   const [copilotDraft, setCopilotDraft] = useState<string | null>(null);
   const [copilotDraftVersion, setCopilotDraftVersion] = useState(0);
   const previousMessageTimestampsRef = useRef<Record<string, string | null>>({});
@@ -106,6 +110,28 @@ export function HostInboxPage() {
       current.map((item) => [item.conversationId, item.latestVisibleMessageTimestamp ?? null])
     );
   }, [conversations.response?.items, conversations.selectedConversationId, conversations.selectConversation, notificationsEnabled]);
+
+  useEffect(() => {
+    if (!auth.accessToken) {
+      setShowOnboardingPrompt(false);
+      return;
+    }
+
+    const http = new HttpClient({
+      baseUrl: getRuntimeApiUrl(),
+      getAccessToken: () => auth.accessToken
+    });
+    const onboardingApi = createOnboardingApi(http);
+
+    void onboardingApi.getStatus()
+      .catch(() => onboardingApi.start())
+      .then((status) => {
+        setShowOnboardingPrompt(!status.isCompleted);
+      })
+      .catch(() => {
+        setShowOnboardingPrompt(false);
+      });
+  }, [auth.accessToken]);
 
   async function enableNotifications() {
     if (!notificationsSupported) {
@@ -176,6 +202,12 @@ export function HostInboxPage() {
         {conversations.sessionExpired ? (
           <div className="sf-host-session-expired" role="alert">
             Your host session expired. Please sign in again.
+          </div>
+        ) : null}
+
+        {showOnboardingPrompt ? (
+          <div className="sf-whatsapp-status" role="status">
+            Onboarding is still in progress. <a href="/onboarding">Resume setup</a>
           </div>
         ) : null}
 

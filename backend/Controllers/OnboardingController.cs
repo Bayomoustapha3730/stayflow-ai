@@ -29,51 +29,114 @@ public sealed class OnboardingController(IOnboardingService onboardingService) :
         return response.Success ? Ok(response) : BadRequest(response);
     }
 
-    [HttpPost("organization/complete")]
+    [HttpPost("organization")]
     [Authorize(Policy = OrganizationPolicyNames.Administrator)]
     public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> CompleteOrganization(
-        [FromBody] CompleteOnboardingOrganizationStepRequest request,
+        [FromBody] OnboardingOrganizationRequest request,
         CancellationToken cancellationToken)
     {
         var response = await onboardingService.CompleteOrganizationStepAsync(request, cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
     }
 
-    [HttpPost("plan/complete")]
+    [HttpPost("plan")]
     [Authorize(Policy = OrganizationPolicyNames.Administrator)]
     public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> CompletePlan(
-        [FromBody] CompleteOnboardingPlanStepRequest request,
+        [FromBody] OnboardingPlanRequest request,
         CancellationToken cancellationToken)
     {
         var response = await onboardingService.CompletePlanStepAsync(request, cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
     }
 
-    [HttpPost("property/complete")]
+    [HttpPost("property")]
     [Authorize(Policy = OrganizationPolicyNames.Administrator)]
     public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> CompleteProperty(
-        [FromBody] CompleteOnboardingPropertyStepRequest request,
+        [FromBody] OnboardingPropertyRequest request,
         CancellationToken cancellationToken)
     {
         var response = await onboardingService.CompletePropertyStepAsync(request, cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
     }
 
-    [HttpPost("team/complete")]
-    [Authorize(Policy = OrganizationPolicyNames.Manager)]
-    public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> CompleteTeam(
-        [FromBody] CompleteOnboardingTeamStepRequest request,
+    [HttpPost("invitations")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<OnboardingActionResponse<OnboardingInvitationsResponse>>>> CompleteInvitations(
+        [FromBody] OnboardingInvitationsRequest request,
         CancellationToken cancellationToken)
     {
-        var response = await onboardingService.CompleteTeamStepAsync(request, cancellationToken);
+        var response = await onboardingService.CompleteInvitationsStepAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("whatsapp")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> CompleteWhatsApp(
+        [FromBody] OnboardingWhatsAppRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await onboardingService.CompleteWhatsAppStepAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("ai-provider")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> CompleteAiProvider(
+        [FromBody] OnboardingAiProviderRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await onboardingService.CompleteAiProviderStepAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("knowledge")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> CompleteKnowledge(
+        [FromBody] OnboardingKnowledgeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await onboardingService.CompleteKnowledgeStepAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("demo-data")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> CompleteDemoData(
+        [FromBody] OnboardingDemoDataRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await onboardingService.CompleteDemoDataStepAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("steps/{step}/skip")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> SkipStep(
+        [FromRoute] string step,
+        [FromBody] OnboardingSkipStepRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await onboardingService.SkipStepAsync(step, request, cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
     }
 
     [HttpPost("complete")]
     [Authorize(Policy = OrganizationPolicyNames.Administrator)]
-    public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> Complete(CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> Complete(
+        [FromBody] OnboardingCompleteRequest request,
+        CancellationToken cancellationToken)
     {
-        var response = await onboardingService.CompleteOnboardingAsync(cancellationToken);
+        var response = await onboardingService.CompleteOnboardingAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("reset")]
+    [Authorize(Policy = OrganizationPolicyNames.PlatformAdmin)]
+    public async Task<ActionResult<ApiResponse<OnboardingStatusDto>>> Reset(
+        [FromBody] OnboardingResetRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await onboardingService.ResetAsync(request, cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
     }
 }

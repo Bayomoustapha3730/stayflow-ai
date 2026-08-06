@@ -22,6 +22,7 @@ public sealed class ApplicationDbContext(
     public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
     public DbSet<OrganizationInvitation> OrganizationInvitations => Set<OrganizationInvitation>();
     public DbSet<OnboardingProgress> OnboardingProgressRecords => Set<OnboardingProgress>();
+    public DbSet<OnboardingEvent> OnboardingEvents => Set<OnboardingEvent>();
     public DbSet<BillingWebhookEvent> BillingWebhookEvents => Set<BillingWebhookEvent>();
     public DbSet<TenantInvoice> TenantInvoices => Set<TenantInvoice>();
     public DbSet<TenantApiKey> TenantApiKeys => Set<TenantApiKey>();
@@ -87,6 +88,7 @@ public sealed class ApplicationDbContext(
         modelBuilder.ApplyConfiguration(new UsageRecordConfiguration());
         modelBuilder.ApplyConfiguration(new UsageOperationConfiguration());
         modelBuilder.ApplyConfiguration(new OnboardingProgressConfiguration());
+        modelBuilder.ApplyConfiguration(new OnboardingEventConfiguration());
         modelBuilder.ApplyConfiguration(new OrganizationInvitationConfiguration());
         modelBuilder.ApplyConfiguration(new BillingWebhookEventConfiguration());
         modelBuilder.ApplyConfiguration(new TenantInvoiceConfiguration());

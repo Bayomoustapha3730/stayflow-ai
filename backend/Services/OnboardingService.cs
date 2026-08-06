@@ -1,15 +1,49 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Onboarding;
+using StayFlow.Api.DTOs.Organizations;
+using StayFlow.Api.DTOs.PropertyKnowledge;
+using StayFlow.Api.DTOs.Properties;
 using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Services;
 
 public sealed class OnboardingService(
     ApplicationDbContext dbContext,
-    ICurrentTenantContext tenantContext) : IOnboardingService
+    ICurrentTenantContext tenantContext,
+    IPropertyService propertyService,
+    IOrganizationInvitationService invitationService,
+    IPropertyKnowledgeService propertyKnowledgeService,
+    IWhatsAppTemplateService whatsAppTemplateService,
+    ISubscriptionEntitlementService subscriptionEntitlementService,
+    IOptions<AIProviderOptions> aiProviderOptions,
+    IOptions<OpenAIOptions> openAiOptions,
+    IHostEnvironment hostEnvironment) : IOnboardingService
 {
+    private static readonly OnboardingStep[] WorkflowSteps =
+    [
+        OnboardingStep.Welcome,
+        OnboardingStep.OrganizationProfile,
+        OnboardingStep.PlanConfirmation,
+        OnboardingStep.FirstProperty,
+        OnboardingStep.TeamInvitations,
+        OnboardingStep.WhatsAppSetup,
+        OnboardingStep.AiProviderSetup,
+        OnboardingStep.KnowledgeBaseSetup,
+        OnboardingStep.DemoData,
+        OnboardingStep.Review
+    ];
+
+    private static readonly HashSet<OnboardingStep> OptionalSteps =
+    [
+        OnboardingStep.TeamInvitations,
+        OnboardingStep.WhatsAppSetup,
+        OnboardingStep.DemoData
+    ];
+
     public async Task<ApiResponse<OnboardingStatusDto>> GetStatusAsync(CancellationToken cancellationToken)
     {
         if (!TryGetContext(out var companyId, out var userId, out var error))
@@ -23,7 +57,10 @@ public sealed class OnboardingService(
             return ApiResponse<OnboardingStatusDto>.Fail("Onboarding has not been initialized.");
         }
 
-        return ApiResponse<OnboardingStatusDto>.Ok(Map(progress));
+        var status = await BuildStatusAsync(progress, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_viewed", status.CurrentStep, status.CurrentStepState, null, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse<OnboardingStatusDto>.Ok(status);
     }
 
     public async Task<ApiResponse<OnboardingStatusDto>> StartAsync(CancellationToken cancellationToken)
@@ -41,20 +78,30 @@ public sealed class OnboardingService(
                 Id = Guid.NewGuid(),
                 CompanyId = companyId,
                 UserId = userId,
-                CurrentStep = OnboardingStep.OrganizationCreated.ToStorageValue(),
+                CurrentStep = OnboardingStep.Welcome.ToStorageValue(),
+                StartedAtUtc = DateTimeOffset.UtcNow,
+                LastUpdatedAtUtc = DateTimeOffset.UtcNow,
                 IsCompleted = false,
-                LastUpdatedAtUtc = DateTimeOffset.UtcNow
+                Version = 1
             };
 
             await dbContext.OnboardingProgressRecords.AddAsync(progress, cancellationToken);
-            await AddAuditLogAsync(companyId, progress.Id, "OnboardingStarted", cancellationToken);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            await AddAuditLogAsync(companyId, progress.Id, "OnboardingStarted", null, cancellationToken);
+            await AddOnboardingEventAsync(companyId, userId, "onboarding.started", progress.CurrentStep, OnboardingStepState.InProgress.ToString(), null, cancellationToken);
+        }
+        else
+        {
+            await AddOnboardingEventAsync(companyId, userId, "onboarding.resumed", progress.CurrentStep, OnboardingStepState.InProgress.ToString(), null, cancellationToken);
         }
 
-        return ApiResponse<OnboardingStatusDto>.Ok(Map(progress));
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
     }
 
-    public async Task<ApiResponse<OnboardingStatusDto>> CompleteOrganizationStepAsync(CompleteOnboardingOrganizationStepRequest request, CancellationToken cancellationToken)
+    public async Task<ApiResponse<OnboardingStatusDto>> CompleteOrganizationStepAsync(OnboardingOrganizationRequest request, CancellationToken cancellationToken)
     {
         if (!TryGetContext(out var companyId, out var userId, out var error))
         {
@@ -64,6 +111,12 @@ public sealed class OnboardingService(
         if (string.IsNullOrWhiteSpace(request.Name))
         {
             return ApiResponse<OnboardingStatusDto>.Fail("Organization name is required.");
+        }
+
+        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+        if (!CanActOnStep(progress, OnboardingStep.OrganizationProfile))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Organization profile step is not available yet.");
         }
 
         var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
@@ -94,99 +147,211 @@ public sealed class OnboardingService(
         company.NormalizedSlug = normalizedSlug;
         company.BrandingLogoUrl = NormalizeOptional(request.BrandingLogoUrl);
         company.BrandingPrimaryColor = NormalizeOptional(request.BrandingPrimaryColor);
-        company.OnboardingState = OnboardingStep.OrganizationCreated.ToStorageValue();
+        company.Email = NormalizeOptional(request.SupportContactEmail) ?? company.Email;
+        company.TimeZone = NormalizeOptional(request.TimeZone) ?? company.TimeZone;
 
-        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
-        if (!CanAdvance(progress.CurrentStep, OnboardingStep.OrganizationCreated))
+        CompleteStep(progress, OnboardingStep.OrganizationProfile);
+        company.OnboardingState = progress.CurrentStep;
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingOrganizationCompleted", new
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Onboarding step order is invalid.");
-        }
+            locale = NormalizeOptional(request.Locale),
+            supportContactUpdated = !string.IsNullOrWhiteSpace(request.SupportContactEmail)
+        }, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.OrganizationProfile.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
 
-        SetStep(progress, OnboardingStep.OrganizationCreated);
-
-        await AddAuditLogAsync(companyId, progress.Id, "OnboardingOrganizationCompleted", cancellationToken);
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
         await dbContext.SaveChangesAsync(cancellationToken);
-        return ApiResponse<OnboardingStatusDto>.Ok(Map(progress));
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
     }
 
-    public async Task<ApiResponse<OnboardingStatusDto>> CompletePlanStepAsync(CompleteOnboardingPlanStepRequest request, CancellationToken cancellationToken)
+    public async Task<ApiResponse<OnboardingStatusDto>> CompletePlanStepAsync(OnboardingPlanRequest request, CancellationToken cancellationToken)
     {
         if (!TryGetContext(out var companyId, out var userId, out var error))
         {
             return ApiResponse<OnboardingStatusDto>.Fail(error);
         }
 
-        if (string.IsNullOrWhiteSpace(request.PlanName))
+        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+        if (!CanActOnStep(progress, OnboardingStep.PlanConfirmation))
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Plan name is required.");
+            return ApiResponse<OnboardingStatusDto>.Fail("Plan confirmation step is not available yet.");
         }
 
-        var plan = await dbContext.SubscriptionPlans
+        var snapshot = await subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(snapshot.PlanName))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("No active plan was found. Use billing checkout to activate a plan first.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.PlanName)
+            && !string.Equals(snapshot.PlanName, request.PlanName.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Plan changes must be completed through the billing flow.");
+        }
+
+        progress.SelectedPlanName = snapshot.PlanName;
+        CompleteStep(progress, OnboardingStep.PlanConfirmation);
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingPlanConfirmed", new { snapshot.PlanName }, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.PlanConfirmation.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
+
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
+    }
+
+    public async Task<ApiResponse<OnboardingStatusDto>> CompletePropertyStepAsync(OnboardingPropertyRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetContext(out var companyId, out var userId, out var error))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail(error);
+        }
+
+        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+        if (!CanActOnStep(progress, OnboardingStep.FirstProperty))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("First property step is not available yet.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.AddressLine1) || string.IsNullOrWhiteSpace(request.City))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Property name, address line 1, and city are required.");
+        }
+
+        var normalizedName = request.Name.Trim().ToUpperInvariant();
+        var normalizedAddress = request.AddressLine1.Trim().ToUpperInvariant();
+        var normalizedCity = request.City.Trim().ToUpperInvariant();
+        var normalizedTimeZone = request.TimeZone.Trim().ToUpperInvariant();
+
+        var existing = await dbContext.Properties
             .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.IsActive
-                && (string.Equals(item.Name, request.PlanName.Trim(), StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(item.DisplayName, request.PlanName.Trim(), StringComparison.OrdinalIgnoreCase)), cancellationToken);
-        if (plan is null)
+            .Where(item => item.CompanyId == companyId && !item.IsDeleted)
+            .FirstOrDefaultAsync(item =>
+                item.Name.ToUpper() == normalizedName
+                && item.AddressLine1.ToUpper() == normalizedAddress
+                && item.City.ToUpper() == normalizedCity
+                && item.TimeZone.ToUpper() == normalizedTimeZone,
+                cancellationToken);
+
+        Guid propertyId;
+        if (existing is not null)
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Selected plan was not found.");
+            propertyId = existing.Id;
+        }
+        else
+        {
+            var created = await propertyService.CreateAsync(new CreatePropertyRequest
+            {
+                Name = request.Name,
+                AddressLine1 = request.AddressLine1,
+                AddressLine2 = request.AddressLine2,
+                City = request.City,
+                CountryCode = request.CountryCode,
+                TimeZone = request.TimeZone,
+                Description = request.Description
+            }, cancellationToken);
+
+            if (!created.Success || created.Data is null)
+            {
+                return ApiResponse<OnboardingStatusDto>.Fail(created.Message, created.Errors);
+            }
+
+            propertyId = created.Data.Id;
         }
 
-        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
-        if (!CanAdvance(progress.CurrentStep, OnboardingStep.PlanSelected))
+        progress.FirstPropertyId = propertyId;
+        CompleteStep(progress, OnboardingStep.FirstProperty);
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingPropertyCreated", new
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Onboarding step order is invalid.");
-        }
+            progress.FirstPropertyId,
+            request.IdempotencyKey
+        }, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.FirstProperty.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
 
-        progress.SelectedPlanName = plan.Name;
-        SetStep(progress, OnboardingStep.PlanSelected);
-
-        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
-        if (company is not null)
-        {
-            company.OnboardingState = OnboardingStep.PlanSelected.ToStorageValue();
-        }
-
-        await AddAuditLogAsync(companyId, progress.Id, "OnboardingPlanCompleted", cancellationToken);
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
         await dbContext.SaveChangesAsync(cancellationToken);
-        return ApiResponse<OnboardingStatusDto>.Ok(Map(progress));
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
     }
 
-    public async Task<ApiResponse<OnboardingStatusDto>> CompletePropertyStepAsync(CompleteOnboardingPropertyStepRequest request, CancellationToken cancellationToken)
+    public async Task<ApiResponse<OnboardingActionResponse<OnboardingInvitationsResponse>>> CompleteInvitationsStepAsync(OnboardingInvitationsRequest request, CancellationToken cancellationToken)
     {
         if (!TryGetContext(out var companyId, out var userId, out var error))
         {
-            return ApiResponse<OnboardingStatusDto>.Fail(error);
+            return ApiResponse<OnboardingActionResponse<OnboardingInvitationsResponse>>.Fail(error);
         }
 
-        var propertyExists = await dbContext.Properties
+        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+        if (!CanActOnStep(progress, OnboardingStep.TeamInvitations))
+        {
+            return ApiResponse<OnboardingActionResponse<OnboardingInvitationsResponse>>.Fail("Team invitation step is not available yet.");
+        }
+
+        if (request.Invitations.Count == 0)
+        {
+            return ApiResponse<OnboardingActionResponse<OnboardingInvitationsResponse>>.Fail("At least one invitation is required, or skip the step.");
+        }
+
+        var results = new List<OnboardingInvitationResultDto>();
+        foreach (var invitation in request.Invitations
+                     .Where(item => !string.IsNullOrWhiteSpace(item.Email))
+                     .GroupBy(item => item.Email.Trim().ToUpperInvariant())
+                     .Select(group => group.First()))
+        {
+            var response = await invitationService.CreateAsync(new CreateOrganizationInvitationRequest
+            {
+                Email = invitation.Email,
+                Role = invitation.Role
+            }, cancellationToken);
+
+            results.Add(new OnboardingInvitationResultDto
+            {
+                Email = invitation.Email,
+                Role = invitation.Role,
+                Success = response.Success,
+                Message = response.Message
+            });
+        }
+
+        var hasSuccess = results.Any(item => item.Success);
+        var hasExistingActiveInvites = await dbContext.OrganizationInvitations
             .AsNoTracking()
-            .AnyAsync(item => item.Id == request.PropertyId && item.CompanyId == companyId && !item.IsDeleted, cancellationToken);
-        if (!propertyExists)
+            .AnyAsync(item => item.CompanyId == companyId
+                && item.AcceptedAtUtc == null
+                && item.RevokedAtUtc == null
+                && item.ExpiresAtUtc > DateTimeOffset.UtcNow, cancellationToken);
+
+        if (!hasSuccess && !hasExistingActiveInvites)
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Property was not found.");
+            return ApiResponse<OnboardingActionResponse<OnboardingInvitationsResponse>>.Fail("No invitation was accepted for processing.");
         }
 
-        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
-        if (!CanAdvance(progress.CurrentStep, OnboardingStep.FirstPropertyCreated))
+        CompleteStep(progress, OnboardingStep.TeamInvitations);
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingInvitationsSent", new
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Onboarding step order is invalid.");
-        }
+            attempted = results.Count,
+            successful = results.Count(item => item.Success)
+        }, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.TeamInvitations.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
 
-        progress.FirstPropertyId = request.PropertyId;
-        SetStep(progress, OnboardingStep.FirstPropertyCreated);
-
-        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
-        if (company is not null)
-        {
-            company.OnboardingState = OnboardingStep.FirstPropertyCreated.ToStorageValue();
-        }
-
-        await AddAuditLogAsync(companyId, progress.Id, "OnboardingPropertyCompleted", cancellationToken);
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
         await dbContext.SaveChangesAsync(cancellationToken);
-        return ApiResponse<OnboardingStatusDto>.Ok(Map(progress));
+
+        var status = await BuildStatusAsync(progress, cancellationToken);
+        return ApiResponse<OnboardingActionResponse<OnboardingInvitationsResponse>>.Ok(new OnboardingActionResponse<OnboardingInvitationsResponse>
+        {
+            Status = status,
+            Result = new OnboardingInvitationsResponse { Results = results }
+        });
     }
 
-    public async Task<ApiResponse<OnboardingStatusDto>> CompleteTeamStepAsync(CompleteOnboardingTeamStepRequest request, CancellationToken cancellationToken)
+    public async Task<ApiResponse<OnboardingStatusDto>> CompleteWhatsAppStepAsync(OnboardingWhatsAppRequest request, CancellationToken cancellationToken)
     {
         if (!TryGetContext(out var companyId, out var userId, out var error))
         {
@@ -194,25 +359,58 @@ public sealed class OnboardingService(
         }
 
         var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
-        if (!CanAdvance(progress.CurrentStep, OnboardingStep.TeammatesInvited))
+        if (!CanActOnStep(progress, OnboardingStep.WhatsAppSetup))
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Onboarding step order is invalid.");
+            return ApiResponse<OnboardingStatusDto>.Fail("WhatsApp setup step is not available yet.");
         }
 
-        SetStep(progress, OnboardingStep.TeammatesInvited);
-
-        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
-        if (company is not null)
+        var integrations = await whatsAppTemplateService.GetIntegrationsAsync(cancellationToken);
+        if (!integrations.Success || integrations.Data is null || integrations.Data.Count == 0)
         {
-            company.OnboardingState = OnboardingStep.TeammatesInvited.ToStorageValue();
+            return ApiResponse<OnboardingStatusDto>.Fail("WhatsApp integration is not configured for this tenant.");
         }
 
-        await AddAuditLogAsync(companyId, progress.Id, "OnboardingTeamCompleted", cancellationToken);
+        var integration = request.IntegrationId.HasValue
+            ? integrations.Data.FirstOrDefault(item => item.Id == request.IntegrationId.Value)
+            : integrations.Data.First();
+        if (integration is null)
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Selected WhatsApp integration was not found.");
+        }
+
+        string status;
+        if (request.RunHealthCheck)
+        {
+            var health = await whatsAppTemplateService.CheckHealthAsync(integration.Id, cancellationToken);
+            if (!health.Success || health.Data is null)
+            {
+                return ApiResponse<OnboardingStatusDto>.Fail("WhatsApp health check failed. Resolve integration blockers first.");
+            }
+
+            status = health.Data.Status;
+        }
+        else
+        {
+            status = integration.HealthStatus;
+        }
+
+        if (!string.Equals(status, "Healthy", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("WhatsApp integration is not healthy yet.");
+        }
+
+        CompleteStep(progress, OnboardingStep.WhatsAppSetup);
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingWhatsAppConfigured", new { integration.Id }, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.WhatsAppSetup.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
+
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
         await dbContext.SaveChangesAsync(cancellationToken);
-        return ApiResponse<OnboardingStatusDto>.Ok(Map(progress));
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
     }
 
-    public async Task<ApiResponse<OnboardingStatusDto>> CompleteOnboardingAsync(CancellationToken cancellationToken)
+    public async Task<ApiResponse<OnboardingStatusDto>> CompleteAiProviderStepAsync(OnboardingAiProviderRequest request, CancellationToken cancellationToken)
     {
         if (!TryGetContext(out var companyId, out var userId, out var error))
         {
@@ -220,14 +418,356 @@ public sealed class OnboardingService(
         }
 
         var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
-        if (StepRank(progress.CurrentStep) < StepRank(OnboardingStep.TeammatesInvited.ToStorageValue()))
+        if (!CanActOnStep(progress, OnboardingStep.AiProviderSetup))
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Onboarding cannot be completed before all steps are done.");
+            return ApiResponse<OnboardingStatusDto>.Fail("AI provider setup step is not available yet.");
+        }
+
+        var provider = aiProviderOptions.Value.Provider;
+        if (string.Equals(provider, "OpenAI", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(openAiOptions.Value.ApiKey) || string.IsNullOrWhiteSpace(openAiOptions.Value.Model))
+            {
+                return ApiResponse<OnboardingStatusDto>.Fail("OpenAI provider configuration is incomplete.");
+            }
+
+            CompleteStep(progress, OnboardingStep.AiProviderSetup);
+        }
+        else
+        {
+            if (!request.AcknowledgeDeterministicFallback && !request.SkipIfDeterministicOnly)
+            {
+                return ApiResponse<OnboardingStatusDto>.Fail("Confirm deterministic fallback readiness before continuing.");
+            }
+
+            if (request.SkipIfDeterministicOnly)
+            {
+                SkipStep(progress, OnboardingStep.AiProviderSetup);
+                await AddOnboardingEventAsync(companyId, userId, "onboarding.step_skipped", OnboardingStep.AiProviderSetup.ToStorageValue(), OnboardingStepState.Skipped.ToString(), null, cancellationToken);
+            }
+            else
+            {
+                CompleteStep(progress, OnboardingStep.AiProviderSetup);
+                await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.AiProviderSetup.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
+            }
+        }
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingAiConfigured", new { provider }, cancellationToken);
+
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
+    }
+
+    public async Task<ApiResponse<OnboardingStatusDto>> CompleteKnowledgeStepAsync(OnboardingKnowledgeRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetContext(out var companyId, out var userId, out var error))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail(error);
+        }
+
+        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+        if (!CanActOnStep(progress, OnboardingStep.KnowledgeBaseSetup))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Knowledge setup step is not available yet.");
+        }
+
+        var propertyId = request.PropertyId ?? progress.FirstPropertyId;
+        if (propertyId is null || propertyId == Guid.Empty)
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("A valid property is required before knowledge setup.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Content))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Knowledge title and content are required.");
+        }
+
+        var existing = await dbContext.PropertyKnowledgeArticles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.CompanyId == companyId
+                && item.PropertyId == propertyId
+                && !item.IsDeleted
+                && item.Title == request.Title.Trim()
+                && item.Content == request.Content.Trim(), cancellationToken);
+
+        if (existing is null)
+        {
+            var created = await propertyKnowledgeService.CreateAsync(propertyId.Value, new CreatePropertyKnowledgeRequest
+            {
+                Category = PropertyKnowledgeCategory.Other,
+                Title = request.Title,
+                Summary = request.Summary,
+                Content = request.Content,
+                Tags = request.Tags,
+                IsActive = true,
+                Priority = 0
+            }, cancellationToken);
+
+            if (!created.Success || created.Data is null)
+            {
+                return ApiResponse<OnboardingStatusDto>.Fail(created.Message, created.Errors);
+            }
+
+            if (!created.Data.IsApproved)
+            {
+                await propertyKnowledgeService.ApproveAsync(propertyId.Value, created.Data.Id, cancellationToken);
+            }
+        }
+
+        CompleteStep(progress, OnboardingStep.KnowledgeBaseSetup);
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingKnowledgeAdded", new
+        {
+            propertyId,
+            request.IdempotencyKey
+        }, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.KnowledgeBaseSetup.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
+
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
+    }
+
+    public async Task<ApiResponse<OnboardingStatusDto>> CompleteDemoDataStepAsync(OnboardingDemoDataRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetContext(out var companyId, out var userId, out var error))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail(error);
+        }
+
+        if (hostEnvironment.IsProduction())
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Demo data generation is blocked in production.");
+        }
+
+        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+        if (!CanActOnStep(progress, OnboardingStep.DemoData))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Demo data step is not available yet.");
+        }
+
+        var propertyId = progress.FirstPropertyId;
+        if (propertyId is null || propertyId == Guid.Empty)
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("First property must be configured before demo data.");
+        }
+
+        var marker = $"[DEMO][ONBOARDING][{companyId:N}]";
+
+        Guest? guest = null;
+        if (request.CreateSampleReservation || request.CreateSampleConversation)
+        {
+            guest = await dbContext.Guests.FirstOrDefaultAsync(item => item.CompanyId == companyId && item.Email == $"demo+{companyId:N}@stayflow.invalid" && !item.IsDeleted, cancellationToken);
+            if (guest is null)
+            {
+                guest = new Guest
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyId,
+                    FirstName = "Demo",
+                    LastName = "Guest",
+                    Email = $"demo+{companyId:N}@stayflow.invalid",
+                    PreferredLanguage = "en",
+                    CountryCode = "KE",
+                    IsActive = true,
+                    Notes = marker
+                };
+
+                await dbContext.Guests.AddAsync(guest, cancellationToken);
+            }
+        }
+
+        Reservation? reservation = null;
+        if (request.CreateSampleReservation && guest is not null)
+        {
+            var externalRef = $"{marker}:reservation";
+            reservation = await dbContext.Reservations.FirstOrDefaultAsync(item => item.CompanyId == companyId && item.ExternalReservationReference == externalRef && !item.IsDeleted, cancellationToken);
+            if (reservation is null)
+            {
+                var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                reservation = new Reservation
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyId,
+                    PropertyId = propertyId.Value,
+                    PrimaryGuestId = guest.Id,
+                    ExternalReservationReference = externalRef,
+                    ReservationSource = "Demo",
+                    CheckInDate = today,
+                    CheckOutDate = today.AddDays(2),
+                    Adults = 2,
+                    Children = 0,
+                    TotalGuestCount = 2,
+                    Status = ReservationStatus.Confirmed,
+                    IsActive = true,
+                    InternalNotes = marker
+                };
+
+                await dbContext.Reservations.AddAsync(reservation, cancellationToken);
+            }
+        }
+
+        Conversation? conversation = null;
+        if (request.CreateSampleConversation && guest is not null)
+        {
+            var subject = $"{marker} First guest conversation";
+            conversation = await dbContext.Conversations.FirstOrDefaultAsync(item => item.CompanyId == companyId && item.Subject == subject && !item.IsDeleted, cancellationToken);
+            if (conversation is null)
+            {
+                conversation = new Conversation
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyId,
+                    GuestId = guest.Id,
+                    PropertyId = propertyId,
+                    ReservationId = reservation?.Id,
+                    Subject = subject,
+                    Channel = DTOs.ReservationContext.GuestChannel.Web,
+                    Status = ConversationStatus.Open,
+                    StartedAt = DateTimeOffset.UtcNow,
+                    LastActivityAt = DateTimeOffset.UtcNow,
+                    HumanTakeoverEnabled = true
+                };
+
+                await dbContext.Conversations.AddAsync(conversation, cancellationToken);
+            }
+
+            var hasDemoMessage = await dbContext.ConversationMessages
+                .AnyAsync(item => item.CompanyId == companyId
+                    && item.ConversationId == conversation.Id
+                    && item.Content.Contains(marker, StringComparison.Ordinal), cancellationToken);
+            if (!hasDemoMessage)
+            {
+                await dbContext.ConversationMessages.AddAsync(new ConversationMessage
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyId,
+                    ConversationId = conversation.Id,
+                    SenderType = ConversationSenderType.Guest,
+                    Content = $"{marker} Hello, can I check in early?",
+                    MessageType = ConversationMessageType.Text,
+                    Provider = ConversationMessageProvider.None,
+                    SentAt = DateTimeOffset.UtcNow,
+                    IsInternal = false
+                }, cancellationToken);
+            }
+        }
+
+        if (request.CreateSampleKnowledge)
+        {
+            var knowledgeTitle = $"{marker} Welcome Instructions";
+            var knowledgeExists = await dbContext.PropertyKnowledgeArticles.AnyAsync(item =>
+                item.CompanyId == companyId
+                && item.PropertyId == propertyId
+                && !item.IsDeleted
+                && item.Title == knowledgeTitle, cancellationToken);
+            if (!knowledgeExists)
+            {
+                await dbContext.PropertyKnowledgeArticles.AddAsync(new PropertyKnowledgeArticle
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyId,
+                    PropertyId = propertyId.Value,
+                    Category = PropertyKnowledgeCategory.CheckIn,
+                    Title = knowledgeTitle,
+                    Content = "Guest check-in starts at 3 PM. Use self-check-in lock instructions in your reservation message.",
+                    Tags = "demo,onboarding",
+                    IsApproved = true,
+                    IsActive = true,
+                    ApprovedAt = DateTimeOffset.UtcNow,
+                    Summary = marker,
+                    Priority = 0
+                }, cancellationToken);
+            }
+        }
+
+        CompleteStep(progress, OnboardingStep.DemoData);
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingDemoDataCreated", new
+        {
+            request.IdempotencyKey,
+            environment = hostEnvironment.EnvironmentName
+        }, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.DemoData.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
+
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
+    }
+
+    public async Task<ApiResponse<OnboardingStatusDto>> SkipStepAsync(string step, OnboardingSkipStepRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetContext(out var companyId, out var userId, out var error))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail(error);
+        }
+
+        if (!OnboardingStepExtensions.TryParse(step, out var targetStep))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Unknown onboarding step.");
+        }
+
+        if (!OptionalSteps.Contains(targetStep))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("This step cannot be skipped.");
+        }
+
+        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+        if (!CanActOnStep(progress, targetStep))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("This step cannot be skipped at the current onboarding stage.");
+        }
+
+        SkipStep(progress, targetStep);
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingStepSkipped", new
+        {
+            step = targetStep.ToStorageValue(),
+            reason = NormalizeOptional(request.Reason)
+        }, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_skipped", targetStep.ToStorageValue(), OnboardingStepState.Skipped.ToString(), null, cancellationToken);
+
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
+    }
+
+    public async Task<ApiResponse<OnboardingStatusDto>> CompleteOnboardingAsync(OnboardingCompleteRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetContext(out var companyId, out var userId, out var error))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail(error);
+        }
+
+        if (!request.ConfirmChecklistReviewed)
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Review confirmation is required before completion.");
+        }
+
+        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+        var status = await BuildStatusAsync(progress, cancellationToken);
+
+        var blockingItems = status.Checklist.Where(item =>
+            !item.Optional
+            && !string.Equals(item.Status, "complete", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (blockingItems.Count > 0 || status.Blockers.Count > 0)
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Onboarding completion is blocked by remaining required setup.");
         }
 
         progress.IsCompleted = true;
         progress.CompletedAtUtc = DateTimeOffset.UtcNow;
-        SetStep(progress, OnboardingStep.Completed);
+        progress.CompletedByUserId = userId;
+        progress.CurrentStep = OnboardingStep.Completed.ToStorageValue();
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
 
         var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
         if (company is not null)
@@ -235,9 +775,440 @@ public sealed class OnboardingService(
             company.OnboardingState = OnboardingStep.Completed.ToStorageValue();
         }
 
-        await AddAuditLogAsync(companyId, progress.Id, "OnboardingCompleted", cancellationToken);
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingCompleted", new
+        {
+            elapsedMinutes = (int)Math.Max(0, (progress.CompletedAtUtc.Value - progress.StartedAtUtc).TotalMinutes)
+        }, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.completed", OnboardingStep.Completed.ToStorageValue(), OnboardingStepState.Completed.ToString(), new
+        {
+            elapsedSeconds = (int)Math.Max(0, (progress.CompletedAtUtc.Value - progress.StartedAtUtc).TotalSeconds)
+        }, cancellationToken);
+
         await dbContext.SaveChangesAsync(cancellationToken);
-        return ApiResponse<OnboardingStatusDto>.Ok(Map(progress));
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
+    }
+
+    public async Task<ApiResponse<OnboardingStatusDto>> ResetAsync(OnboardingResetRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetContext(out var companyId, out var userId, out var error))
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail(error);
+        }
+
+        if (!request.Confirm)
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Reset confirmation is required.");
+        }
+
+        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+        progress.CurrentStep = OnboardingStep.Welcome.ToStorageValue();
+        progress.CompletedStepsCsv = string.Empty;
+        progress.SkippedStepsCsv = string.Empty;
+        progress.IsCompleted = false;
+        progress.CompletedAtUtc = null;
+        progress.CompletedByUserId = null;
+        progress.FirstPropertyId = null;
+        progress.SelectedPlanName = null;
+        progress.StartedAtUtc = DateTimeOffset.UtcNow;
+        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+        progress.Version++;
+
+        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
+        if (company is not null)
+        {
+            company.OnboardingState = OnboardingStep.Welcome.ToStorageValue();
+        }
+
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingReset", null, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.reset", OnboardingStep.Welcome.ToStorageValue(), OnboardingStepState.InProgress.ToString(), null, cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
+    }
+
+    private async Task<OnboardingStatusDto> BuildStatusAsync(OnboardingProgress progress, CancellationToken cancellationToken)
+    {
+        var completed = ParseSteps(progress.CompletedStepsCsv);
+        var skipped = ParseSteps(progress.SkippedStepsCsv);
+        var completedOrSkipped = new HashSet<OnboardingStep>(completed);
+        completedOrSkipped.UnionWith(skipped);
+
+        var blockers = await CalculateBlockersAsync(progress, completedOrSkipped, cancellationToken);
+
+        var currentStep = ResolveCurrentStep(progress, completedOrSkipped, blockers);
+        var remainingSteps = WorkflowSteps
+            .Where(step => !completedOrSkipped.Contains(step))
+            .Select(step => step.ToStorageValue())
+            .ToList();
+
+        var checklist = await BuildChecklistAsync(progress, completedOrSkipped, skipped, blockers, cancellationToken);
+
+        var denominator = WorkflowSteps.Length;
+        var percent = denominator == 0
+            ? 0
+            : (int)Math.Round((completedOrSkipped.Count / (double)denominator) * 100, MidpointRounding.AwayFromZero);
+
+        return new OnboardingStatusDto
+        {
+            CompanyId = progress.CompanyId,
+            UserId = progress.UserId,
+            CurrentStep = currentStep.ToStorageValue(),
+            CurrentStepState = ResolveStepState(currentStep, completed, skipped, blockers).ToString(),
+            CompletedSteps = completed.Select(item => item.ToStorageValue()).ToList(),
+            RemainingSteps = remainingSteps,
+            SkippedSteps = skipped.Select(item => item.ToStorageValue()).ToList(),
+            Blockers = blockers,
+            Checklist = checklist,
+            PercentComplete = Math.Clamp(percent, 0, 100),
+            NextRecommendedAction = blockers.FirstOrDefault(item => item.Step == currentStep.ToStorageValue())?.Message
+                ?? (currentStep == OnboardingStep.Completed ? "Open /get-started to continue." : $"Complete {currentStep.ToStorageValue()}"),
+            SafeLinks = BuildSafeLinks(currentStep),
+            StartedAtUtc = progress.StartedAtUtc,
+            SelectedPlanName = progress.SelectedPlanName,
+            FirstPropertyId = progress.FirstPropertyId,
+            IsCompleted = progress.IsCompleted,
+            CompletedAtUtc = progress.CompletedAtUtc,
+            CompletedByUserId = progress.CompletedByUserId,
+            LastUpdatedAtUtc = progress.LastUpdatedAtUtc,
+            Version = progress.Version
+        };
+    }
+
+    private static IReadOnlyCollection<OnboardingSafeLinkDto> BuildSafeLinks(OnboardingStep currentStep)
+    {
+        var links = new List<OnboardingSafeLinkDto>
+        {
+            new() { Rel = "self", Href = "/onboarding" },
+            new() { Rel = "current_step", Href = $"/onboarding/{ToRouteSegment(currentStep)}" },
+            new() { Rel = "host_inbox", Href = "/host/conversations" },
+            new() { Rel = "property_knowledge", Href = "/host/properties" },
+            new() { Rel = "whatsapp_settings", Href = "/host/settings/whatsapp" },
+            new() { Rel = "billing", Href = "/host/settings/billing" },
+            new() { Rel = "team_settings", Href = "/host/settings/organization" }
+        };
+
+        return links;
+    }
+
+    private async Task<IReadOnlyCollection<OnboardingChecklistItemDto>> BuildChecklistAsync(
+        OnboardingProgress progress,
+        IReadOnlySet<OnboardingStep> completedOrSkipped,
+        IReadOnlySet<OnboardingStep> skipped,
+        IReadOnlyCollection<OnboardingBlockerDto> blockers,
+        CancellationToken cancellationToken)
+    {
+        var ownerOrAdminCount = await dbContext.OrganizationMembers
+            .AsNoTracking()
+            .CountAsync(item => item.CompanyId == progress.CompanyId
+                && item.Status == OrganizationMemberStatus.Active.ToStorageValue()
+                && (item.Role == OrganizationRole.Owner.ToStorageValue() || item.Role == OrganizationRole.Administrator.ToStorageValue()), cancellationToken);
+
+        var hasProperty = await dbContext.Properties.AsNoTracking().AnyAsync(item => item.CompanyId == progress.CompanyId && !item.IsDeleted, cancellationToken);
+        var hasKnowledge = progress.FirstPropertyId.HasValue && await dbContext.PropertyKnowledgeArticles
+            .AsNoTracking()
+            .AnyAsync(item => item.CompanyId == progress.CompanyId
+                && item.PropertyId == progress.FirstPropertyId
+                && !item.IsDeleted
+                && item.IsActive, cancellationToken);
+
+        var hasInvitation = await dbContext.OrganizationInvitations
+            .AsNoTracking()
+            .AnyAsync(item => item.CompanyId == progress.CompanyId
+                && item.RevokedAtUtc == null
+                && item.ExpiresAtUtc > DateTimeOffset.UtcNow, cancellationToken);
+
+        var hasPlan = !string.IsNullOrWhiteSpace(progress.SelectedPlanName)
+            || await dbContext.TenantSubscriptions.AsNoTracking().AnyAsync(item => item.CompanyId == progress.CompanyId, cancellationToken);
+
+        var aiReady = string.Equals(aiProviderOptions.Value.Provider, "OpenAI", StringComparison.OrdinalIgnoreCase)
+            ? !string.IsNullOrWhiteSpace(openAiOptions.Value.ApiKey)
+            : completedOrSkipped.Contains(OnboardingStep.AiProviderSetup);
+
+        var items = new List<OnboardingChecklistItemDto>
+        {
+            new()
+            {
+                Key = "organization_profile_complete",
+                Status = completedOrSkipped.Contains(OnboardingStep.OrganizationProfile) ? "complete" : "incomplete",
+                Optional = false,
+                Recommendation = "Confirm organization profile details."
+            },
+            new()
+            {
+                Key = "active_plan_available",
+                Status = hasPlan ? "complete" : "blocked",
+                Optional = false,
+                Recommendation = "Activate or confirm your plan through billing if required."
+            },
+            new()
+            {
+                Key = "first_property_exists",
+                Status = hasProperty ? "complete" : "incomplete",
+                Optional = false,
+                Recommendation = "Create your first property."
+            },
+            new()
+            {
+                Key = "owner_or_admin_exists",
+                Status = ownerOrAdminCount > 0 ? "complete" : "blocked",
+                Optional = false,
+                Recommendation = "Ensure at least one owner/administrator exists."
+            },
+            new()
+            {
+                Key = "team_invited_or_skipped",
+                Status = hasInvitation || skipped.Contains(OnboardingStep.TeamInvitations) || completedOrSkipped.Contains(OnboardingStep.TeamInvitations)
+                    ? "complete"
+                    : "optional",
+                Optional = true,
+                Recommendation = "Invite teammates or skip for now."
+            },
+            new()
+            {
+                Key = "whatsapp_configured_or_skipped",
+                Status = skipped.Contains(OnboardingStep.WhatsAppSetup) || completedOrSkipped.Contains(OnboardingStep.WhatsAppSetup)
+                    ? "complete"
+                    : "optional",
+                Optional = true,
+                Recommendation = "Configure WhatsApp only if your operating model requires it."
+            },
+            new()
+            {
+                Key = "ai_provider_ready",
+                Status = aiReady ? "complete" : "recommended",
+                Optional = false,
+                Recommendation = "Confirm deterministic fallback or configure OpenAI provider."
+            },
+            new()
+            {
+                Key = "knowledge_item_exists",
+                Status = hasKnowledge ? "complete" : "incomplete",
+                Optional = false,
+                Recommendation = "Add your first knowledge item for the property."
+            },
+            new()
+            {
+                Key = "readiness_checks_pass",
+                Status = blockers.Count == 0 ? "complete" : "blocked",
+                Optional = false,
+                Recommendation = "Resolve blockers to finish onboarding."
+            }
+        };
+
+        return items;
+    }
+
+    private async Task<IReadOnlyCollection<OnboardingBlockerDto>> CalculateBlockersAsync(
+        OnboardingProgress progress,
+        IReadOnlySet<OnboardingStep> completedOrSkipped,
+        CancellationToken cancellationToken)
+    {
+        var blockers = new List<OnboardingBlockerDto>();
+
+        if (!completedOrSkipped.Contains(OnboardingStep.OrganizationProfile))
+        {
+            return blockers;
+        }
+
+        var hasPlan = !string.IsNullOrWhiteSpace(progress.SelectedPlanName)
+            || await dbContext.TenantSubscriptions.AsNoTracking().AnyAsync(item => item.CompanyId == progress.CompanyId, cancellationToken);
+        if (!hasPlan)
+        {
+            blockers.Add(new OnboardingBlockerDto
+            {
+                Step = OnboardingStep.PlanConfirmation.ToStorageValue(),
+                Code = "plan_missing",
+                Message = "No active plan was found. Complete billing checkout to continue."
+            });
+        }
+
+        if (completedOrSkipped.Contains(OnboardingStep.FirstProperty) && progress.FirstPropertyId.HasValue)
+        {
+            var propertyExists = await dbContext.Properties.AsNoTracking().AnyAsync(item =>
+                item.CompanyId == progress.CompanyId
+                && item.Id == progress.FirstPropertyId.Value
+                && !item.IsDeleted, cancellationToken);
+            if (!propertyExists)
+            {
+                blockers.Add(new OnboardingBlockerDto
+                {
+                    Step = OnboardingStep.FirstProperty.ToStorageValue(),
+                    Code = "property_missing",
+                    Message = "The selected onboarding property no longer exists. Create a new property."
+                });
+            }
+        }
+
+        var provider = aiProviderOptions.Value.Provider;
+        if (string.Equals(provider, "OpenAI", StringComparison.OrdinalIgnoreCase)
+            && (string.IsNullOrWhiteSpace(openAiOptions.Value.ApiKey) || string.IsNullOrWhiteSpace(openAiOptions.Value.Model)))
+        {
+            blockers.Add(new OnboardingBlockerDto
+            {
+                Step = OnboardingStep.AiProviderSetup.ToStorageValue(),
+                Code = "ai_provider_not_ready",
+                Message = "OpenAI configuration is incomplete."
+            });
+        }
+
+        return blockers;
+    }
+
+    private static OnboardingStep ResolveCurrentStep(
+        OnboardingProgress progress,
+        IReadOnlySet<OnboardingStep> completedOrSkipped,
+        IReadOnlyCollection<OnboardingBlockerDto> blockers)
+    {
+        if (progress.IsCompleted)
+        {
+            return OnboardingStep.Completed;
+        }
+
+        foreach (var step in WorkflowSteps)
+        {
+            if (completedOrSkipped.Contains(step))
+            {
+                continue;
+            }
+
+            var blocked = blockers.Any(item => string.Equals(item.Step, step.ToStorageValue(), StringComparison.OrdinalIgnoreCase));
+            if (blocked)
+            {
+                return step;
+            }
+
+            var unmetPrerequisite = WorkflowSteps
+                .Where(candidate => candidate.Rank() < step.Rank())
+                .Any(candidate => !completedOrSkipped.Contains(candidate) && !OptionalSteps.Contains(candidate));
+            if (unmetPrerequisite)
+            {
+                continue;
+            }
+
+            return step;
+        }
+
+        return OnboardingStep.Review;
+    }
+
+    private static OnboardingStepState ResolveStepState(
+        OnboardingStep step,
+        IReadOnlySet<OnboardingStep> completed,
+        IReadOnlySet<OnboardingStep> skipped,
+        IReadOnlyCollection<OnboardingBlockerDto> blockers)
+    {
+        if (completed.Contains(step))
+        {
+            return OnboardingStepState.Completed;
+        }
+
+        if (skipped.Contains(step))
+        {
+            return OnboardingStepState.Skipped;
+        }
+
+        if (blockers.Any(item => string.Equals(item.Step, step.ToStorageValue(), StringComparison.OrdinalIgnoreCase)))
+        {
+            return OnboardingStepState.Blocked;
+        }
+
+        return OnboardingStepState.InProgress;
+    }
+
+    private static IReadOnlySet<OnboardingStep> ParseSteps(string csv)
+    {
+        if (string.IsNullOrWhiteSpace(csv))
+        {
+            return new HashSet<OnboardingStep>();
+        }
+
+        var values = csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var steps = new HashSet<OnboardingStep>();
+        foreach (var value in values)
+        {
+            if (OnboardingStepExtensions.TryParse(value, out var step))
+            {
+                steps.Add(step);
+            }
+        }
+
+        return steps;
+    }
+
+    private static string ToCsv(IEnumerable<OnboardingStep> steps)
+    {
+        return string.Join(',', steps.OrderBy(item => item.Rank()).Select(item => item.ToStorageValue()));
+    }
+
+    private static string ToRouteSegment(OnboardingStep step)
+    {
+        return step switch
+        {
+            OnboardingStep.Welcome => "welcome",
+            OnboardingStep.OrganizationProfile => "organization",
+            OnboardingStep.PlanConfirmation => "plan",
+            OnboardingStep.FirstProperty => "property",
+            OnboardingStep.TeamInvitations => "team",
+            OnboardingStep.WhatsAppSetup => "whatsapp",
+            OnboardingStep.AiProviderSetup => "ai",
+            OnboardingStep.KnowledgeBaseSetup => "knowledge",
+            OnboardingStep.DemoData => "demo",
+            OnboardingStep.Review => "review",
+            OnboardingStep.Completed => "complete",
+            _ => "welcome"
+        };
+    }
+
+    private void CompleteStep(OnboardingProgress progress, OnboardingStep step)
+    {
+        var completed = ParseSteps(progress.CompletedStepsCsv).ToHashSet();
+        var skipped = ParseSteps(progress.SkippedStepsCsv).ToHashSet();
+        completed.Add(step);
+        skipped.Remove(step);
+
+        progress.CompletedStepsCsv = ToCsv(completed);
+        progress.SkippedStepsCsv = ToCsv(skipped);
+        progress.CurrentStep = step.ToStorageValue();
+
+        var resolvedCurrent = ResolveCurrentStep(progress, completed.Union(skipped).ToHashSet(), []);
+        progress.CurrentStep = resolvedCurrent.ToStorageValue();
+    }
+
+    private void SkipStep(OnboardingProgress progress, OnboardingStep step)
+    {
+        var completed = ParseSteps(progress.CompletedStepsCsv).ToHashSet();
+        var skipped = ParseSteps(progress.SkippedStepsCsv).ToHashSet();
+        if (!OptionalSteps.Contains(step))
+        {
+            return;
+        }
+
+        skipped.Add(step);
+        completed.Remove(step);
+
+        progress.CompletedStepsCsv = ToCsv(completed);
+        progress.SkippedStepsCsv = ToCsv(skipped);
+
+        var resolvedCurrent = ResolveCurrentStep(progress, completed.Union(skipped).ToHashSet(), []);
+        progress.CurrentStep = resolvedCurrent.ToStorageValue();
+    }
+
+    private bool CanActOnStep(OnboardingProgress progress, OnboardingStep target)
+    {
+        if (progress.IsCompleted)
+        {
+            return target == OnboardingStep.Completed;
+        }
+
+        var completed = ParseSteps(progress.CompletedStepsCsv);
+        var skipped = ParseSteps(progress.SkippedStepsCsv);
+        var completeSet = completed.Union(skipped).ToHashSet();
+
+        var unmetRequiredPriorStep = WorkflowSteps
+            .Where(step => step != OnboardingStep.Welcome && step.Rank() < target.Rank() && !OptionalSteps.Contains(step))
+            .Any(step => !completeSet.Contains(step));
+
+        return !unmetRequiredPriorStep;
     }
 
     private async Task<OnboardingProgress> GetOrCreateProgressAsync(Guid companyId, Guid userId, CancellationToken cancellationToken)
@@ -253,12 +1224,16 @@ public sealed class OnboardingService(
             Id = Guid.NewGuid(),
             CompanyId = companyId,
             UserId = userId,
-            CurrentStep = OnboardingStep.OrganizationCreated.ToStorageValue(),
+            CurrentStep = OnboardingStep.Welcome.ToStorageValue(),
             IsCompleted = false,
-            LastUpdatedAtUtc = DateTimeOffset.UtcNow
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            LastUpdatedAtUtc = DateTimeOffset.UtcNow,
+            Version = 1
         };
 
         await dbContext.OnboardingProgressRecords.AddAsync(created, cancellationToken);
+        await AddAuditLogAsync(companyId, created.Id, "OnboardingStarted", null, cancellationToken);
+        await AddOnboardingEventAsync(companyId, userId, "onboarding.started", created.CurrentStep, OnboardingStepState.InProgress.ToString(), null, cancellationToken);
         return created;
     }
 
@@ -268,25 +1243,7 @@ public sealed class OnboardingService(
             .FirstOrDefaultAsync(item => item.CompanyId == companyId && item.UserId == userId, cancellationToken);
     }
 
-    private static void SetStep(OnboardingProgress progress, OnboardingStep step)
-    {
-        progress.CurrentStep = step.ToStorageValue();
-        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
-    }
-
-    private static bool CanAdvance(string currentStep, OnboardingStep target)
-    {
-        return StepRank(currentStep) <= StepRank(target.ToStorageValue());
-    }
-
-    private static int StepRank(string step)
-    {
-        return Enum.TryParse<OnboardingStep>(step, true, out var parsed)
-            ? (int)parsed
-            : 0;
-    }
-
-    private async Task AddAuditLogAsync(Guid companyId, Guid entityId, string action, CancellationToken cancellationToken)
+    private async Task AddAuditLogAsync(Guid companyId, Guid entityId, string action, object? metadata, CancellationToken cancellationToken)
     {
         await dbContext.AuditLogs.AddAsync(new AuditLog
         {
@@ -294,24 +1251,35 @@ public sealed class OnboardingService(
             EntityName = nameof(OnboardingProgress),
             EntityId = entityId,
             Action = action,
-            Details = $"{{\"companyId\":\"{companyId}\",\"userId\":\"{tenantContext.UserId}\"}}",
+            Details = JsonSerializer.Serialize(new
+            {
+                companyId,
+                userId = tenantContext.UserId,
+                metadata
+            }),
             CreatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
     }
 
-    private static OnboardingStatusDto Map(OnboardingProgress progress)
+    private async Task AddOnboardingEventAsync(
+        Guid companyId,
+        Guid userId,
+        string eventName,
+        string step,
+        string state,
+        object? metadata,
+        CancellationToken cancellationToken)
     {
-        return new OnboardingStatusDto
+        await dbContext.OnboardingEvents.AddAsync(new OnboardingEvent
         {
-            CompanyId = progress.CompanyId,
-            UserId = progress.UserId,
-            CurrentStep = progress.CurrentStep,
-            SelectedPlanName = progress.SelectedPlanName,
-            FirstPropertyId = progress.FirstPropertyId,
-            IsCompleted = progress.IsCompleted,
-            CompletedAtUtc = progress.CompletedAtUtc,
-            LastUpdatedAtUtc = progress.LastUpdatedAtUtc
-        };
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            UserId = userId,
+            EventName = eventName,
+            Step = step,
+            State = state,
+            MetadataJson = metadata is null ? "{}" : JsonSerializer.Serialize(metadata)
+        }, cancellationToken);
     }
 
     private bool TryGetContext(out Guid companyId, out Guid userId, out string error)
