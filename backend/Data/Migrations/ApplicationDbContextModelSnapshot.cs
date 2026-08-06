@@ -112,11 +112,82 @@ namespace backend.Data.Migrations
                     b.ToTable("AuditLogs", (string)null);
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.BillingWebhookEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CustomerId")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset>("EventCreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("PayloadHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("ProcessedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("SubscriptionId")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("WasDuplicate")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId");
+
+                    b.HasIndex("EventCreatedAtUtc");
+
+                    b.HasIndex("SubscriptionId");
+
+                    b.HasIndex("Provider", "EventId")
+                        .IsUnique();
+
+                    b.ToTable("BillingWebhookEvents", (string)null);
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.Company", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("BrandingLogoUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("BrandingPrimaryColor")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<string>("CountryCode")
                         .IsRequired()
@@ -143,10 +214,36 @@ namespace backend.Data.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("character varying(160)");
 
+                    b.Property<string>("NormalizedSlug")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("OnboardingState")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("PhoneNumber")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("StripeCustomerId")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
 
                     b.Property<string>("TimeZone")
                         .IsRequired()
@@ -160,7 +257,19 @@ namespace backend.Data.Migrations
 
                     b.HasIndex("CreatedAt");
 
+                    b.HasIndex("NormalizedSlug")
+                        .IsUnique();
+
+                    b.HasIndex("OwnerUserId");
+
                     b.HasIndex("PhoneNumber");
+
+                    b.HasIndex("Slug")
+                        .IsUnique();
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("StripeCustomerId");
 
                     b.ToTable("Companies", (string)null);
 
@@ -174,7 +283,10 @@ namespace backend.Data.Migrations
                             IsActive = true,
                             LegalName = "StayFlow Demo Hosts Ltd",
                             Name = "StayFlow Demo Hosts",
+                            NormalizedSlug = "STAYFLOW-DEMO-HOSTS",
                             PhoneNumber = "+254700000000",
+                            Slug = "stayflow-demo-hosts",
+                            Status = "Active",
                             TimeZone = "Africa/Nairobi",
                             UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
                         });
@@ -1209,6 +1321,191 @@ namespace backend.Data.Migrations
                     b.ToTable("MaintenanceTickets", (string)null);
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.OnboardingProgress", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CurrentStep")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("FirstPropertyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsCompleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("LastUpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SelectedPlanName")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("CurrentStep");
+
+                    b.HasIndex("IsCompleted");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CompanyId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("OnboardingProgress", (string)null);
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.OrganizationInvitation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("AcceptedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AcceptedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<DateTimeOffset>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("InvitedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("LastSentAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<DateTimeOffset?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int>("SendCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AcceptedByUserId");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.HasIndex("InvitedByUserId");
+
+                    b.HasIndex("NormalizedEmail");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "NormalizedEmail")
+                        .HasFilter("\"AcceptedAtUtc\" IS NULL AND \"RevokedAtUtc\" IS NULL");
+
+                    b.ToTable("OrganizationInvitations", (string)null);
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.OrganizationMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("InvitedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("InvitedByUserId");
+
+                    b.HasIndex("Role");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("CompanyId", "UserId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Active'");
+
+                    b.ToTable("OrganizationMembers", (string)null);
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.ParkingRequest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1467,6 +1764,838 @@ namespace backend.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Permissions", (string)null);
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.PlanEntitlement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsUnlimited")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<long?>("QuotaLimit")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("SubscriptionPlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key");
+
+                    b.HasIndex("SubscriptionPlanId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("PlanEntitlements", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("2f13a2c1-a62f-e3a2-9837-02085d74d01b"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "AiConcierge",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("cd7bdc6f-7827-f9fe-8172-7cfcf037ec4e"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "HostCopilot",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("8b13301f-b3e2-6720-ab74-7d0fc8e14f15"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "MultiProperty",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("72d9f55d-df90-32e7-0ab4-a086b47ef3db"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "ApiAccess",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("8f45a3de-b804-90ae-311c-102d4906beb1"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = false,
+                            IsUnlimited = false,
+                            Key = "WhatsApp",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("088f8a01-b563-c293-d948-2167e0832d13"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = false,
+                            IsUnlimited = false,
+                            Key = "Analytics",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("91bff02c-7068-1825-dac7-a6af75a8fbf2"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = false,
+                            IsUnlimited = false,
+                            Key = "CustomBranding",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("0a402b67-e3d8-3547-5c78-34282ea4577c"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = false,
+                            IsUnlimited = false,
+                            Key = "AdvancedIntegrations",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("6ea7eb52-1e53-bd59-765a-d98262a9d8b7"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = false,
+                            IsUnlimited = false,
+                            Key = "PrioritySupport",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("8505fb2c-987a-8df5-2138-f04bd422ff21"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.Users",
+                            QuotaLimit = 3L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("2970b9ff-cad8-46da-bb19-f3f27c3c6306"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.Properties",
+                            QuotaLimit = 1L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("587fc91e-9a11-a42f-049e-96b197023621"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.Reservations",
+                            QuotaLimit = 200L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("4240297e-4751-51bb-a0e8-8dd21f5f7922"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.AiRequests",
+                            QuotaLimit = 1000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("47f12cf5-fbe4-0351-0cb0-24b8e6dc55a4"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.AiTokens",
+                            QuotaLimit = 200000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("1c4e0a3b-2b27-a4b5-78ac-00c5a24ee339"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.WhatsAppMessages",
+                            QuotaLimit = 200L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("4276f308-b6c5-8582-c9a4-4eb174913aaf"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.ApiRequests",
+                            QuotaLimit = 50000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("5b7f735c-56d7-2e82-6a04-721165862236"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.StorageBytes",
+                            QuotaLimit = 1073741824L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("31e3d05e-5cf7-f994-b15c-68b1ac36b755"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.FileUploads",
+                            QuotaLimit = 500L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000001"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("6a8210c3-9b15-4c50-1a27-0d016b6f4bcf"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "AiConcierge",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("235aee7b-7f25-fa62-e4ad-f66a17b74fa1"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "HostCopilot",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("36e64050-31d4-8086-855c-632700ffb38c"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "WhatsApp",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("0ddc65e9-1d77-cd93-dacd-1a42bfef2b92"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "MultiProperty",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("54917e5e-e24c-43c1-1ef1-24b04174b7ed"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "ApiAccess",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("f9ca2394-1356-295f-619a-8b5f08925c61"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = false,
+                            IsUnlimited = false,
+                            Key = "Analytics",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("7c395c26-b94d-6661-50a2-7c05399ea2f0"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = false,
+                            IsUnlimited = false,
+                            Key = "CustomBranding",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("4959e1aa-d4ce-d808-dda8-51e317eba004"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = false,
+                            IsUnlimited = false,
+                            Key = "AdvancedIntegrations",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("ccbf86e7-51be-793b-9e59-073e7d253d20"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = false,
+                            IsUnlimited = false,
+                            Key = "PrioritySupport",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("eda2e4ae-9c6c-80e6-3128-9fea7c9d0284"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.Users",
+                            QuotaLimit = 10L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("b5637a88-9543-aeeb-d63d-5de710d3aadb"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.Properties",
+                            QuotaLimit = 5L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("a4622b43-5247-f9e3-6ad5-cde2c686ec59"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.Reservations",
+                            QuotaLimit = 2000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("515b5838-a6f3-213d-7add-3f9eb8f3bcac"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.AiRequests",
+                            QuotaLimit = 10000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("62cfd090-7dab-7e4a-77c9-af2ba2a2e36e"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.AiTokens",
+                            QuotaLimit = 2000000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("79b8c7bb-3e12-59ee-0075-ed12900e1171"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.WhatsAppMessages",
+                            QuotaLimit = 5000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("0f04526f-f330-2832-45e6-0be59aa8dcd4"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.ApiRequests",
+                            QuotaLimit = 250000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("5a5441d9-9dc4-3763-32a6-a0fa55a9a16c"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.StorageBytes",
+                            QuotaLimit = 10737418240L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("bb911420-ad0e-82f2-a947-61216b606439"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.FileUploads",
+                            QuotaLimit = 5000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000002"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("c37ffe7b-ea68-8f1c-1d81-f72ba2d43eef"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "AiConcierge",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("16e79b73-8315-78e7-8ca4-deff6d868ac7"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "HostCopilot",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("9482a1e1-ad94-5a00-8b41-36652621160b"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "WhatsApp",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("7b231ecc-e6e6-9531-ef3d-ced09a3239dd"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Analytics",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("0242ddce-66c1-5d0f-7117-724eb50ce951"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "CustomBranding",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("0ebd0bba-ae2c-2a14-c18c-81bf83fe6cad"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "AdvancedIntegrations",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("81ef0be8-0e23-7f36-7bf6-e061bf8af1cd"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "MultiProperty",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("fd5ea420-9db1-f605-3654-0e03b14555d4"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "PrioritySupport",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("9acb9287-eedd-2673-a381-6c0543111b23"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "ApiAccess",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("b6aaf8b2-d74c-5a8a-4ff0-f01aa2e04980"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.Users",
+                            QuotaLimit = 50L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("7bf9be32-4a77-0250-26b7-c30538d0b3fc"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.Properties",
+                            QuotaLimit = 30L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("d0e9e9c0-2a72-c273-0bd5-3c3e3dc53e9d"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.Reservations",
+                            QuotaLimit = 15000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("2d69e3ff-3f96-e282-1afb-928049ee7d65"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.AiRequests",
+                            QuotaLimit = 50000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("04398d91-3153-4392-e478-b8065611fef3"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.AiTokens",
+                            QuotaLimit = 20000000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("5e070b89-9c98-6ebd-a256-c8e294949da4"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.WhatsAppMessages",
+                            QuotaLimit = 50000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("b35e3ef5-1dc5-8306-1286-ca852a5d2ce1"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.ApiRequests",
+                            QuotaLimit = 2000000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("7a6cf377-6421-5ced-29b3-f5f2c66527c8"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.StorageBytes",
+                            QuotaLimit = 107374182400L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("d9e618fc-1481-87c7-5615-c9a0aa63c130"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Quota.FileUploads",
+                            QuotaLimit = 50000L,
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000003"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("e8683848-563d-1ca6-e58a-2baa630e28f5"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "AiConcierge",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("2762cd08-1479-b115-27ff-1feaf1f85381"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "HostCopilot",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("95d0f40b-5b50-03a3-bbc6-c7e6d7e5708c"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "WhatsApp",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("a263a207-70b5-bdc0-bf19-4e51cc2eb8dd"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "Analytics",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("cd9fabbe-23bb-56e8-5dff-cb166663cf7c"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "CustomBranding",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("61f3b578-3a64-1577-abd7-350a66844c28"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "AdvancedIntegrations",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("5860f88d-67c1-1cd9-a727-0ed82fe6fdf0"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "MultiProperty",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("ffc2966b-5fa3-9eef-e2ee-4620479d10d8"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "PrioritySupport",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("b1601751-3aab-d57f-7079-633e5f21157c"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = false,
+                            Key = "ApiAccess",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("73ccfdb7-c92b-5854-b5db-47f9b2c62c52"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = true,
+                            Key = "Quota.Users",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("cc66b8be-6370-8420-4d39-0f369f62a367"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = true,
+                            Key = "Quota.Properties",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("f6dcf0e5-c7ca-77b0-5294-444a387f4b18"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = true,
+                            Key = "Quota.Reservations",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("0eb5b871-c880-880d-81d4-9b121ecfbc4e"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = true,
+                            Key = "Quota.AiRequests",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("9056c29f-52fe-5b9a-be64-4121018bc678"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = true,
+                            Key = "Quota.AiTokens",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("9e59c522-27fc-c9ca-843c-e14b96898fca"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = true,
+                            Key = "Quota.WhatsAppMessages",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("e64c725b-187c-2e23-db2e-afb8ceba7771"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = true,
+                            Key = "Quota.ApiRequests",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("fa20c4f6-db9f-69ba-83cf-7a7b3303f3ee"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = true,
+                            Key = "Quota.StorageBytes",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("f5df617d-5462-40c8-3cc0-a016718a2b77"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            IsEnabled = true,
+                            IsUnlimited = true,
+                            Key = "Quota.FileUploads",
+                            SubscriptionPlanId = new Guid("90000000-0000-0000-0000-000000000004"),
+                            Unit = "count",
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        });
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.Property", b =>
@@ -2122,6 +3251,384 @@ namespace backend.Data.Migrations
                     b.ToTable("ServiceRequests", (string)null);
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.SubscriptionPlan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsEnterprise")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.HasIndex("SortOrder");
+
+                    b.ToTable("SubscriptionPlans", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("90000000-0000-0000-0000-000000000001"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Description = "Entry tier for early setup and light usage.",
+                            DisplayName = "Free",
+                            IsActive = true,
+                            IsEnterprise = false,
+                            Name = "Free",
+                            SortOrder = 1,
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("90000000-0000-0000-0000-000000000002"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Description = "Small teams with moderate operational volume.",
+                            DisplayName = "Starter",
+                            IsActive = true,
+                            IsEnterprise = false,
+                            Name = "Starter",
+                            SortOrder = 2,
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("90000000-0000-0000-0000-000000000003"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Description = "Default production-safe plan for multi-property operations.",
+                            DisplayName = "Professional",
+                            IsActive = true,
+                            IsEnterprise = false,
+                            Name = "Professional",
+                            SortOrder = 3,
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        },
+                        new
+                        {
+                            Id = new Guid("90000000-0000-0000-0000-000000000004"),
+                            CreatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
+                            Description = "Custom enterprise plan with unlimited negotiated capacities.",
+                            DisplayName = "Enterprise",
+                            IsActive = true,
+                            IsEnterprise = true,
+                            Name = "Enterprise",
+                            SortOrder = 4,
+                            UpdatedAt = new DateTimeOffset(new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
+                        });
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.TenantApiKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsRevoked")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("KeyPrefix")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset?>("LastUsedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset?>("RevokedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ScopesCsv")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<string>("SecretHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.HasIndex("KeyPrefix")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "IsRevoked");
+
+                    b.HasIndex("CompanyId", "Name");
+
+                    b.ToTable("TenantApiKeys", (string)null);
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.TenantInvoice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("AmountDue")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("AmountPaid")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<string>("ExternalCustomerId")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ExternalInvoiceId")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ExternalSubscriptionId")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset?>("FailedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("PaidAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("PeriodEndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("PeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("ExternalInvoiceId")
+                        .IsUnique();
+
+                    b.HasIndex("FailedAtUtc");
+
+                    b.HasIndex("CompanyId", "Status");
+
+                    b.ToTable("TenantInvoices", (string)null);
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.TenantSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("CancelAtPeriodEnd")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CurrentPeriodEndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("CurrentPeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EndedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ExternalPriceId")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ExternalSubscriptionId")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTimeOffset?>("LastProviderEventCreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<Guid>("SubscriptionPlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("TrialEndsAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId")
+                        .IsUnique()
+                        .HasFilter("\"Status\" IN ('Active','Trialing')");
+
+                    b.HasIndex("ExternalSubscriptionId");
+
+                    b.HasIndex("SubscriptionPlanId");
+
+                    b.HasIndex("CompanyId", "Status");
+
+                    b.ToTable("TenantSubscriptions", (string)null);
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.UsageOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Metric")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset>("PeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("Quantity")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Metric", "PeriodStartUtc", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.ToTable("UsageOperations", (string)null);
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.UsageRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Metric")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset>("PeriodEndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("PeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("QuantityUsed")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId", "Metric", "PeriodEndUtc");
+
+                    b.HasIndex("CompanyId", "Metric", "PeriodStartUtc")
+                        .IsUnique();
+
+                    b.ToTable("UsageRecords", (string)null);
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2388,6 +3895,14 @@ namespace backend.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.Company", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.ConciergeActionAuditLog", b =>
@@ -2845,6 +4360,77 @@ namespace backend.Data.Migrations
                     b.Navigation("Reservation");
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.OnboardingProgress", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("OnboardingProgressRecords")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.OrganizationInvitation", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.User", "AcceptedByUser")
+                        .WithMany()
+                        .HasForeignKey("AcceptedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("OrganizationInvitations")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.User", "InvitedByUser")
+                        .WithMany()
+                        .HasForeignKey("InvitedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AcceptedByUser");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("InvitedByUser");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.OrganizationMember", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("OrganizationMembers")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.User", "InvitedByUser")
+                        .WithMany("OrganizationInvitesSent")
+                        .HasForeignKey("InvitedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("StayFlow.Api.Models.User", "User")
+                        .WithMany("OrganizationMemberships")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("InvitedByUser");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.ParkingRequest", b =>
                 {
                     b.HasOne("StayFlow.Api.Models.Company", "Company")
@@ -2957,6 +4543,17 @@ namespace backend.Data.Migrations
                     b.Navigation("Property");
 
                     b.Navigation("Reservation");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.PlanEntitlement", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.SubscriptionPlan", "SubscriptionPlan")
+                        .WithMany("Entitlements")
+                        .HasForeignKey("SubscriptionPlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("SubscriptionPlan");
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.Property", b =>
@@ -3170,6 +4767,77 @@ namespace backend.Data.Migrations
                     b.Navigation("ServiceProvider");
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.TenantApiKey", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("TenantApiKeys")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("CreatedByUser");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.TenantInvoice", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("TenantInvoices")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.TenantSubscription", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("TenantSubscriptions")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.SubscriptionPlan", "SubscriptionPlan")
+                        .WithMany("TenantSubscriptions")
+                        .HasForeignKey("SubscriptionPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+
+                    b.Navigation("SubscriptionPlan");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.UsageOperation", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("UsageOperations")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.UsageRecord", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany("UsageRecords")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.User", b =>
                 {
                     b.HasOne("StayFlow.Api.Models.Company", "Company")
@@ -3244,6 +4912,12 @@ namespace backend.Data.Migrations
 
                     b.Navigation("KnowledgeBaseItems");
 
+                    b.Navigation("OnboardingProgressRecords");
+
+                    b.Navigation("OrganizationInvitations");
+
+                    b.Navigation("OrganizationMembers");
+
                     b.Navigation("Payments");
 
                     b.Navigation("Properties");
@@ -3255,6 +4929,16 @@ namespace backend.Data.Migrations
                     b.Navigation("ServiceProviders");
 
                     b.Navigation("ServiceRequests");
+
+                    b.Navigation("TenantApiKeys");
+
+                    b.Navigation("TenantInvoices");
+
+                    b.Navigation("TenantSubscriptions");
+
+                    b.Navigation("UsageOperations");
+
+                    b.Navigation("UsageRecords");
 
                     b.Navigation("Users");
 
@@ -3347,6 +5031,13 @@ namespace backend.Data.Migrations
                     b.Navigation("Payments");
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.SubscriptionPlan", b =>
+                {
+                    b.Navigation("Entitlements");
+
+                    b.Navigation("TenantSubscriptions");
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.User", b =>
                 {
                     b.Navigation("ApprovedKnowledgeArticles");
@@ -3358,6 +5049,10 @@ namespace backend.Data.Migrations
                     b.Navigation("DeletedKnowledgeArticles");
 
                     b.Navigation("EmailVerificationTokens");
+
+                    b.Navigation("OrganizationInvitesSent");
+
+                    b.Navigation("OrganizationMemberships");
 
                     b.Navigation("PasswordResetTokens");
 

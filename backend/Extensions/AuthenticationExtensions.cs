@@ -1,10 +1,15 @@
 using System.Text;
 using System.Text.Json;
 using System.Diagnostics;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
+using StayFlow.Api.Authorization;
 using StayFlow.Api.Middleware;
+using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Extensions;
 
@@ -18,7 +23,21 @@ public static class AuthenticationExtensions
             ?? throw new InvalidOperationException("Jwt:SigningKey is not configured.");
 
         services
-            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddAuthentication(options =>
+            {
+                options.DefaultScheme = "BearerOrApiKey";
+                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            })
+            .AddPolicyScheme("BearerOrApiKey", "BearerOrApiKey", options =>
+            {
+                options.ForwardDefaultSelector = context =>
+                {
+                    var authorization = context.Request.Headers.Authorization.ToString();
+                    return authorization.StartsWith("ApiKey ", StringComparison.OrdinalIgnoreCase)
+                        ? ApiKeyAuthenticationDefaults.Scheme
+                        : JwtBearerDefaults.AuthenticationScheme;
+                };
+            })
             .AddJwtBearer(options =>
             {
                 options.TokenValidationParameters = new TokenValidationParameters
@@ -103,9 +122,47 @@ public static class AuthenticationExtensions
                         return Task.CompletedTask;
                     }
                 };
-            });
+            })
+            .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
+                ApiKeyAuthenticationDefaults.Scheme,
+                _ => { });
 
-        services.AddAuthorization();
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy(OrganizationPolicyNames.ReadOnly, policy =>
+                policy.RequireAuthenticatedUser().AddRequirements(new OrganizationRoleRequirement(OrganizationRole.ReadOnly)));
+            options.AddPolicy(OrganizationPolicyNames.Support, policy =>
+                policy.RequireAuthenticatedUser().AddRequirements(new OrganizationRoleRequirement(OrganizationRole.Support)));
+            options.AddPolicy(OrganizationPolicyNames.Host, policy =>
+                policy.RequireAuthenticatedUser().AddRequirements(new OrganizationRoleRequirement(OrganizationRole.Host)));
+            options.AddPolicy(OrganizationPolicyNames.Manager, policy =>
+                policy.RequireAuthenticatedUser().AddRequirements(new OrganizationRoleRequirement(OrganizationRole.Manager)));
+            options.AddPolicy(OrganizationPolicyNames.Administrator, policy =>
+                policy.RequireAuthenticatedUser().AddRequirements(new OrganizationRoleRequirement(OrganizationRole.Administrator)));
+            options.AddPolicy(OrganizationPolicyNames.Owner, policy =>
+                policy.RequireAuthenticatedUser().AddRequirements(new OrganizationRoleRequirement(OrganizationRole.Owner)));
+            options.AddPolicy(OrganizationPolicyNames.PlatformAdmin, policy =>
+                policy.RequireAuthenticatedUser().RequireAssertion(context =>
+                    context.User.HasClaim("permission", "platform.admin")
+                    || context.User.HasClaim("platform_admin", "true")
+                    || context.User.IsInRole("PlatformAdmin")));
+
+            options.AddPolicy(ApiKeyPolicyNames.IntegrationsRead, policy =>
+                policy.AddAuthenticationSchemes(ApiKeyAuthenticationDefaults.Scheme)
+                    .RequireAuthenticatedUser()
+                    .RequireClaim("api_scope", ApiKeyScope.IntegrationsRead));
+
+            options.AddPolicy(ApiKeyPolicyNames.UsageRead, policy =>
+                policy.AddAuthenticationSchemes(ApiKeyAuthenticationDefaults.Scheme)
+                    .RequireAuthenticatedUser()
+                    .RequireClaim("api_scope", ApiKeyScope.UsageRead));
+
+            options.AddPolicy(ApiKeyPolicyNames.ConversationsRead, policy =>
+                policy.AddAuthenticationSchemes(ApiKeyAuthenticationDefaults.Scheme)
+                    .RequireAuthenticatedUser()
+                    .RequireClaim("api_scope", ApiKeyScope.ConversationsRead));
+        });
+        services.AddScoped<IAuthorizationHandler, OrganizationRoleAuthorizationHandler>();
 
         return services;
     }

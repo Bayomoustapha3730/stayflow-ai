@@ -45,6 +45,9 @@ public sealed class CompanyService(ICompanyRepository companyRepository) : IComp
         {
             Id = Guid.NewGuid(),
             Name = request.Name.Trim(),
+            Slug = BuildSlug(request.Slug, request.Name),
+            NormalizedSlug = BuildSlug(request.Slug, request.Name).ToUpperInvariant(),
+            Status = "Active",
             LegalName = NormalizeOptional(request.LegalName),
             Email = request.Email.Trim(),
             PhoneNumber = request.PhoneNumber.Trim(),
@@ -78,11 +81,18 @@ public sealed class CompanyService(ICompanyRepository companyRepository) : IComp
         }
 
         company.Name = request.Name.Trim();
+        var slug = BuildSlug(request.Slug, request.Name);
+        company.Slug = slug;
+        company.NormalizedSlug = slug.ToUpperInvariant();
+        company.Status = string.IsNullOrWhiteSpace(request.Status) ? company.Status : request.Status.Trim();
         company.LegalName = NormalizeOptional(request.LegalName);
         company.Email = request.Email.Trim();
         company.PhoneNumber = request.PhoneNumber.Trim();
         company.CountryCode = request.CountryCode.Trim().ToUpperInvariant();
         company.TimeZone = request.TimeZone.Trim();
+        company.BrandingLogoUrl = NormalizeOptional(request.BrandingLogoUrl);
+        company.BrandingPrimaryColor = NormalizeOptional(request.BrandingPrimaryColor);
+        company.OnboardingState = NormalizeOptional(request.OnboardingState);
         company.IsActive = request.IsActive;
 
         await AddAuditLogAsync("Updated", company, cancellationToken);
@@ -134,11 +144,17 @@ public sealed class CompanyService(ICompanyRepository companyRepository) : IComp
         {
             Id = company.Id,
             Name = company.Name,
+            Slug = company.Slug,
+            Status = company.Status,
+            OwnerUserId = company.OwnerUserId,
             LegalName = company.LegalName,
             Email = company.Email,
             PhoneNumber = company.PhoneNumber,
             CountryCode = company.CountryCode,
             TimeZone = company.TimeZone,
+            BrandingLogoUrl = company.BrandingLogoUrl,
+            BrandingPrimaryColor = company.BrandingPrimaryColor,
+            OnboardingState = company.OnboardingState,
             IsActive = company.IsActive,
             CreatedAt = company.CreatedAt,
             UpdatedAt = company.UpdatedAt
@@ -148,5 +164,20 @@ public sealed class CompanyService(ICompanyRepository companyRepository) : IComp
     private static string? NormalizeOptional(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string BuildSlug(string? slug, string name)
+    {
+        var source = string.IsNullOrWhiteSpace(slug) ? name : slug;
+        var normalized = new string(source.Trim().ToLowerInvariant()
+            .Select(character => char.IsLetterOrDigit(character) ? character : '-')
+            .ToArray());
+        while (normalized.Contains("--", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        normalized = normalized.Trim('-');
+        return string.IsNullOrWhiteSpace(normalized) ? "organization" : normalized;
     }
 }

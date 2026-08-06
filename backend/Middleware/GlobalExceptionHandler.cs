@@ -99,6 +99,11 @@ public sealed class GlobalExceptionHandler(
                 "Dependency unavailable",
                 "A required upstream dependency is currently unavailable.",
                 external.ErrorCode),
+            QuotaExceededException quotaExceeded => (
+                StatusCodes.Status429TooManyRequests,
+                "Quota exceeded",
+                $"Subscription quota exceeded for metric '{quotaExceeded.Metric}'.",
+                "quota_exceeded"),
             BadHttpRequestException => (
                 StatusCodes.Status400BadRequest,
                 "Bad request",

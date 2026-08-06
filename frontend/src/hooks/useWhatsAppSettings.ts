@@ -54,6 +54,8 @@ export interface UseWhatsAppSettingsResult {
 const defaultPageSize = 20;
 
 export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsAppSettingsOptions): UseWhatsAppSettingsResult {
+  const isMountedRef = useRef(true);
+
   const [integrations, setIntegrations] = useState<WhatsAppIntegrationSummary[]>([]);
   const [selectedIntegrationId, setSelectedIntegrationId] = useState<string | null>(null);
   const [health, setHealth] = useState<WhatsAppIntegrationHealth | null>(null);
@@ -81,6 +83,11 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
   const integrationRequestVersionRef = useRef(0);
   const templatesRequestVersionRef = useRef(0);
   const detailRequestVersionRef = useRef(0);
+  const integrationsAbortRef = useRef<AbortController | null>(null);
+  const templatesAbortRef = useRef<AbortController | null>(null);
+  const detailAbortRef = useRef<AbortController | null>(null);
+  const healthAbortRef = useRef<AbortController | null>(null);
+  const syncAbortRef = useRef<AbortController | null>(null);
 
   const http = useMemo(
     () => new HttpClient({
@@ -98,11 +105,32 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
   );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    isMountedRef.current = true;
+
+    return () => {
+      isMountedRef.current = false;
+      integrationRequestVersionRef.current += 1;
+      templatesRequestVersionRef.current += 1;
+      detailRequestVersionRef.current += 1;
+
+      integrationsAbortRef.current?.abort();
+      templatesAbortRef.current?.abort();
+      detailAbortRef.current?.abort();
+      healthAbortRef.current?.abort();
+      syncAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const timer = globalThis.setTimeout(() => {
+      if (!isMountedRef.current) {
+        return;
+      }
+
       setDebouncedSearch(search.trim());
     }, 300);
 
-    return () => window.clearTimeout(timer);
+    return () => globalThis.clearTimeout(timer);
   }, [search]);
 
   useEffect(() => {
@@ -135,12 +163,16 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
     }
 
     const version = ++integrationRequestVersionRef.current;
+    integrationsAbortRef.current?.abort();
+    const controller = new AbortController();
+    integrationsAbortRef.current = controller;
+
     setIsLoadingIntegrations(true);
     setError(null);
 
     try {
-      const items = await api.listIntegrations();
-      if (version !== integrationRequestVersionRef.current) {
+      const items = await api.listIntegrations({ signal: controller.signal });
+      if (!isMountedRef.current || version !== integrationRequestVersionRef.current) {
         return;
       }
 
@@ -153,7 +185,7 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
         return items[0]?.id ?? null;
       });
     } catch (failure) {
-      if (version !== integrationRequestVersionRef.current) {
+      if (!isMountedRef.current || version !== integrationRequestVersionRef.current || controller.signal.aborted) {
         return;
       }
 
@@ -161,8 +193,12 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
       setSelectedIntegrationId(null);
       setError(handleFailure(failure, "Unable to load WhatsApp integrations."));
     } finally {
-      if (version === integrationRequestVersionRef.current) {
+      if (isMountedRef.current && version === integrationRequestVersionRef.current) {
         setIsLoadingIntegrations(false);
+      }
+
+      if (integrationsAbortRef.current === controller) {
+        integrationsAbortRef.current = null;
       }
     }
   }, [accessToken, api, handleFailure]);
@@ -176,6 +212,10 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
     }
 
     const version = ++templatesRequestVersionRef.current;
+    templatesAbortRef.current?.abort();
+    const controller = new AbortController();
+    templatesAbortRef.current = controller;
+
     setIsLoadingTemplates(true);
     setTemplatesError(null);
 
@@ -188,9 +228,9 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
         approvedOnly,
         page,
         pageSize
-      });
+      }, { signal: controller.signal });
 
-      if (version !== templatesRequestVersionRef.current) {
+      if (!isMountedRef.current || version !== templatesRequestVersionRef.current) {
         return;
       }
 
@@ -203,7 +243,7 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
         return response.items.some((item) => item.id === current.id) ? current : null;
       });
     } catch (failure) {
-      if (version !== templatesRequestVersionRef.current) {
+      if (!isMountedRef.current || version !== templatesRequestVersionRef.current || controller.signal.aborted) {
         return;
       }
 
@@ -211,8 +251,12 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
       setSelectedTemplate(null);
       setTemplatesError(handleFailure(failure, "Unable to load WhatsApp templates."));
     } finally {
-      if (version === templatesRequestVersionRef.current) {
+      if (isMountedRef.current && version === templatesRequestVersionRef.current) {
         setIsLoadingTemplates(false);
+      }
+
+      if (templatesAbortRef.current === controller) {
+        templatesAbortRef.current = null;
       }
     }
   }, [accessToken, api, approvedOnly, categoryFilter, debouncedSearch, handleFailure, languageFilter, page, pageSize, selectedIntegrationId, statusFilter]);
@@ -232,25 +276,33 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
     }
 
     const version = ++detailRequestVersionRef.current;
+    detailAbortRef.current?.abort();
+    const controller = new AbortController();
+    detailAbortRef.current = controller;
+
     setIsLoadingTemplateDetail(true);
     setActionMessage(null);
 
     try {
-      const detail = await api.getTemplate(selectedIntegrationId, templateId);
-      if (version !== detailRequestVersionRef.current) {
+      const detail = await api.getTemplate(selectedIntegrationId, templateId, { signal: controller.signal });
+      if (!isMountedRef.current || version !== detailRequestVersionRef.current) {
         return;
       }
 
       setSelectedTemplate(detail);
     } catch (failure) {
-      if (version !== detailRequestVersionRef.current) {
+      if (!isMountedRef.current || version !== detailRequestVersionRef.current || controller.signal.aborted) {
         return;
       }
 
       setActionMessage(handleFailure(failure, "Unable to load template preview."));
     } finally {
-      if (version === detailRequestVersionRef.current) {
+      if (isMountedRef.current && version === detailRequestVersionRef.current) {
         setIsLoadingTemplateDetail(false);
+      }
+
+      if (detailAbortRef.current === controller) {
+        detailAbortRef.current = null;
       }
     }
   }, [accessToken, api, handleFailure, selectedIntegrationId]);
@@ -262,16 +314,33 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
 
     setIsCheckingHealth(true);
     setActionMessage(null);
+    healthAbortRef.current?.abort();
+    const controller = new AbortController();
+    healthAbortRef.current = controller;
 
     try {
-      const result = await api.checkIntegrationHealth(selectedIntegrationId);
+      const result = await api.checkIntegrationHealth(selectedIntegrationId, { signal: controller.signal });
+      if (!isMountedRef.current || controller.signal.aborted) {
+        return;
+      }
+
       setHealth(result);
       setActionMessage("Health check completed.");
       await loadIntegrations();
     } catch (failure) {
+      if (!isMountedRef.current || controller.signal.aborted) {
+        return;
+      }
+
       setActionMessage(handleFailure(failure, "Unable to check integration health."));
     } finally {
-      setIsCheckingHealth(false);
+      if (isMountedRef.current) {
+        setIsCheckingHealth(false);
+      }
+
+      if (healthAbortRef.current === controller) {
+        healthAbortRef.current = null;
+      }
     }
   }, [accessToken, api, handleFailure, loadIntegrations, selectedIntegrationId]);
 
@@ -282,16 +351,33 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
 
     setIsSyncingTemplates(true);
     setActionMessage(null);
+    syncAbortRef.current?.abort();
+    const controller = new AbortController();
+    syncAbortRef.current = controller;
 
     try {
-      const result = await api.syncTemplates(selectedIntegrationId);
+      const result = await api.syncTemplates(selectedIntegrationId, { signal: controller.signal });
+      if (!isMountedRef.current || controller.signal.aborted) {
+        return;
+      }
+
       setSyncResult(result);
       setActionMessage("Template synchronization completed.");
       await Promise.all([loadIntegrations(), loadTemplates()]);
     } catch (failure) {
+      if (!isMountedRef.current || controller.signal.aborted) {
+        return;
+      }
+
       setActionMessage(handleFailure(failure, "Unable to synchronize templates."));
     } finally {
-      setIsSyncingTemplates(false);
+      if (isMountedRef.current) {
+        setIsSyncingTemplates(false);
+      }
+
+      if (syncAbortRef.current === controller) {
+        syncAbortRef.current = null;
+      }
     }
   }, [accessToken, api, handleFailure, loadIntegrations, loadTemplates, selectedIntegrationId]);
 

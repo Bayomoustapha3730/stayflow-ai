@@ -241,6 +241,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseMiddleware<PermissionAuthorizationMiddleware>();
+app.UseMiddleware<FeatureEntitlementMiddleware>();
 
 app.MapControllers();
 app.MapHub<ConversationHub>("/hubs/conversations")

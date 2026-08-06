@@ -11,20 +11,24 @@ import type {
 } from "../models/whatsAppSettings";
 
 export function createWhatsAppSettingsApi(http: HttpClient) {
+  interface RequestOptions {
+    signal?: AbortSignal;
+  }
+
   return {
-    listIntegrations() {
-      return http.get<WhatsAppIntegrationSummary[]>("/whatsapp/integrations");
+    listIntegrations(options?: RequestOptions) {
+      return http.get<WhatsAppIntegrationSummary[]>("/whatsapp/integrations", options);
     },
 
-    checkIntegrationHealth(integrationId: string) {
-      return http.get<WhatsAppIntegrationHealth>(`/whatsapp/integrations/${integrationId}/health`);
+    checkIntegrationHealth(integrationId: string, options?: RequestOptions) {
+      return http.get<WhatsAppIntegrationHealth>(`/whatsapp/integrations/${integrationId}/health`, options);
     },
 
-    syncTemplates(integrationId: string) {
-      return http.post<WhatsAppTemplateSyncResult>(`/whatsapp/integrations/${integrationId}/templates/sync`);
+    syncTemplates(integrationId: string, options?: RequestOptions) {
+      return http.post<WhatsAppTemplateSyncResult>(`/whatsapp/integrations/${integrationId}/templates/sync`, undefined, options);
     },
 
-    listTemplates(integrationId: string, query: WhatsAppTemplateListQuery) {
+    listTemplates(integrationId: string, query: WhatsAppTemplateListQuery, options?: RequestOptions) {
       const params = new URLSearchParams();
 
       if (query.status?.trim()) {
@@ -64,15 +68,15 @@ export function createWhatsAppSettingsApi(http: HttpClient) {
         ? `/whatsapp/integrations/${integrationId}/templates?${queryString}`
         : `/whatsapp/integrations/${integrationId}/templates`;
 
-      return http.get<WhatsAppTemplateListResponse>(path);
+      return http.get<WhatsAppTemplateListResponse>(path, options);
     },
 
-    getTemplate(integrationId: string, templateId: string) {
-      return http.get<WhatsAppTemplateDetail>(`/whatsapp/integrations/${integrationId}/templates/${templateId}`);
+    getTemplate(integrationId: string, templateId: string, options?: RequestOptions) {
+      return http.get<WhatsAppTemplateDetail>(`/whatsapp/integrations/${integrationId}/templates/${templateId}`, options);
     },
 
-    previewTemplate(integrationId: string, templateId: string, request: WhatsAppTemplatePreviewRequest) {
-      return http.post<WhatsAppTemplatePreview>(`/whatsapp/integrations/${integrationId}/templates/${templateId}/preview`, request);
+    previewTemplate(integrationId: string, templateId: string, request: WhatsAppTemplatePreviewRequest, options?: RequestOptions) {
+      return http.post<WhatsAppTemplatePreview>(`/whatsapp/integrations/${integrationId}/templates/${templateId}/preview`, request, options);
     }
   };
 }

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Copilot;
+using StayFlow.Api.Models;
 using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Controllers;
@@ -13,6 +14,7 @@ namespace StayFlow.Api.Controllers;
 [Produces("application/json")]
 [Authorize]
 [EnableRateLimiting("ai-generation")]
+[RequireFeature(FeatureKeys.HostCopilot)]
 public sealed class CopilotController(ICopilotService copilotService) : ControllerBase
 {
     [HttpPost("{conversationId:guid}/suggest-reply")]

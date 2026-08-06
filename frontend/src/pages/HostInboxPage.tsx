@@ -165,6 +165,7 @@ export function HostInboxPage() {
           copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={resolvedKnowledgePropertyId ? `/host/properties/${resolvedKnowledgePropertyId}/knowledge` : null}
           whatsappSettingsHref="/host/settings/whatsapp"
+          organizationSettingsHref="/host/settings/organization"
           current="conversations"
         />
 

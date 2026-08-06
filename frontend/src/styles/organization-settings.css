@@ -1,0 +1,92 @@
+.sf-organization-page {
+  background: linear-gradient(180deg, #f5f7fb 0%, #ffffff 55%);
+}
+
+.sf-organization-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.sf-organization-header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sf-organization-access-note {
+  margin-top: 0.75rem;
+  color: #374151;
+}
+
+.sf-organization-grid {
+  margin-top: 1rem;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.sf-organization-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.9rem;
+  padding: 1rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.sf-organization-card label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.92rem;
+}
+
+.sf-organization-card input,
+.sf-organization-card select {
+  border: 1px solid #d1d5db;
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.sf-organization-member-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.sf-organization-member-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.7rem;
+  padding: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.sf-organization-member-name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.sf-organization-member-meta {
+  margin: 0.15rem 0 0;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.sf-organization-member-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+@media (max-width: 720px) {
+  .sf-organization-header {
+    flex-direction: column;
+  }
+
+  .sf-organization-member-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

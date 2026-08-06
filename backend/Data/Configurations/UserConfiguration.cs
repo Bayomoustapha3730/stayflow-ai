@@ -23,6 +23,16 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .HasForeignKey(user => user.CompanyId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        builder.HasMany(user => user.OrganizationMemberships)
+            .WithOne(member => member.User)
+            .HasForeignKey(member => member.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(user => user.OrganizationInvitesSent)
+            .WithOne(member => member.InvitedByUser)
+            .HasForeignKey(member => member.InvitedByUserId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.HasIndex(user => user.CompanyId);
         builder.HasIndex(user => user.PhoneNumber);
         builder.HasIndex(user => user.CreatedAt);

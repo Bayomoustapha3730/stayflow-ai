@@ -8,6 +8,7 @@ public sealed class CurrentUserDto
     public string Email { get; init; } = string.Empty;
     public string PhoneNumber { get; init; } = string.Empty;
     public bool IsEmailVerified { get; init; }
+    public string? OrganizationRole { get; init; }
     public IReadOnlyCollection<string> Roles { get; init; } = [];
     public IReadOnlyCollection<string> Permissions { get; init; } = [];
 }

@@ -1,11 +1,13 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createAuthApi } from "../api/authApi";
 import { ApiError, HttpClient } from "../api/httpClient";
+import type { CurrentUserProfile } from "../models/organization";
 
 const hostTokenStorageKey = "stayflow.host.accessToken";
 
 export interface UseHostAuthResult {
   accessToken: string | null;
+  currentUser: CurrentUserProfile | null;
   isAuthenticated: boolean;
   isSigningIn: boolean;
   error: string | null;
@@ -16,6 +18,7 @@ export interface UseHostAuthResult {
 
 export function useHostAuth(): UseHostAuthResult {
   const [accessToken, setAccessToken] = useState<string | null>(() => sessionStorage.getItem(hostTokenStorageKey));
+  const [currentUser, setCurrentUser] = useState<CurrentUserProfile | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,6 +32,26 @@ export function useHostAuth(): UseHostAuthResult {
 
   const authApi = useMemo(() => createAuthApi(http), [http]);
 
+  useEffect(() => {
+    if (!accessToken) {
+      return;
+    }
+
+    const authenticatedHttp = new HttpClient({
+      baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
+      getAccessToken: () => accessToken
+    });
+    const authenticatedAuthApi = createAuthApi(authenticatedHttp);
+
+    void authenticatedAuthApi.getCurrentUser()
+      .then((profile) => {
+        setCurrentUser(profile);
+      })
+      .catch(() => {
+        setCurrentUser(null);
+      });
+  }, [accessToken]);
+
   const login = useCallback(
     async (email: string, password: string) => {
       setError(null);
@@ -41,6 +64,7 @@ export function useHostAuth(): UseHostAuthResult {
       } catch (failure) {
         const message = failure instanceof Error ? failure.message : "Unable to sign in.";
         setError(message);
+        setCurrentUser(null);
         throw failure;
       } finally {
         setIsSigningIn(false);
@@ -51,6 +75,7 @@ export function useHostAuth(): UseHostAuthResult {
 
   const logout = useCallback(() => {
     setAccessToken(null);
+    setCurrentUser(null);
     sessionStorage.removeItem(hostTokenStorageKey);
     setError(null);
   }, []);
@@ -59,6 +84,7 @@ export function useHostAuth(): UseHostAuthResult {
 
   return {
     accessToken,
+    currentUser,
     isAuthenticated: Boolean(accessToken),
     isSigningIn,
     error,

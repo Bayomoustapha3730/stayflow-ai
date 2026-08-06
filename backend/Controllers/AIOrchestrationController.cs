@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIOrchestration;
+using StayFlow.Api.Models;
 using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Controllers;
@@ -15,6 +17,7 @@ namespace StayFlow.Api.Controllers;
 [Produces("application/json")]
 [Authorize]
 [EnableRateLimiting("ai-generation")]
+[RequireFeature(FeatureKeys.AiConcierge)]
 public sealed class AIOrchestrationController(IAIOrchestrator aiOrchestrator) : ControllerBase
 {
     /// <summary>

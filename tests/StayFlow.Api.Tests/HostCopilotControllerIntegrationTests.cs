@@ -13,6 +13,9 @@ namespace StayFlow.Api.Tests;
 
 public sealed class HostCopilotControllerIntegrationTests : IClassFixture<SignalRTestAppFactory>
 {
+    private static readonly Guid HostCopilotFeatureEntitlementId = Guid.Parse("aaaaaaaa-7777-7777-7777-777777777701");
+    private static readonly Guid CompanyASubscriptionId = Guid.Parse("aaaaaaaa-8888-8888-8888-888888888801");
+    private static readonly Guid CompanyBSubscriptionId = Guid.Parse("aaaaaaaa-8888-8888-8888-888888888802");
     private static readonly Guid CompanyA = SignalRTenantContextIntegrationTests.CompanyA;
     private static readonly Guid CompanyB = SignalRTenantContextIntegrationTests.CompanyB;
     private static readonly Guid UserA = SignalRTenantContextIntegrationTests.UserA;
@@ -29,6 +32,7 @@ public sealed class HostCopilotControllerIntegrationTests : IClassFixture<Signal
     public HostCopilotControllerIntegrationTests(SignalRTestAppFactory factory)
     {
         _factory = factory;
+        _factory.EnsureSeeded();
         EnsureSeedData();
     }
 
@@ -124,6 +128,9 @@ public sealed class HostCopilotControllerIntegrationTests : IClassFixture<Signal
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        EnsureHostCopilotSubscription(db, CompanyA, CompanyASubscriptionId);
+        EnsureHostCopilotSubscription(db, CompanyB, CompanyBSubscriptionId);
 
         if (!db.Properties.Any(property => property.Id == PropertyA))
         {
@@ -261,6 +268,60 @@ public sealed class HostCopilotControllerIntegrationTests : IClassFixture<Signal
         }
 
         db.SaveChanges();
+    }
+
+    private static void EnsureHostCopilotSubscription(ApplicationDbContext db, Guid companyId, Guid subscriptionId)
+    {
+        var plan = db.SubscriptionPlans.FirstOrDefault(item => item.Id == SeedData.FreePlanId)
+            ?? db.SubscriptionPlans.FirstOrDefault(item => item.IsActive && item.Name == "Free")
+            ?? throw new InvalidOperationException("Expected the seeded Free subscription plan to exist for HostCopilot integration tests.");
+
+        if (!db.PlanEntitlements.Any(item => item.SubscriptionPlanId == plan.Id && item.Key == FeatureKeys.HostCopilot))
+        {
+            db.PlanEntitlements.Add(new PlanEntitlement
+            {
+                Id = HostCopilotFeatureEntitlementId,
+                SubscriptionPlanId = plan.Id,
+                Key = FeatureKeys.HostCopilot,
+                IsEnabled = true,
+                IsUnlimited = false
+            });
+        }
+
+        var existingSubscriptions = db.TenantSubscriptions
+            .Where(item => item.CompanyId == companyId)
+            .ToList();
+
+        var activeSubscription = existingSubscriptions.FirstOrDefault(item =>
+            item.Status == SubscriptionStatus.Active.ToStorageValue()
+            || item.Status == SubscriptionStatus.Trialing.ToStorageValue()
+            || item.Status == SubscriptionStatus.CancelAtPeriodEnd.ToStorageValue()
+            || item.Status == SubscriptionStatus.PastDue.ToStorageValue());
+
+        var periodStartUtc = new DateTimeOffset(2026, 8, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEndUtc = periodStartUtc.AddMonths(1).AddTicks(-1);
+
+        if (activeSubscription is null)
+        {
+            db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                Id = subscriptionId,
+                CompanyId = companyId,
+                SubscriptionPlanId = plan.Id,
+                Status = SubscriptionStatus.Active.ToStorageValue(),
+                CurrentPeriodStartUtc = periodStartUtc,
+                CurrentPeriodEndUtc = periodEndUtc
+            });
+
+            return;
+        }
+
+        activeSubscription.SubscriptionPlanId = plan.Id;
+        activeSubscription.Status = SubscriptionStatus.Active.ToStorageValue();
+        activeSubscription.CurrentPeriodStartUtc = periodStartUtc;
+        activeSubscription.CurrentPeriodEndUtc = periodEndUtc;
+        activeSubscription.CancelAtPeriodEnd = false;
+        activeSubscription.EndedAtUtc = null;
     }
 
     private static async Task<JsonDocument> ParseJsonAsync(HttpResponseMessage response)

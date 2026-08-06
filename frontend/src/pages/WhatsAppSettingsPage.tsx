@@ -116,6 +116,7 @@ export function WhatsAppSettingsPage() {
           copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={null}
           whatsappSettingsHref="/host/settings/whatsapp"
+          organizationSettingsHref="/host/settings/organization"
           current="settings"
         />
 
