@@ -1,0 +1,137 @@
+.sf-onboarding-shell {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 1rem 1rem 2rem;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% 6%, rgba(29, 78, 216, 0.12), transparent 28%),
+    radial-gradient(circle at 92% 0%, rgba(4, 120, 87, 0.12), transparent 32%),
+    linear-gradient(180deg, #f8fafc 0%, #ffffff 68%, #f9fafb 100%);
+}
+
+.sf-onboarding-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.sf-onboarding-top-actions {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.sf-onboarding-top-actions a,
+.sf-onboarding-top-actions button,
+.sf-onboarding-card button {
+  border: 1px solid transparent;
+  border-radius: 0.7rem;
+  padding: 0.55rem 0.85rem;
+  background: #0f4c81;
+  color: #ffffff;
+  cursor: pointer;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.sf-onboarding-progress {
+  margin-top: 0.75rem;
+  height: 0.65rem;
+  border-radius: 999px;
+  background: #dbeafe;
+  overflow: hidden;
+}
+
+.sf-onboarding-progress span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #0f4c81, #0f766e);
+  transition: width 180ms ease;
+}
+
+.sf-onboarding-step-tabs {
+  margin-top: 0.75rem;
+  display: grid;
+  gap: 0.4rem;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.sf-onboarding-step-tabs button {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.65rem;
+  background: #ffffff;
+  padding: 0.55rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sf-onboarding-step-tabs button.active {
+  border-color: #0f4c81;
+  box-shadow: 0 6px 18px rgba(15, 76, 129, 0.15);
+}
+
+.sf-onboarding-card {
+  margin-top: 0.95rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.9rem;
+  padding: 1rem;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+  display: grid;
+  gap: 0.65rem;
+}
+
+.sf-onboarding-card label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.sf-onboarding-card input,
+.sf-onboarding-card textarea,
+.sf-onboarding-card select {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.6rem;
+  padding: 0.55rem 0.65rem;
+  font: inherit;
+}
+
+.sf-onboarding-card textarea {
+  min-height: 84px;
+}
+
+.sf-onboarding-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.sf-onboarding-blockers {
+  margin-top: 0.75rem;
+  border: 1px solid #fca5a5;
+  background: #fff1f2;
+  border-radius: 0.8rem;
+  padding: 0.75rem;
+}
+
+.sf-onboarding-checklist,
+.sf-onboarding-links {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.sf-onboarding-footer-actions {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.65rem;
+}
+
+@media (max-width: 760px) {
+  .sf-onboarding-header {
+    flex-direction: column;
+  }
+
+  .sf-onboarding-top-actions {
+    width: 100%;
+  }
+}

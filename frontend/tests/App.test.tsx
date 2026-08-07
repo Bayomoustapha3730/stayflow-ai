@@ -47,6 +47,14 @@ vi.mock("../src/pages/WhatsAppSettingsPage", () => ({
   WhatsAppSettingsPage: () => <div data-testid="whatsapp-settings-page">whatsapp-settings</div>
 }));
 
+vi.mock("../src/pages/OrganizationSettingsPage", () => ({
+  OrganizationSettingsPage: () => <div data-testid="organization-settings-page">organization-settings</div>
+}));
+
+vi.mock("../src/pages/OnboardingPage", () => ({
+  OnboardingPage: ({ routeStep }: { routeStep?: string }) => <div data-testid="onboarding-page">{routeStep ?? "root"}</div>
+}));
+
 import App from "../src/App";
 
 describe("App routing", () => {
@@ -154,5 +162,29 @@ describe("App routing", () => {
     render(<App />);
 
     expect(screen.getByTestId("demo-page")).toBeInTheDocument();
+  });
+
+  it("renders onboarding root route", () => {
+    window.history.pushState({}, "", "/onboarding");
+
+    render(<App />);
+
+    expect(screen.getByTestId("onboarding-page")).toHaveTextContent("root");
+  });
+
+  it("renders onboarding step route", () => {
+    window.history.pushState({}, "", "/onboarding/property");
+
+    render(<App />);
+
+    expect(screen.getByTestId("onboarding-page")).toHaveTextContent("property");
+  });
+
+  it("renders get-started route", () => {
+    window.history.pushState({}, "", "/get-started");
+
+    render(<App />);
+
+    expect(screen.getByTestId("onboarding-page")).toHaveTextContent("completed");
   });
 });
