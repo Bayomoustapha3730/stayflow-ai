@@ -1,0 +1,164 @@
+.sf-platform-admin-page {
+  min-height: 100vh;
+  padding: 1.25rem;
+  color: #0b1b2b;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(255, 228, 196, 0.45), transparent 40%),
+    radial-gradient(circle at 80% 0%, rgba(182, 226, 255, 0.35), transparent 35%),
+    linear-gradient(180deg, #f7fafc 0%, #eef5fb 100%);
+}
+
+.sf-platform-admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.sf-platform-admin-kicker {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #0d5c63;
+}
+
+.sf-platform-admin-subtitle {
+  margin: 0.25rem 0 0;
+  max-width: 58ch;
+}
+
+.sf-platform-admin-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sf-platform-admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.sf-platform-admin-tabs button {
+  border: 1px solid #b8c7d4;
+  background: #ffffff;
+  color: #102a43;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+}
+
+.sf-platform-admin-tabs button.active {
+  background: #0d5c63;
+  color: #ffffff;
+  border-color: #0d5c63;
+}
+
+.sf-platform-admin-error {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  border-radius: 0.6rem;
+  background: #ffe3e3;
+  color: #7f1d1d;
+}
+
+.sf-platform-admin-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.8rem;
+}
+
+.sf-platform-admin-cards article,
+.sf-platform-admin-grid article,
+.sf-platform-admin-single {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid #dbe7f1;
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+  box-shadow: 0 6px 20px rgba(17, 46, 78, 0.06);
+}
+
+.sf-platform-admin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.8rem;
+}
+
+.sf-platform-admin-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.sf-platform-admin-controls input,
+.sf-platform-admin-controls select,
+.sf-platform-admin-form-grid input {
+  width: 100%;
+  border: 1px solid #c0d2df;
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.6rem;
+}
+
+.sf-platform-admin-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.sf-platform-admin-list button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem;
+  border: 1px solid #d4e0ea;
+  border-radius: 0.5rem;
+  background: #fff;
+}
+
+.sf-platform-admin-list button.selected {
+  border-color: #0d5c63;
+  box-shadow: inset 0 0 0 1px #0d5c63;
+}
+
+.sf-platform-admin-detail p {
+  margin: 0.2rem 0;
+}
+
+.sf-platform-admin-actions-inline {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.sf-platform-admin-list-plain {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.sf-platform-admin-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+}
+
+.sf-platform-admin-form-grid label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+@media (max-width: 900px) {
+  .sf-platform-admin-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sf-platform-admin-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

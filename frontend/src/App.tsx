@@ -2,6 +2,7 @@ import { DemoPage } from "./pages/DemoPage";
 import { HostCopilotWorkspacePage } from "./pages/HostCopilotWorkspacePage";
 import { HostInboxPage } from "./pages/HostInboxPage";
 import { OrganizationSettingsPage } from "./pages/OrganizationSettingsPage";
+import { PlatformAdminPage } from "./pages/PlatformAdminPage";
 import { PropertyKnowledgePage } from "./pages/PropertyKnowledgePage";
 import { WhatsAppSettingsPage } from "./pages/WhatsAppSettingsPage";
 import { normalizePropertyId, resolvePropertyKnowledgePropertyId } from "./utils/propertyRouting";
@@ -21,6 +22,10 @@ export default function App() {
 
   if (path === "/host/copilot" || path === "/host/copilot/") {
     return <HostCopilotWorkspacePage />;
+  }
+
+  if (path === "/platform-admin" || path.startsWith("/platform-admin/")) {
+    return <PlatformAdminPage />;
   }
 
   if (path === "/host" || path.startsWith("/host/conversations")) {
