@@ -29,6 +29,10 @@ vi.mock("../src/pages/HostCopilotWorkspacePage", () => ({
   HostCopilotWorkspacePage: () => <div data-testid="host-copilot-workspace-page">host-copilot</div>
 }));
 
+vi.mock("../src/pages/PlatformAdminPage", () => ({
+  PlatformAdminPage: () => <div data-testid="platform-admin-page">platform-admin</div>
+}));
+
 vi.mock("../src/pages/PropertyKnowledgePage", () => ({
   PropertyKnowledgePage: ({ propertyId }: { propertyId: string | null }) => (
     <div data-testid="property-knowledge-page">{propertyId ?? "(none)"}</div>
@@ -145,6 +149,22 @@ describe("App routing", () => {
     render(<App />);
 
     expect(screen.getByTestId("host-copilot-workspace-page")).toBeInTheDocument();
+  });
+
+  it("renders the platform admin route", () => {
+    window.history.pushState({}, "", "/platform-admin");
+
+    render(<App />);
+
+    expect(screen.getByTestId("platform-admin-page")).toBeInTheDocument();
+  });
+
+  it("renders the platform admin route with trailing slash", () => {
+    window.history.pushState({}, "", "/platform-admin/");
+
+    render(<App />);
+
+    expect(screen.getByTestId("platform-admin-page")).toBeInTheDocument();
   });
 
   it("passes a null property ID when no valid demo fallback is configured", () => {

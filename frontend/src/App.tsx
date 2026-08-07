@@ -9,6 +9,7 @@ import { InvitationDecisionPage } from "./pages/InvitationDecisionPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { OrganizationSettingsPage } from "./pages/OrganizationSettingsPage";
 import { PlanComparisonPage } from "./pages/PlanComparisonPage";
+import { PlatformAdminPage } from "./pages/PlatformAdminPage";
 import { PropertyKnowledgePage } from "./pages/PropertyKnowledgePage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage";
@@ -110,6 +111,10 @@ export default function App() {
 
   if (path === "/host/copilot" || path === "/host/copilot/") {
     return <HostCopilotWorkspacePage />;
+  }
+
+  if (path === "/platform-admin" || path.startsWith("/platform-admin/")) {
+    return <PlatformAdminPage />;
   }
 
   if (path === "/host" || path.startsWith("/host/conversations")) {
