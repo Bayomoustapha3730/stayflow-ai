@@ -1,16 +1,20 @@
 import { createAuthApi } from "./authApi";
+import { createBillingApi } from "./billingApi";
 import { createChatApi } from "./chatApi";
 import { createHostCopilotApi } from "./hostCopilotApi";
 import { createHostCopilotWorkspaceApi } from "./hostCopilotWorkspaceApi";
+import { createOnboardingApi } from "./onboardingApi";
 import { createPlatformAdminApi } from "./platformAdminApi";
 import { createPropertyKnowledgeApi } from "./propertyKnowledgeApi";
 import { HttpClient } from "./httpClient";
 import { getRuntimeApiUrl } from "../runtimeConfig";
 
 export { createAuthApi } from "./authApi";
+export { createBillingApi } from "./billingApi";
 export { createChatApi } from "./chatApi";
 export { createHostCopilotApi } from "./hostCopilotApi";
 export { createHostCopilotWorkspaceApi } from "./hostCopilotWorkspaceApi";
+export { createOnboardingApi } from "./onboardingApi";
 export { createPlatformAdminApi } from "./platformAdminApi";
 export { createPropertyKnowledgeApi } from "./propertyKnowledgeApi";
 export { ApiError, HttpClient } from "./httpClient";
@@ -23,9 +27,11 @@ export function createStayFlowApi(getAccessToken: () => string | null) {
 
   return {
     auth: createAuthApi(http),
+    billing: createBillingApi(http),
     chat: createChatApi(http),
     hostCopilot: createHostCopilotApi(http),
     hostCopilotWorkspace: createHostCopilotWorkspaceApi(http),
+    onboarding: createOnboardingApi(http),
     platformAdmin: createPlatformAdminApi(http),
     propertyKnowledge: createPropertyKnowledgeApi(http)
   };

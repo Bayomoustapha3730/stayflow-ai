@@ -1,0 +1,268 @@
+.sf-billing-page {
+  --billing-bg-top: #f8efe4;
+  --billing-bg-mid: #faf7f0;
+  --billing-accent: #0a6e6b;
+  --billing-accent-strong: #05514f;
+  --billing-warn: #b7791f;
+  --billing-risk: #9b2c2c;
+  background:
+    radial-gradient(circle at 8% 16%, rgba(10, 110, 107, 0.12), transparent 32%),
+    radial-gradient(circle at 88% 0%, rgba(183, 121, 31, 0.15), transparent 38%),
+    linear-gradient(170deg, var(--billing-bg-top) 0%, var(--billing-bg-mid) 55%, #ffffff 100%);
+}
+
+.sf-billing-grid {
+  margin-top: 1rem;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+}
+
+.sf-billing-overview {
+  border: 1px solid rgba(10, 110, 107, 0.2);
+  box-shadow: 0 10px 24px rgba(10, 110, 107, 0.08);
+}
+
+.sf-billing-key-value {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px dashed #d7ddd9;
+  padding: 0.45rem 0;
+}
+
+.sf-billing-actions {
+  margin-top: 0.45rem;
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.sf-billing-actions button,
+.sf-plan-actions button,
+.sf-trial-banner button {
+  border: 1px solid transparent;
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sf-billing-actions button,
+.sf-plan-actions button:first-child,
+.sf-trial-banner button {
+  background: var(--billing-accent);
+  color: #ffffff;
+}
+
+.sf-billing-actions button:hover,
+.sf-plan-actions button:first-child:hover,
+.sf-trial-banner button:hover {
+  background: var(--billing-accent-strong);
+}
+
+.sf-plan-actions button:last-child {
+  background: #fff6e7;
+  color: #7d4d07;
+  border-color: rgba(183, 121, 31, 0.3);
+}
+
+.sf-status-pill {
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+}
+
+.sf-status-ok {
+  background: #e6fffa;
+  color: #065f46;
+}
+
+.sf-status-warn {
+  background: #fff7e0;
+  color: #8a5808;
+}
+
+.sf-status-risk {
+  background: #ffe8e8;
+  color: #8f1f1f;
+}
+
+.sf-trial-banner {
+  margin-top: 0.9rem;
+  border: 1px solid rgba(183, 121, 31, 0.35);
+  background: linear-gradient(120deg, #fff6e9, #fffdf8);
+  border-radius: 0.8rem;
+  padding: 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  animation: sf-trial-slide 280ms ease-out;
+}
+
+@keyframes sf-trial-slide {
+  from {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.sf-plan-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.sf-plan-card {
+  border: 1px solid #e8e4d8;
+  border-radius: 0.8rem;
+  padding: 0.8rem;
+  background: linear-gradient(180deg, #ffffff, #fcfaf5);
+  animation: sf-plan-fade-in 350ms ease both;
+}
+
+.sf-plan-card:nth-child(2) {
+  animation-delay: 60ms;
+}
+
+.sf-plan-card:nth-child(3) {
+  animation-delay: 120ms;
+}
+
+@keyframes sf-plan-fade-in {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.sf-plan-price {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #12403f;
+}
+
+.sf-plan-price span {
+  margin-left: 0.25rem;
+  font-size: 0.9rem;
+  color: #4b5563;
+}
+
+.sf-plan-card ul {
+  margin: 0.55rem 0;
+  padding-left: 1rem;
+}
+
+.sf-plan-actions {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.sf-billing-dialog {
+  width: min(520px, calc(100vw - 2rem));
+  border: 1px solid #d6d3c8;
+  border-radius: 0.9rem;
+  padding: 1rem;
+  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.22);
+}
+
+.sf-billing-dialog::backdrop {
+  background: rgba(2, 6, 23, 0.42);
+}
+
+.sf-billing-dialog-actions {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.sf-billing-dialog-actions button {
+  border: 1px solid transparent;
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sf-billing-dialog-actions button:first-child {
+  background: #f3f4f6;
+  color: #1f2937;
+}
+
+.sf-billing-dialog-actions button:last-child {
+  background: var(--billing-accent);
+  color: #ffffff;
+}
+
+.sf-usage-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.sf-usage-row {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.7rem;
+  padding: 0.65rem;
+}
+
+.sf-usage-headline-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.sf-usage-meter {
+  margin-top: 0.45rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #e6edea;
+  overflow: hidden;
+}
+
+.sf-usage-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0a6e6b, #25a28e);
+  transition: width 180ms ease;
+}
+
+.sf-invoice-table-wrap {
+  overflow-x: auto;
+}
+
+.sf-invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.sf-invoice-table th,
+.sf-invoice-table td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+@media (max-width: 760px) {
+  .sf-trial-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .sf-billing-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -12,7 +12,10 @@ public sealed class OnboardingProgressConfiguration : IEntityTypeConfiguration<O
 
         builder.HasKey(progress => progress.Id);
         builder.Property(progress => progress.CurrentStep).HasMaxLength(64).IsRequired();
+        builder.Property(progress => progress.CompletedStepsCsv).HasMaxLength(1000).IsRequired();
+        builder.Property(progress => progress.SkippedStepsCsv).HasMaxLength(1000).IsRequired();
         builder.Property(progress => progress.SelectedPlanName).HasMaxLength(120);
+        builder.Property(progress => progress.Version).IsRequired();
 
         builder.HasOne(progress => progress.Company)
             .WithMany(company => company.OnboardingProgressRecords)
@@ -29,5 +32,6 @@ public sealed class OnboardingProgressConfiguration : IEntityTypeConfiguration<O
         builder.HasIndex(progress => new { progress.CompanyId, progress.UserId }).IsUnique();
         builder.HasIndex(progress => progress.CurrentStep);
         builder.HasIndex(progress => progress.IsCompleted);
+        builder.HasIndex(progress => progress.CompletedByUserId);
     }
 }

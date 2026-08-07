@@ -11,6 +11,7 @@ public sealed class OrganizationInvitation : AuditableEntity
     public DateTimeOffset ExpiresAtUtc { get; set; }
     public DateTimeOffset? AcceptedAtUtc { get; set; }
     public Guid? AcceptedByUserId { get; set; }
+    public DateTimeOffset? RejectedAtUtc { get; set; }
     public DateTimeOffset? RevokedAtUtc { get; set; }
     public DateTimeOffset? LastSentAtUtc { get; set; }
     public int SendCount { get; set; }

@@ -6,6 +6,7 @@ using StayFlow.Api.Common;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Organizations;
 using StayFlow.Api.Models;
+using StayFlow.Api.Services.Email;
 
 namespace StayFlow.Api.Services;
 
@@ -13,7 +14,8 @@ public sealed class OrganizationInvitationService(
     ApplicationDbContext dbContext,
     ICurrentTenantContext tenantContext,
     IPasswordHasher passwordHasher,
-    IConfiguration configuration) : IOrganizationInvitationService
+    IConfiguration configuration,
+    IIdentityEmailService identityEmailService) : IOrganizationInvitationService
 {
     private static readonly TimeSpan DefaultExpiry = TimeSpan.FromDays(7);
     private static readonly TimeSpan ResendCooldown = TimeSpan.FromMinutes(1);
@@ -69,14 +71,15 @@ public sealed class OrganizationInvitationService(
         };
 
         await dbContext.OrganizationInvitations.AddAsync(invitation, cancellationToken);
+        await identityEmailService.SendOrganizationInvitationAsync(invitation.Email, invitation.Role, plainToken, cancellationToken);
         await AddAuditLogAsync(companyId, invitation.Id, "InvitationCreated", cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<CreatedOrganizationInvitationDto>.Ok(new CreatedOrganizationInvitationDto
         {
             Invitation = Map(invitation),
-            InvitationToken = plainToken,
-            InvitationLink = BuildInvitationLink(plainToken)
+            InvitationToken = ShouldExposeTokensForDevelopment() ? plainToken : string.Empty,
+            InvitationLink = ShouldExposeTokensForDevelopment() ? BuildInvitationLink(plainToken) : string.Empty
         }, "Invitation created.");
     }
 
@@ -158,14 +161,15 @@ public sealed class OrganizationInvitationService(
         invitation.SendCount++;
         invitation.ExpiresAtUtc = now.Add(DefaultExpiry);
 
+        await identityEmailService.SendOrganizationInvitationAsync(invitation.Email, invitation.Role, plainToken, cancellationToken);
         await AddAuditLogAsync(companyId, invitation.Id, "InvitationResent", cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<ResentOrganizationInvitationDto>.Ok(new ResentOrganizationInvitationDto
         {
             Invitation = Map(invitation),
-            InvitationToken = plainToken,
-            InvitationLink = BuildInvitationLink(plainToken)
+            InvitationToken = ShouldExposeTokensForDevelopment() ? plainToken : string.Empty,
+            InvitationLink = ShouldExposeTokensForDevelopment() ? BuildInvitationLink(plainToken) : string.Empty
         }, "Invitation resent.");
     }
 
@@ -203,6 +207,11 @@ public sealed class OrganizationInvitationService(
         if (invitation.AcceptedAtUtc is not null)
         {
             return ApiResponse<object>.Fail("Invitation has already been used.");
+        }
+
+        if (invitation.RejectedAtUtc is not null)
+        {
+            return ApiResponse<object>.Fail("Invitation has already been rejected.");
         }
 
         if (invitation.ExpiresAtUtc <= DateTimeOffset.UtcNow)
@@ -252,6 +261,48 @@ public sealed class OrganizationInvitationService(
         await AddAuditLogAsync(companyId, invitation.Id, "InvitationAccepted", cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return ApiResponse<object>.Ok(new { invitationId = invitation.Id }, "Invitation accepted.");
+    }
+
+    public async Task<ApiResponse<object>> RejectAsync(RejectOrganizationInvitationRequest request, CancellationToken cancellationToken)
+    {
+        var plainToken = request.Token.Trim();
+        if (string.IsNullOrWhiteSpace(plainToken))
+        {
+            return ApiResponse<object>.Fail("Invitation token is required.");
+        }
+
+        var tokenHash = HashInvitationToken(plainToken);
+        var invitation = await dbContext.OrganizationInvitations
+            .FirstOrDefaultAsync(item => item.TokenHash == tokenHash, cancellationToken);
+        if (invitation is null)
+        {
+            return ApiResponse<object>.Fail("Invitation is invalid.");
+        }
+
+        if (invitation.AcceptedAtUtc is not null)
+        {
+            return ApiResponse<object>.Fail("Invitation has already been used.");
+        }
+
+        if (invitation.RejectedAtUtc is not null)
+        {
+            return ApiResponse<object>.Fail("Invitation has already been rejected.");
+        }
+
+        if (invitation.RevokedAtUtc is not null)
+        {
+            return ApiResponse<object>.Fail("Invitation has been revoked.");
+        }
+
+        if (invitation.ExpiresAtUtc <= DateTimeOffset.UtcNow)
+        {
+            return ApiResponse<object>.Fail("Invitation has expired.");
+        }
+
+        invitation.RejectedAtUtc = DateTimeOffset.UtcNow;
+        await AddAuditLogAsync(invitation.CompanyId, invitation.Id, "InvitationRejected", cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ApiResponse<object>.Ok(new { invitationId = invitation.Id }, "Invitation rejected.");
     }
 
     private bool TryGetContext(out Guid companyId, out Guid userId, out string error)
@@ -311,6 +362,7 @@ public sealed class OrganizationInvitationService(
             Role = invitation.Role,
             ExpiresAtUtc = invitation.ExpiresAtUtc,
             AcceptedAtUtc = invitation.AcceptedAtUtc,
+            RejectedAtUtc = invitation.RejectedAtUtc,
             RevokedAtUtc = invitation.RevokedAtUtc,
             LastSentAtUtc = invitation.LastSentAtUtc,
             SendCount = invitation.SendCount
@@ -334,5 +386,10 @@ public sealed class OrganizationInvitationService(
             Details = $"{{\"companyId\":\"{companyId}\",\"invitedBy\":\"{tenantContext.UserId}\"}}",
             CreatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
+    }
+
+    private bool ShouldExposeTokensForDevelopment()
+    {
+        return string.Equals(configuration["Email:Provider"], "Development", StringComparison.OrdinalIgnoreCase);
     }
 }

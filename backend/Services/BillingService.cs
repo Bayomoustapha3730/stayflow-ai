@@ -12,6 +12,7 @@ namespace StayFlow.Api.Services;
 public sealed class BillingService(
     ApplicationDbContext dbContext,
     ICurrentTenantContext tenantContext,
+    ISubscriptionEntitlementService subscriptionEntitlementService,
     IBillingProvider billingProvider,
     IOptions<BillingOptions> billingOptions,
     ILogger<BillingService> logger) : IBillingService
@@ -61,7 +62,8 @@ public sealed class BillingService(
             priceId,
             options.CheckoutSuccessUrl,
             options.CheckoutCancelUrl,
-            tenantContext.CorrelationId), cancellationToken);
+            tenantContext.CorrelationId,
+            request.TrialDays), cancellationToken);
 
         await dbContext.AuditLogs.AddAsync(new AuditLog
         {
@@ -130,11 +132,66 @@ public sealed class BillingService(
         });
     }
 
+    public async Task<ApiResponse<CreateBillingPortalSessionResponse>> CreatePaymentMethodManagementSessionAsync(CancellationToken cancellationToken)
+    {
+        if (!TryGetTenant(out var companyId, out var error))
+        {
+            return ApiResponse<CreateBillingPortalSessionResponse>.Fail(error);
+        }
+
+        var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
+        if (!authorization.Success)
+        {
+            return ApiResponse<CreateBillingPortalSessionResponse>.Fail(authorization.Error);
+        }
+
+        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
+        if (company is null)
+        {
+            return ApiResponse<CreateBillingPortalSessionResponse>.Fail("Organization was not found.");
+        }
+
+        var customerId = company.StripeCustomerId;
+        if (string.IsNullOrWhiteSpace(customerId))
+        {
+            return ApiResponse<CreateBillingPortalSessionResponse>.Fail("Billing customer is not configured for this tenant.");
+        }
+
+        var portalUrl = await billingProvider.CreatePaymentMethodPortalSessionAsync(new BillingPortalRequest(
+            companyId,
+            customerId,
+            billingOptions.Value.BillingPortalReturnUrl,
+            tenantContext.CorrelationId), cancellationToken);
+
+        await dbContext.AuditLogs.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            EntityName = nameof(TenantSubscription),
+            EntityId = companyId,
+            Action = "BillingPaymentMethodPortalCreated",
+            Details = $"{{\"companyId\":\"{companyId}\"}}",
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<CreateBillingPortalSessionResponse>.Ok(new CreateBillingPortalSessionResponse
+        {
+            PortalUrl = portalUrl,
+            Provider = billingProvider.ProviderName
+        });
+    }
+
     public async Task<ApiResponse<BillingSubscriptionResponse>> GetSubscriptionAsync(CancellationToken cancellationToken)
     {
         if (!TryGetTenant(out var companyId, out var error))
         {
             return ApiResponse<BillingSubscriptionResponse>.Fail(error);
+        }
+
+        var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
+        if (!authorization.Success)
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail(authorization.Error);
         }
 
         var subscription = await dbContext.TenantSubscriptions
@@ -147,18 +204,162 @@ public sealed class BillingService(
             return ApiResponse<BillingSubscriptionResponse>.Fail("Subscription was not found.");
         }
 
-        return ApiResponse<BillingSubscriptionResponse>.Ok(new BillingSubscriptionResponse
+        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription));
+    }
+
+    public async Task<ApiResponse<BillingSubscriptionResponse>> ChangeSubscriptionPlanAsync(ChangeSubscriptionPlanRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetTenant(out var companyId, out var error))
         {
-            CompanyId = companyId,
-            Status = subscription.Status,
-            CancelAtPeriodEnd = subscription.CancelAtPeriodEnd,
-            CurrentPeriodStartUtc = subscription.CurrentPeriodStartUtc,
-            CurrentPeriodEndUtc = subscription.CurrentPeriodEndUtc,
-            TrialEndsAtUtc = subscription.TrialEndsAtUtc,
-            PlanName = subscription.SubscriptionPlan?.DisplayName ?? subscription.SubscriptionPlan?.Name,
-            ExternalSubscriptionId = subscription.ExternalSubscriptionId,
-            ExternalPriceId = subscription.ExternalPriceId
-        });
+            return ApiResponse<BillingSubscriptionResponse>.Fail(error);
+        }
+
+        var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
+        if (!authorization.Success)
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail(authorization.Error);
+        }
+
+        var planName = request.PlanName.Trim();
+        if (string.IsNullOrWhiteSpace(planName))
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail("Plan name is required.");
+        }
+
+        var options = billingOptions.Value;
+        if (!options.PlanPriceIds.TryGetValue(planName, out var priceId) || string.IsNullOrWhiteSpace(priceId))
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail("Plan price mapping is not configured.");
+        }
+
+        var subscription = await dbContext.TenantSubscriptions
+            .Include(item => item.SubscriptionPlan)
+            .OrderByDescending(item => item.CurrentPeriodStartUtc)
+            .FirstOrDefaultAsync(item => item.CompanyId == companyId, cancellationToken);
+        if (subscription is null)
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail("Subscription was not found.");
+        }
+
+        if (string.IsNullOrWhiteSpace(subscription.ExternalSubscriptionId))
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail("Provider subscription ID is not configured for this tenant.");
+        }
+
+        var snapshot = await billingProvider.ChangeSubscriptionPlanAsync(new ChangeSubscriptionPlanProviderRequest(
+            subscription.ExternalSubscriptionId,
+            priceId,
+            tenantContext.CorrelationId), cancellationToken);
+
+        await ApplyProviderSnapshotAsync(subscription, snapshot, cancellationToken);
+
+        await dbContext.AuditLogs.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            EntityName = nameof(TenantSubscription),
+            EntityId = subscription.Id,
+            Action = "BillingPlanChanged",
+            Details = $"{{\"companyId\":\"{companyId}\",\"plan\":\"{planName}\",\"priceId\":\"{priceId}\"}}",
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription), "Plan changed successfully.");
+    }
+
+    public async Task<ApiResponse<BillingSubscriptionResponse>> CancelSubscriptionAsync(CancelSubscriptionRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetTenant(out var companyId, out var error))
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail(error);
+        }
+
+        var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
+        if (!authorization.Success)
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail(authorization.Error);
+        }
+
+        var subscription = await dbContext.TenantSubscriptions
+            .Include(item => item.SubscriptionPlan)
+            .OrderByDescending(item => item.CurrentPeriodStartUtc)
+            .FirstOrDefaultAsync(item => item.CompanyId == companyId, cancellationToken);
+        if (subscription is null)
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail("Subscription was not found.");
+        }
+
+        if (string.IsNullOrWhiteSpace(subscription.ExternalSubscriptionId))
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail("Provider subscription ID is not configured for this tenant.");
+        }
+
+        var snapshot = await billingProvider.CancelSubscriptionAsync(new CancelSubscriptionProviderRequest(
+            subscription.ExternalSubscriptionId,
+            request.AtPeriodEnd,
+            tenantContext.CorrelationId), cancellationToken);
+
+        await ApplyProviderSnapshotAsync(subscription, snapshot, cancellationToken);
+
+        await dbContext.AuditLogs.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            EntityName = nameof(TenantSubscription),
+            EntityId = subscription.Id,
+            Action = request.AtPeriodEnd ? "BillingCancelScheduled" : "BillingCancelledImmediately",
+            Details = $"{{\"companyId\":\"{companyId}\",\"atPeriodEnd\":{request.AtPeriodEnd.ToString().ToLowerInvariant()}}}",
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription), "Subscription cancellation updated.");
+    }
+
+    public async Task<ApiResponse<BillingSubscriptionResponse>> ResumeSubscriptionAsync(CancellationToken cancellationToken)
+    {
+        if (!TryGetTenant(out var companyId, out var error))
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail(error);
+        }
+
+        var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
+        if (!authorization.Success)
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail(authorization.Error);
+        }
+
+        var subscription = await dbContext.TenantSubscriptions
+            .Include(item => item.SubscriptionPlan)
+            .OrderByDescending(item => item.CurrentPeriodStartUtc)
+            .FirstOrDefaultAsync(item => item.CompanyId == companyId, cancellationToken);
+        if (subscription is null)
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail("Subscription was not found.");
+        }
+
+        if (string.IsNullOrWhiteSpace(subscription.ExternalSubscriptionId))
+        {
+            return ApiResponse<BillingSubscriptionResponse>.Fail("Provider subscription ID is not configured for this tenant.");
+        }
+
+        var snapshot = await billingProvider.ResumeSubscriptionAsync(new ResumeSubscriptionProviderRequest(
+            subscription.ExternalSubscriptionId,
+            tenantContext.CorrelationId), cancellationToken);
+
+        await ApplyProviderSnapshotAsync(subscription, snapshot, cancellationToken);
+
+        await dbContext.AuditLogs.AddAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            EntityName = nameof(TenantSubscription),
+            EntityId = subscription.Id,
+            Action = "BillingSubscriptionResumed",
+            Details = $"{{\"companyId\":\"{companyId}\"}}",
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription), "Subscription resumed.");
     }
 
     public async Task<ApiResponse<IReadOnlyCollection<TenantInvoiceDto>>> GetInvoicesAsync(CancellationToken cancellationToken)
@@ -166,6 +367,12 @@ public sealed class BillingService(
         if (!TryGetTenant(out var companyId, out var error))
         {
             return ApiResponse<IReadOnlyCollection<TenantInvoiceDto>>.Fail(error);
+        }
+
+        var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
+        if (!authorization.Success)
+        {
+            return ApiResponse<IReadOnlyCollection<TenantInvoiceDto>>.Fail(authorization.Error);
         }
 
         var invoices = await dbContext.TenantInvoices
@@ -191,15 +398,56 @@ public sealed class BillingService(
         return ApiResponse<IReadOnlyCollection<TenantInvoiceDto>>.Ok(invoices);
     }
 
+    public async Task<ApiResponse<UsageSummaryResponse>> GetUsageSummaryAsync(CancellationToken cancellationToken)
+    {
+        if (!TryGetTenant(out var companyId, out var error))
+        {
+            return ApiResponse<UsageSummaryResponse>.Fail(error);
+        }
+
+        var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
+        if (!authorization.Success)
+        {
+            return ApiResponse<UsageSummaryResponse>.Fail(authorization.Error);
+        }
+
+        var snapshot = await subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
+        var metrics = snapshot.Quotas
+            .OrderBy(item => item.Metric)
+            .Select(item => new UsageMetricSummaryDto
+            {
+                Metric = item.Metric.ToStorageValue(),
+                EntitlementKey = item.EntitlementKey,
+                Used = item.Used,
+                Limit = item.Limit,
+                Remaining = item.Remaining,
+                IsUnlimited = item.IsUnlimited,
+                Unit = item.Unit,
+                PeriodStartUtc = item.PeriodStartUtc,
+                PeriodEndUtc = item.PeriodEndUtc
+            })
+            .ToList();
+
+        return ApiResponse<UsageSummaryResponse>.Ok(new UsageSummaryResponse
+        {
+            CompanyId = companyId,
+            GeneratedAtUtc = DateTimeOffset.UtcNow,
+            Metrics = metrics
+        });
+    }
+
     public async Task<BillingWebhookProcessingResult> ProcessStripeWebhookAsync(string rawBody, string signatureHeader, CancellationToken cancellationToken)
     {
         var envelope = billingProvider.ValidateAndParseWebhook(rawBody, signatureHeader);
 
         var existing = await dbContext.BillingWebhookEvents
-            .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Provider == billingProvider.ProviderName && item.EventId == envelope.EventId, cancellationToken);
         if (existing is not null)
         {
+            existing.WasDuplicate = true;
+            existing.ProcessedAtUtc = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
             return new BillingWebhookProcessingResult
             {
                 EventId = envelope.EventId,
@@ -226,27 +474,42 @@ public sealed class BillingService(
             WasDuplicate = false
         }, cancellationToken);
 
-        switch (envelope.EventType)
+        try
         {
-            case "checkout.session.completed":
-                applied = await ApplyCheckoutSessionCompletedAsync(envelope, cancellationToken);
-                break;
-            case "customer.subscription.created":
-            case "customer.subscription.updated":
-            case "customer.subscription.deleted":
-                applied = await ApplySubscriptionEventAsync(envelope, cancellationToken);
-                break;
-            case "invoice.paid":
-            case "invoice.payment_failed":
-                applied = await ApplyInvoiceEventAsync(envelope, cancellationToken);
-                break;
-            default:
-                logger.LogInformation("Ignored unsupported Stripe event type {EventType}", envelope.EventType);
-                break;
-        }
+            switch (envelope.EventType)
+            {
+                case "checkout.session.completed":
+                    applied = await ApplyCheckoutSessionCompletedAsync(envelope, cancellationToken);
+                    break;
+                case "customer.subscription.created":
+                case "customer.subscription.updated":
+                case "customer.subscription.deleted":
+                    applied = await ApplySubscriptionEventAsync(envelope, cancellationToken);
+                    break;
+                case "invoice.paid":
+                case "invoice.payment_failed":
+                    applied = await ApplyInvoiceEventAsync(envelope, cancellationToken);
+                    break;
+                default:
+                    logger.LogInformation("Ignored unsupported Stripe event type {EventType}", envelope.EventType);
+                    break;
+            }
 
-        await dbContext.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsUniqueWebhookEventViolation(exception))
+        {
+            logger.LogInformation("Duplicate Stripe webhook event detected via unique constraint for {EventId}", envelope.EventId);
+            await transaction.RollbackAsync(cancellationToken);
+            return new BillingWebhookProcessingResult
+            {
+                EventId = envelope.EventId,
+                EventType = envelope.EventType,
+                WasDuplicate = true,
+                AppliedStateChange = false
+            };
+        }
 
         return new BillingWebhookProcessingResult
         {
@@ -299,14 +562,7 @@ public sealed class BillingService(
 
     private async Task<bool> ApplySubscriptionEventAsync(BillingWebhookEnvelope envelope, CancellationToken cancellationToken)
     {
-        var customerId = envelope.CustomerId;
-        if (string.IsNullOrWhiteSpace(customerId))
-        {
-            return false;
-        }
-
-        var company = await dbContext.Companies
-            .FirstOrDefaultAsync(item => item.StripeCustomerId == customerId, cancellationToken);
+        var company = await ResolveCompanyForWebhookAsync(envelope, cancellationToken);
         if (company is null)
         {
             return false;
@@ -345,6 +601,11 @@ public sealed class BillingService(
             subscription.CancelAtPeriodEnd = cancelElement.GetBoolean();
         }
 
+        if (data.TryGetProperty("trial_end", out var trialEndElement) && trialEndElement.ValueKind == JsonValueKind.Number)
+        {
+            subscription.TrialEndsAtUtc = DateTimeOffset.FromUnixTimeSeconds(trialEndElement.GetInt64());
+        }
+
         if (data.TryGetProperty("items", out var itemsElement)
             && itemsElement.TryGetProperty("data", out var itemData)
             && itemData.ValueKind == JsonValueKind.Array
@@ -355,6 +616,20 @@ public sealed class BillingService(
                 && priceElement.TryGetProperty("id", out var priceIdElement))
             {
                 subscription.ExternalPriceId = priceIdElement.GetString();
+            }
+        }
+
+        // Snapshot refresh tolerates partial payloads and ensures we stay aligned with provider state.
+        if (!string.IsNullOrWhiteSpace(subscription.ExternalSubscriptionId))
+        {
+            try
+            {
+                var snapshot = await billingProvider.GetSubscriptionSnapshotAsync(subscription.ExternalSubscriptionId, cancellationToken);
+                await ApplyProviderSnapshotAsync(subscription, snapshot, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Failed to synchronize Stripe subscription snapshot for {SubscriptionId}", subscription.ExternalSubscriptionId);
             }
         }
 
@@ -375,6 +650,30 @@ public sealed class BillingService(
         }, cancellationToken);
 
         return true;
+    }
+
+    private async Task<Company?> ResolveCompanyForWebhookAsync(BillingWebhookEnvelope envelope, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(envelope.CustomerId))
+        {
+            var companyByCustomer = await dbContext.Companies
+                .FirstOrDefaultAsync(item => item.StripeCustomerId == envelope.CustomerId, cancellationToken);
+            if (companyByCustomer is not null)
+            {
+                return companyByCustomer;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(envelope.SubscriptionId))
+        {
+            var companyBySubscription = await dbContext.TenantSubscriptions
+                .Where(item => item.ExternalSubscriptionId == envelope.SubscriptionId)
+                .Select(item => item.Company)
+                .FirstOrDefaultAsync(cancellationToken);
+            return companyBySubscription;
+        }
+
+        return null;
     }
 
     private async Task<bool> ApplyInvoiceEventAsync(BillingWebhookEnvelope envelope, CancellationToken cancellationToken)
@@ -502,6 +801,56 @@ public sealed class BillingService(
         }
 
         return SubscriptionStatus.Active.ToStorageValue();
+    }
+
+    private static bool IsUniqueWebhookEventViolation(DbUpdateException exception)
+    {
+        return exception.InnerException?.Message.Contains("IX_BillingWebhookEvents_Provider_EventId", StringComparison.OrdinalIgnoreCase) == true
+            || exception.InnerException?.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static BillingSubscriptionResponse MapSubscriptionResponse(Guid companyId, TenantSubscription subscription)
+    {
+        return new BillingSubscriptionResponse
+        {
+            CompanyId = companyId,
+            Status = subscription.Status,
+            CancelAtPeriodEnd = subscription.CancelAtPeriodEnd,
+            CurrentPeriodStartUtc = subscription.CurrentPeriodStartUtc,
+            CurrentPeriodEndUtc = subscription.CurrentPeriodEndUtc,
+            TrialEndsAtUtc = subscription.TrialEndsAtUtc,
+            PlanName = subscription.SubscriptionPlan?.DisplayName ?? subscription.SubscriptionPlan?.Name,
+            ExternalSubscriptionId = subscription.ExternalSubscriptionId,
+            ExternalPriceId = subscription.ExternalPriceId
+        };
+    }
+
+    private Task ApplyProviderSnapshotAsync(TenantSubscription subscription, BillingProviderSubscriptionSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+
+        subscription.ExternalSubscriptionId = snapshot.SubscriptionId;
+        subscription.ExternalPriceId = snapshot.PriceId ?? subscription.ExternalPriceId;
+        subscription.CurrentPeriodStartUtc = snapshot.CurrentPeriodStartUtc;
+        subscription.CurrentPeriodEndUtc = snapshot.CurrentPeriodEndUtc;
+        subscription.TrialEndsAtUtc = snapshot.TrialEndsAtUtc;
+        subscription.CancelAtPeriodEnd = snapshot.CancelAtPeriodEnd;
+        subscription.LastProviderEventCreatedAtUtc = snapshot.EventCreatedAtUtc;
+
+        subscription.Status = MapSubscriptionStatus(
+            subscription.CancelAtPeriodEnd ? "customer.subscription.updated" : string.Empty,
+            JsonSerializer.SerializeToElement(new
+            {
+                status = snapshot.Status,
+                cancel_at_period_end = snapshot.CancelAtPeriodEnd
+            }));
+
+        if (subscription.Status == SubscriptionStatus.Cancelled.ToStorageValue())
+        {
+            subscription.EndedAtUtc = DateTimeOffset.UtcNow;
+        }
+
+        return Task.CompletedTask;
     }
 
     private bool TryGetTenant(out Guid companyId, out string error)

@@ -8,6 +8,7 @@ JSON Web Tokens provide stateless access tokens for authenticated API requests.
 
 - Keep access token lifetimes short.
 - Use refresh tokens for session continuation.
+- Rotate refresh tokens on use and retain revocation metadata for session management.
 - Validate issuer, audience, signing key, expiration, and token integrity.
 - Do not place secrets, private guest content, or sensitive operational data in token claims.
 - Include only stable identity and authorization context required by the API.
@@ -20,6 +21,7 @@ Recommended claim categories include:
 - Company identifier.
 - Role or permission references.
 - Token identifier when revocation tracking is needed.
+- Session identifier when session-level revocation or inspection is needed.
 
 ## Security Notes
 

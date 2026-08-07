@@ -1,0 +1,23 @@
+.sf-account-checkbox {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.sf-account-checkbox input {
+  width: auto;
+}
+
+.sf-account-session-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.sf-account-session-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 0.85rem 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.08);
+}

@@ -3,6 +3,7 @@ namespace StayFlow.Api.DTOs.Billing;
 public sealed class CreateCheckoutSessionRequest
 {
     public string PlanName { get; init; } = string.Empty;
+    public int? TrialDays { get; init; }
 }
 
 public sealed class CreateCheckoutSessionResponse
@@ -28,6 +29,36 @@ public sealed class BillingSubscriptionResponse
     public string? PlanName { get; init; }
     public string? ExternalSubscriptionId { get; init; }
     public string? ExternalPriceId { get; init; }
+}
+
+public sealed class ChangeSubscriptionPlanRequest
+{
+    public string PlanName { get; init; } = string.Empty;
+}
+
+public sealed class CancelSubscriptionRequest
+{
+    public bool AtPeriodEnd { get; init; } = true;
+}
+
+public sealed class UsageSummaryResponse
+{
+    public Guid CompanyId { get; init; }
+    public DateTimeOffset GeneratedAtUtc { get; init; }
+    public IReadOnlyCollection<UsageMetricSummaryDto> Metrics { get; init; } = [];
+}
+
+public sealed class UsageMetricSummaryDto
+{
+    public string Metric { get; init; } = string.Empty;
+    public string EntitlementKey { get; init; } = string.Empty;
+    public long Used { get; init; }
+    public long? Limit { get; init; }
+    public long? Remaining { get; init; }
+    public bool IsUnlimited { get; init; }
+    public string Unit { get; init; } = string.Empty;
+    public DateTimeOffset PeriodStartUtc { get; init; }
+    public DateTimeOffset PeriodEndUtc { get; init; }
 }
 
 public sealed class TenantInvoiceDto
