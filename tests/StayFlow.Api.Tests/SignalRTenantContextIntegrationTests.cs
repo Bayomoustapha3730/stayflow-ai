@@ -282,6 +282,7 @@ public sealed class SignalRTestAppFactory : WebApplicationFactory<Program>
     public const string JwtSigningKey = "development-only-secret-key-change-before-production";
     private static readonly InMemoryDatabaseRoot DatabaseRoot = new();
     private static int _seeded;
+    private static readonly ManualResetEventSlim _seedCompleted = new(false);
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -311,17 +312,20 @@ public sealed class SignalRTestAppFactory : WebApplicationFactory<Program>
 
     public void EnsureSeeded()
     {
-        if (Interlocked.Exchange(ref _seeded, 1) == 1)
+        if (Interlocked.Exchange(ref _seeded, 1) == 0)
         {
-            return;
+            _ = Server;
+
+            using var scope = Services.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            dbContext.Database.EnsureCreated();
+            SeedConversations(dbContext);
+            _seedCompleted.Set();
         }
-
-        _ = Server;
-
-        using var scope = Services.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-        dbContext.Database.EnsureCreated();
-        SeedConversations(dbContext);
+        else
+        {
+            _seedCompleted.Wait();
+        }
     }
 
     private static void SeedConversations(ApplicationDbContext dbContext)
