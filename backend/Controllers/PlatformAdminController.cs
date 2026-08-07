@@ -197,7 +197,7 @@ public sealed class PlatformAdminController(
             {
                 AuditLogId = item.Id,
                 Action = item.Action,
-                Details = item.Details,
+                Details = item.Details ?? string.Empty,
                 CreatedAt = item.CreatedAt
             })
             .ToListAsync(cancellationToken);

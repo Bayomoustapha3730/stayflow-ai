@@ -405,6 +405,9 @@ public sealed class OnboardingServiceTests
 
         public Task<ApiResponse<object>> AcceptAsync(AcceptOrganizationInvitationRequest request, CancellationToken cancellationToken)
             => Task.FromResult(ApiResponse<object>.Fail("not implemented"));
+
+        public Task<ApiResponse<object>> RejectAsync(RejectOrganizationInvitationRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(ApiResponse<object>.Fail("not implemented"));
     }
 
     private sealed class FakePropertyKnowledgeService : IPropertyKnowledgeService
