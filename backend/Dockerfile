@@ -17,7 +17,7 @@ ENV ASPNETCORE_URLS=http://+:8080 \
     DOTNET_EnableDiagnostics=0
 EXPOSE 8080
 
-RUN addgroup --system --gid 10001 app && adduser --system --uid 10001 --ingroup app app
+RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app app
 USER app
 
 COPY --from=build /app/publish .
