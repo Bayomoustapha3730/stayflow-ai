@@ -222,6 +222,27 @@ public sealed class ChatService(
                 IsMock = true
             };
         }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Guest AI orchestration failed. ConversationId={ConversationId} CompanyId={CompanyId}",
+                conversation.Id,
+                companyId);
+
+            replyResult = new AIReplyOrchestrationResult
+            {
+                Confidence = 0,
+                Output = AIOrchestrationSafeMessages.HostAssistanceRequired,
+                Provider = "Fallback",
+                RequiresHumanReview = true,
+                FallbackUsed = true,
+                ContextMessageCount = conversation.Messages.Count,
+                GeneratedAt = DateTimeOffset.UtcNow,
+                DurationMilliseconds = 0,
+                IsMock = true
+            };
+        }
 
         if (replyResult is null)
         {
@@ -232,6 +253,17 @@ public sealed class ChatService(
 
         UpdateConversationStatusFromAI(conversation, orchestration);
         var aiMessage = await conversationService.AddAIMessageAsync(conversation.Id, orchestration.GuestSafeMessage, orchestration, cancellationToken);
+        if (!aiMessage.Success || aiMessage.Data is null)
+        {
+            logger.LogWarning(
+                "Guest AI response could not be stored. ConversationId={ConversationId} CompanyId={CompanyId} Reason={Reason}",
+                conversation.Id,
+                companyId,
+                aiMessage.Message);
+
+            return ApiResponse<ChatMessageResponse>.Fail(aiMessage.Message, aiMessage.Errors);
+        }
+
         await AuditAsync(companyId, conversation.Id, request.GuestId, orchestration.Outcome == AIOrchestrationOutcome.Responded ? "ChatAIResponseStored" : "ChatEscalated", request.Channel, orchestration.Outcome, orchestration.ProviderMetadata?.ProviderName, cancellationToken);
 
         return ApiResponse<ChatMessageResponse>.Ok(

@@ -229,6 +229,23 @@ public sealed class ChatServiceTests
     }
 
     [Fact]
+    public async Task SendGuestMessageAsync_WhenAIOrchestratorThrows_FallsBackToHostAssistance()
+    {
+        var fixture = new Fixture();
+        fixture.ReplyOrchestrator.ShouldThrow = true;
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(
+            fixture.Request("What time is check-in?"),
+            CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        Assert.Equal(ConversationStatus.AwaitingHost, response.Data.ConversationStatus);
+        Assert.True(response.Data.RequiresHostAttention);
+        Assert.Equal("I need a host or support team member to help with this request.", response.Data.AssistantMessage!.Content);
+    }
+
+    [Fact]
     public async Task EscalateGuestConversationAsync_AlreadyEscalatedReturnsSuccessWithoutDuplicateHostMessage()
     {
         var fixture = new Fixture();
@@ -381,6 +398,7 @@ public sealed class ChatServiceTests
     private sealed class FakeAIReplyOrchestrator : IAIReplyOrchestrator
     {
         public bool WasCalled { get; set; }
+        public bool ShouldThrow { get; set; }
         public AIReplyOperation? LastOperation { get; private set; }
         public AIReplyOrchestrationResult Result { get; set; } = new()
         {
@@ -399,6 +417,12 @@ public sealed class ChatServiceTests
         {
             WasCalled = true;
             LastOperation = request.Operation;
+
+            if (ShouldThrow)
+            {
+                throw new InvalidOperationException("Simulated orchestrator failure");
+            }
+
             return Task.FromResult<AIReplyOrchestrationResult?>(new AIReplyOrchestrationResult
             {
                 ConversationId = request.ConversationId,
