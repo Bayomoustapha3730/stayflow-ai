@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createAuthApi } from "../api/authApi";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { HostConsoleNav, HostLoginPanel } from "../components/host";
@@ -18,6 +18,18 @@ function formatDateTime(value?: string | null): string {
 
 export function AccountSettingsPage() {
   const auth = useHostAuth();
+  const {
+    accessToken,
+    currentUser,
+    isAuthenticated,
+    isSigningIn,
+    error: authError,
+    login,
+    logout,
+    clearError,
+    refreshCurrentUser,
+    setCurrentUserProfile
+  } = auth;
   const [fullName, setFullName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [preferredLanguage, setPreferredLanguage] = useState("en");
@@ -38,52 +50,59 @@ export function AccountSettingsPage() {
 
   const http = useMemo(() => new HttpClient({
     baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
-    getAccessToken: () => auth.accessToken
-  }), [auth.accessToken]);
+    getAccessToken: () => accessToken
+  }), [accessToken]);
   const api = useMemo(() => createAuthApi(http), [http]);
 
   useEffect(() => {
-    if (!auth.currentUser) {
+    if (!currentUser) {
       return;
     }
 
-    setFullName(auth.currentUser.fullName);
-    setPhoneNumber(auth.currentUser.phoneNumber);
-    setPreferredLanguage(auth.currentUser.preferredLanguage);
-    setTimeZone(auth.currentUser.timeZone);
-    setEmailNotificationsEnabled(auth.currentUser.emailNotificationsEnabled);
-    setSecurityNotificationsEnabled(auth.currentUser.securityNotificationsEnabled);
-    setProductUpdatesEnabled(auth.currentUser.productUpdatesEnabled);
-  }, [auth.currentUser]);
+    setFullName(currentUser.fullName);
+    setPhoneNumber(currentUser.phoneNumber);
+    setPreferredLanguage(currentUser.preferredLanguage);
+    setTimeZone(currentUser.timeZone);
+    setEmailNotificationsEnabled(currentUser.emailNotificationsEnabled);
+    setSecurityNotificationsEnabled(currentUser.securityNotificationsEnabled);
+    setProductUpdatesEnabled(currentUser.productUpdatesEnabled);
+  }, [currentUser]);
 
-  useEffect(() => {
-    if (!auth.isAuthenticated) {
+  const loadSessions = useCallback(async () => {
+    if (!isAuthenticated) {
       setSessions([]);
       return;
     }
 
     setIsLoadingSessions(true);
-    void api.listSessions()
-      .then((items) => setSessions(items))
-      .catch((failure) => {
-        if (failure instanceof ApiError && failure.status === 401) {
-          auth.logout();
-          return;
-        }
 
-        setError(failure instanceof Error ? failure.message : "Unable to load sessions.");
-      })
-      .finally(() => setIsLoadingSessions(false));
-  }, [api, auth]);
+    try {
+      const items = await api.listSessions();
+      setSessions(items);
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 401) {
+        logout();
+        return;
+      }
 
-  if (!auth.isAuthenticated) {
+      setError(failure instanceof Error ? failure.message : "Unable to load sessions.");
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, [api, isAuthenticated, logout]);
+
+  useEffect(() => {
+    void loadSessions();
+  }, [loadSessions]);
+
+  if (!isAuthenticated) {
     return (
       <div className="sf-host-login-shell">
         <HostLoginPanel
-          isSigningIn={auth.isSigningIn}
-          error={auth.error}
-          onLogin={auth.login}
-          onClearError={auth.clearError}
+          isSigningIn={isSigningIn}
+          error={authError}
+          onLogin={login}
+          onClearError={clearError}
         />
       </div>
     );
@@ -99,8 +118,8 @@ export function AccountSettingsPage() {
             <p className="sf-host-muted-note">Manage your profile, session security, and notification preferences.</p>
           </div>
           <div className="sf-organization-header-actions">
-            <button type="button" onClick={() => void auth.refreshCurrentUser()}>Refresh profile</button>
-            <button type="button" onClick={() => auth.logout()}>Sign out</button>
+            <button type="button" onClick={() => void refreshCurrentUser()}>Refresh profile</button>
+            <button type="button" onClick={() => logout()}>Sign out</button>
           </div>
         </header>
 
@@ -116,7 +135,7 @@ export function AccountSettingsPage() {
         />
 
         <div className="sf-organization-access-note">
-          Signed in as: <strong>{auth.currentUser?.fullName ?? "Host"}</strong> ({auth.currentUser?.organizationRole ?? "Unknown role"})
+          Signed in as: <strong>{currentUser?.fullName ?? "Host"}</strong> ({currentUser?.organizationRole ?? "Unknown role"})
         </div>
 
         {error ? <div className="sf-host-inline-error" role="alert"><p>{error}</p></div> : null}
@@ -131,7 +150,7 @@ export function AccountSettingsPage() {
             </label>
             <label>
               Email
-              <input value={auth.currentUser?.email ?? ""} disabled />
+              <input value={currentUser?.email ?? ""} disabled />
             </label>
             <label>
               Phone Number
@@ -174,12 +193,12 @@ export function AccountSettingsPage() {
                   productUpdatesEnabled
                 })
                   .then((profile) => {
-                    auth.setCurrentUserProfile(profile);
+                    setCurrentUserProfile(profile);
                     setMessage("Profile updated.");
                   })
                   .catch((failure) => {
                     if (failure instanceof ApiError && failure.status === 401) {
-                      auth.logout();
+                      logout();
                       return;
                     }
 
@@ -194,8 +213,8 @@ export function AccountSettingsPage() {
 
           <article className="sf-organization-card">
             <h2>Security</h2>
-            <p>Email verification: <strong>{auth.currentUser?.isEmailVerified ? "Verified" : "Pending"}</strong></p>
-            {!auth.currentUser?.isEmailVerified ? (
+            <p>Email verification: <strong>{currentUser?.isEmailVerified ? "Verified" : "Pending"}</strong></p>
+            {!currentUser?.isEmailVerified ? (
               <button
                 type="button"
                 disabled={isSendingVerification}
@@ -207,7 +226,7 @@ export function AccountSettingsPage() {
                     .then(() => setMessage("Verification email sent."))
                     .catch((failure) => {
                       if (failure instanceof ApiError && failure.status === 401) {
-                        auth.logout();
+                        logout();
                         return;
                       }
 
@@ -250,10 +269,11 @@ export function AccountSettingsPage() {
                     setNewPassword("");
                     setConfirmPassword("");
                     setMessage("Password changed. Other sessions were revoked.");
+                    void loadSessions();
                   })
                   .catch((failure) => {
                     if (failure instanceof ApiError && failure.status === 401) {
-                      auth.logout();
+                      logout();
                       return;
                     }
 
@@ -286,12 +306,12 @@ export function AccountSettingsPage() {
                       setMessage(null);
                       void api.revokeSession(session.sessionId)
                         .then(() => {
-                          setSessions((current) => current.filter((item) => item.sessionId !== session.sessionId));
+                          void loadSessions();
                           setMessage(session.isCurrent ? "Current refresh session revoked. Sign in again when needed." : "Session revoked.");
                         })
                         .catch((failure) => {
                           if (failure instanceof ApiError && failure.status === 401) {
-                            auth.logout();
+                            logout();
                             return;
                           }
 
@@ -311,12 +331,12 @@ export function AccountSettingsPage() {
                 setMessage(null);
                 void api.revokeAllSessions()
                   .then(() => {
-                    setSessions([]);
+                    void loadSessions();
                     setMessage("All refresh sessions revoked.");
                   })
                   .catch((failure) => {
                     if (failure instanceof ApiError && failure.status === 401) {
-                      auth.logout();
+                      logout();
                       return;
                     }
 

@@ -30,6 +30,7 @@ public sealed class DevelopmentSeedService(
     private const string DemoUserFullName = "Demo User";
     private const string DemoReservationReference = "DEMO-2026-001";
     private const string DemoRoleName = "Demo Administrator";
+    private const string DemoOrganizationRole = nameof(OrganizationRole.Owner);
 
     public async Task SeedAsync(CancellationToken cancellationToken)
     {
@@ -49,6 +50,8 @@ public sealed class DevelopmentSeedService(
         await EnsureDemoWhatsAppIntegrationAsync(cancellationToken);
         await EnsureDemoWhatsAppTemplatesAsync(cancellationToken);
         await EnsureDemoUserRoleAsync(demoUser.Id, role.Id, cancellationToken);
+        await EnsureDemoOrganizationMembershipAsync(demoUser.Id, cancellationToken);
+        await EnsureDemoCompanyOwnershipAsync(demoUser.Id, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -71,9 +74,48 @@ public sealed class DevelopmentSeedService(
         user.PasswordHash = passwordHasher.HashPassword(demoPassword);
         user.IsEmailVerified = true;
         user.IsActive = true;
-        user.Role = role.Name;
+        user.Role = DemoOrganizationRole;
 
         return user;
+    }
+
+    private async Task EnsureDemoOrganizationMembershipAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var membership = await dbContext.OrganizationMembers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(member => member.CompanyId == SeedData.DemoCompanyId && member.UserId == userId, cancellationToken);
+
+        if (membership is null)
+        {
+            membership = new OrganizationMember
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = SeedData.DemoCompanyId,
+                UserId = userId,
+                JoinedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.OrganizationMembers.Add(membership);
+        }
+
+        membership.Role = DemoOrganizationRole;
+        membership.Status = OrganizationMemberStatus.Active.ToStorageValue();
+        if (membership.JoinedAt == default)
+        {
+            membership.JoinedAt = DateTimeOffset.UtcNow;
+        }
+    }
+
+    private async Task EnsureDemoCompanyOwnershipAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var company = await dbContext.Companies
+            .FirstOrDefaultAsync(item => item.Id == SeedData.DemoCompanyId, cancellationToken);
+
+        if (company is null)
+        {
+            return;
+        }
+
+        company.OwnerUserId = userId;
     }
 
     private async Task EnsureDemoGuestAsync(CancellationToken cancellationToken)

@@ -12,8 +12,10 @@ public sealed class DevelopmentSeedServiceTests
     private static readonly Guid DemoDemoUserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid DemoDemoGuestId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid DemoDemoReservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private const string DemoOrganizationRole = "Owner";
 
     private const string DemoUserEmail = "demo.user@stayflow.local";
+    private const string DemoUserFullName = "Demo User";
     private const string TestPassword = "TestPassword123!";
 
     [Fact]
@@ -104,6 +106,34 @@ public sealed class DevelopmentSeedServiceTests
         {
             Assert.Contains(permission, rolePermissionNames);
         }
+    }
+
+    [Fact]
+    public async Task SeedAsync_DemoUserHasActiveOrganizationMembershipAsOwner()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?> { ["DevelopmentSeed:DemoPassword"] = TestPassword });
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        var membership = await dbContext.OrganizationMembers
+            .SingleOrDefaultAsync(item => item.CompanyId == SeedData.DemoCompanyId && item.UserId == DemoDemoUserId);
+
+        Assert.NotNull(membership);
+        Assert.Equal(DemoOrganizationRole, membership.Role);
+        Assert.Equal(OrganizationMemberStatus.Active.ToStorageValue(), membership.Status);
+    }
+
+    [Fact]
+    public async Task SeedAsync_AssignsDemoUserAsDemoCompanyOwner()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?> { ["DevelopmentSeed:DemoPassword"] = TestPassword });
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        var company = await dbContext.Companies.SingleAsync(item => item.Id == SeedData.DemoCompanyId);
+        Assert.Equal(DemoDemoUserId, company.OwnerUserId);
     }
 
     [Fact]
@@ -267,6 +297,74 @@ public sealed class DevelopmentSeedServiceTests
         Assert.NotNull(await dbContext.Guests.FirstOrDefaultAsync(g => g.Id == DemoDemoGuestId));
         Assert.NotNull(await dbContext.Reservations.FirstOrDefaultAsync(r => r.Id == DemoDemoReservationId));
         Assert.True(await dbContext.UserRoles.AnyAsync(userRole => userRole.UserId == DemoDemoUserId));
+        Assert.True(await dbContext.OrganizationMembers.AnyAsync(member => member.CompanyId == SeedData.DemoCompanyId
+            && member.UserId == DemoDemoUserId
+            && member.Role == DemoOrganizationRole
+            && member.Status == OrganizationMemberStatus.Active.ToStorageValue()));
+    }
+
+    [Fact]
+    public async Task SeedAsync_RepairsExistingDemoUserMissingOrganizationMembership()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        dbContext.Users.Add(new User
+        {
+            Id = DemoDemoUserId,
+            CompanyId = SeedData.DemoCompanyId,
+            Email = DemoUserEmail,
+            FullName = DemoUserFullName,
+            PasswordHash = "old-hash",
+            Role = "Administrator",
+            IsActive = true
+        });
+        await dbContext.SaveChangesAsync();
+
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?> { ["DevelopmentSeed:DemoPassword"] = TestPassword });
+        await seeder.SeedAsync(CancellationToken.None);
+
+        var membership = await dbContext.OrganizationMembers.SingleAsync(item => item.CompanyId == SeedData.DemoCompanyId && item.UserId == DemoDemoUserId);
+        Assert.Equal(DemoOrganizationRole, membership.Role);
+        Assert.Equal(OrganizationMemberStatus.Active.ToStorageValue(), membership.Status);
+
+        var company = await dbContext.Companies.SingleAsync(item => item.Id == SeedData.DemoCompanyId);
+        Assert.Equal(DemoDemoUserId, company.OwnerUserId);
+    }
+
+    [Fact]
+    public async Task SeedAsync_RepairsExistingDemoMembershipWithoutCreatingDuplicate()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        dbContext.Users.Add(new User
+        {
+            Id = DemoDemoUserId,
+            CompanyId = SeedData.DemoCompanyId,
+            Email = DemoUserEmail,
+            FullName = DemoUserFullName,
+            PasswordHash = "old-hash",
+            Role = "Support",
+            IsActive = true
+        });
+        dbContext.OrganizationMembers.Add(new OrganizationMember
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = SeedData.DemoCompanyId,
+            UserId = DemoDemoUserId,
+            Role = OrganizationRole.Support.ToStorageValue(),
+            Status = OrganizationMemberStatus.Removed.ToStorageValue(),
+            JoinedAt = DateTimeOffset.UtcNow.AddDays(-30)
+        });
+        await dbContext.SaveChangesAsync();
+
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?> { ["DevelopmentSeed:DemoPassword"] = TestPassword });
+        await seeder.SeedAsync(CancellationToken.None);
+
+        var memberships = await dbContext.OrganizationMembers
+            .Where(item => item.CompanyId == SeedData.DemoCompanyId && item.UserId == DemoDemoUserId)
+            .ToListAsync();
+
+        var membership = Assert.Single(memberships);
+        Assert.Equal(DemoOrganizationRole, membership.Role);
+        Assert.Equal(OrganizationMemberStatus.Active.ToStorageValue(), membership.Status);
     }
 
     [Fact]

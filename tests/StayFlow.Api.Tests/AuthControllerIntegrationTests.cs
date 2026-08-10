@@ -37,6 +37,31 @@ public sealed class AuthControllerIntegrationTests : IClassFixture<SignalRTestAp
         Assert.Equal("demo.user@stayflow.local", payload.RootElement.GetProperty("data").GetProperty("email").GetString());
         Assert.True(payload.RootElement.GetProperty("data").TryGetProperty("preferredLanguage", out _));
         Assert.True(payload.RootElement.GetProperty("data").TryGetProperty("timeZone", out _));
+        Assert.Equal("Owner", payload.RootElement.GetProperty("data").GetProperty("organizationRole").GetString());
+    }
+
+    [Fact]
+    public async Task Me_WithoutOrganizationMembership_DoesNotInventRole()
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var membership = dbContext.OrganizationMembers.FirstOrDefault(item => item.CompanyId == DemoCompanyId && item.UserId == DemoUserId);
+        if (membership is not null)
+        {
+            dbContext.OrganizationMembers.Remove(membership);
+            dbContext.SaveChanges();
+        }
+
+        using var client = CreateClientWithToken(DemoCompanyId, DemoUserId, ["auth.me"]);
+
+        using var response = await client.GetAsync("/auth/me");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(JsonValueKind.Null, payload.RootElement.GetProperty("data").GetProperty("organizationRole").ValueKind);
+
+        EnsureOrganizationMembershipExists();
     }
 
     [Fact]
@@ -93,30 +118,69 @@ public sealed class AuthControllerIntegrationTests : IClassFixture<SignalRTestAp
         using var scope = factory.Services.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-        if (dbContext.Users.Any(user => user.Id == DemoUserId))
+        var user = dbContext.Users.FirstOrDefault(item => item.Id == DemoUserId);
+        if (user is null)
         {
-            return;
+            user = new User
+            {
+                Id = DemoUserId,
+                CompanyId = DemoCompanyId,
+                FullName = "Demo User",
+                Email = "demo.user@stayflow.local",
+                PhoneNumber = "+254700000001",
+                PreferredLanguage = "en",
+                TimeZone = "UTC",
+                Role = "Owner",
+                PasswordHash = "integration-only-placeholder",
+                IsEmailVerified = true,
+                IsActive = true,
+                EmailNotificationsEnabled = true,
+                SecurityNotificationsEnabled = true,
+                ProductUpdatesEnabled = false
+            };
+            dbContext.Users.Add(user);
         }
 
-        dbContext.Users.Add(new User
+        if (!dbContext.OrganizationMembers.Any(item => item.CompanyId == DemoCompanyId && item.UserId == DemoUserId && item.Status == OrganizationMemberStatus.Active.ToStorageValue()))
         {
-            Id = DemoUserId,
-            CompanyId = DemoCompanyId,
-            FullName = "Demo User",
-            Email = "demo.user@stayflow.local",
-            PhoneNumber = "+254700000001",
-            PreferredLanguage = "en",
-            TimeZone = "UTC",
-            Role = "Administrator",
-            PasswordHash = "integration-only-placeholder",
-            IsEmailVerified = true,
-            IsActive = true,
-            EmailNotificationsEnabled = true,
-            SecurityNotificationsEnabled = true,
-            ProductUpdatesEnabled = false
-        });
+            dbContext.OrganizationMembers.Add(new OrganizationMember
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = DemoCompanyId,
+                UserId = DemoUserId,
+                Role = OrganizationRole.Owner.ToStorageValue(),
+                Status = OrganizationMemberStatus.Active.ToStorageValue(),
+                JoinedAt = DateTimeOffset.UtcNow.AddDays(-10)
+            });
+        }
+
+        var company = dbContext.Companies.FirstOrDefault(item => item.Id == DemoCompanyId);
+        if (company is not null)
+        {
+            company.OwnerUserId = DemoUserId;
+        }
 
         dbContext.SaveChanges();
+    }
+
+    private void EnsureOrganizationMembershipExists()
+    {
+        using var scope = factory.Services.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        if (!dbContext.OrganizationMembers.Any(item => item.CompanyId == DemoCompanyId && item.UserId == DemoUserId && item.Status == OrganizationMemberStatus.Active.ToStorageValue()))
+        {
+            dbContext.OrganizationMembers.Add(new OrganizationMember
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = DemoCompanyId,
+                UserId = DemoUserId,
+                Role = OrganizationRole.Owner.ToStorageValue(),
+                Status = OrganizationMemberStatus.Active.ToStorageValue(),
+                JoinedAt = DateTimeOffset.UtcNow.AddDays(-10)
+            });
+            dbContext.SaveChanges();
+        }
     }
 
     private static string CreateJwtToken(Guid companyId, Guid userId, IReadOnlyCollection<string> permissions)
