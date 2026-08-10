@@ -193,30 +193,9 @@ builder.Services.AddRateLimiter(options =>
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("StayFlowFrontendDevelopment", policy =>
+    options.AddPolicy(CorsPolicyConfiguration.PolicyName, policy =>
     {
-        var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
-        if (origins.Length == 0)
-        {
-            origins =
-            [
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-                "http://localhost:5174",
-                "http://127.0.0.1:5174"
-            ];
-        }
-
-        if (origins.Any(origin => origin == "*"))
-        {
-            throw new InvalidOperationException("Cors:AllowedOrigins must not contain wildcard '*' when credentials are enabled.");
-        }
-
-        policy
-            .WithOrigins(origins)
-            .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-            .WithHeaders("Authorization", "Content-Type", "X-Correlation-Id")
-            .AllowCredentials();
+        CorsPolicyConfiguration.ConfigurePolicy(policy, builder.Configuration, builder.Environment);
     });
 });
 
@@ -245,7 +224,7 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 
 app.UseRouting();
 
-app.UseCors("StayFlowFrontendDevelopment");
+app.UseCors(CorsPolicyConfiguration.PolicyName);
 app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())
@@ -275,7 +254,7 @@ app.UseMiddleware<FeatureEntitlementMiddleware>();
 app.MapControllers();
 app.MapHub<ConversationHub>("/hubs/conversations")
 .RequireAuthorization()
-.RequireCors("StayFlowFrontendDevelopment");
+.RequireCors(CorsPolicyConfiguration.PolicyName);
 
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
@@ -325,7 +304,7 @@ public partial class Program
             throw new InvalidOperationException("ConnectionStrings:DefaultConnection must not point to localhost in production.");
         }
 
-        var origins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
+        var origins = CorsPolicyConfiguration.ResolveAllowedOrigins(configuration, environment);
         if (origins.Length == 0)
         {
             throw new InvalidOperationException("Cors:AllowedOrigins must contain at least one production origin.");
