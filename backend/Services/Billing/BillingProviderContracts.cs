@@ -28,6 +28,13 @@ public sealed class BillingOptions
     public string CheckoutCancelUrl { get; set; } = "https://example.invalid/cancel";
     public string BillingPortalReturnUrl { get; set; } = "https://example.invalid/billing";
     public Dictionary<string, string> PlanPriceIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, long> PlanMonthlyAmountsMinor { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> PlanCurrencies { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, int> PlanTrialDays { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> CountryCurrencies { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string[]> CountryPaymentMethods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string[] DefaultPaymentMethods { get; set; } = ["Card"];
+    public string DefaultCurrency { get; set; } = "USD";
     public int WebhookToleranceSeconds { get; set; } = 300;
     public int WebhookMaxBodyBytes { get; set; } = 262144;
 }

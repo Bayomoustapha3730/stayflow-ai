@@ -71,7 +71,7 @@ public sealed class BillingService(
             EntityName = nameof(TenantSubscription),
             EntityId = companyId,
             Action = "BillingCheckoutCreated",
-            Details = $"{{\"companyId\":\"{companyId}\",\"plan\":\"{planName}\"}}",
+            Details = $"{{\"companyId\":\"{companyId}\",\"plan\":\"{planName}\",\"paymentMethod\":\"{(request.PaymentMethod ?? string.Empty).Trim()}\"}}",
             CreatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -181,17 +181,17 @@ public sealed class BillingService(
         });
     }
 
-    public async Task<ApiResponse<BillingSubscriptionResponse>> GetSubscriptionAsync(CancellationToken cancellationToken)
+    public async Task<ApiResponse<BillingSubscriptionResponse?>> GetSubscriptionAsync(CancellationToken cancellationToken)
     {
         if (!TryGetTenant(out var companyId, out var error))
         {
-            return ApiResponse<BillingSubscriptionResponse>.Fail(error);
+            return ApiResponse<BillingSubscriptionResponse?>.Fail(error);
         }
 
         var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
         if (!authorization.Success)
         {
-            return ApiResponse<BillingSubscriptionResponse>.Fail(authorization.Error);
+            return ApiResponse<BillingSubscriptionResponse?>.Fail(authorization.Error);
         }
 
         var subscription = await dbContext.TenantSubscriptions
@@ -201,10 +201,81 @@ public sealed class BillingService(
             .FirstOrDefaultAsync(item => item.CompanyId == companyId, cancellationToken);
         if (subscription is null)
         {
-            return ApiResponse<BillingSubscriptionResponse>.Fail("Subscription was not found.");
+            return ApiResponse<BillingSubscriptionResponse?>.Ok(null, "No active subscription.");
         }
 
-        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription));
+        return ApiResponse<BillingSubscriptionResponse?>.Ok(MapSubscriptionResponse(companyId, subscription));
+    }
+
+    public async Task<ApiResponse<IReadOnlyCollection<BillingPlanResponse>>> GetPlansAsync(CancellationToken cancellationToken)
+    {
+        if (!TryGetTenant(out var companyId, out var error))
+        {
+            return ApiResponse<IReadOnlyCollection<BillingPlanResponse>>.Fail(error);
+        }
+
+        var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
+        if (!authorization.Success)
+        {
+            return ApiResponse<IReadOnlyCollection<BillingPlanResponse>>.Fail(authorization.Error);
+        }
+
+        var company = await dbContext.Companies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
+        if (company is null)
+        {
+            return ApiResponse<IReadOnlyCollection<BillingPlanResponse>>.Fail("Organization was not found.");
+        }
+
+        var currentSubscription = await dbContext.TenantSubscriptions
+            .AsNoTracking()
+            .OrderByDescending(item => item.CurrentPeriodStartUtc)
+            .FirstOrDefaultAsync(item => item.CompanyId == companyId, cancellationToken);
+
+        var activePlans = await dbContext.SubscriptionPlans
+            .AsNoTracking()
+            .Include(plan => plan.Entitlements)
+            .Where(plan => plan.IsActive)
+            .OrderBy(plan => plan.SortOrder)
+            .ThenBy(plan => plan.DisplayName)
+            .ToListAsync(cancellationToken);
+
+        var options = billingOptions.Value;
+        var currency = ResolveCurrency(company.CountryCode, options);
+        var plans = activePlans
+            .Select(plan => MapPlanResponse(plan, currentSubscription?.SubscriptionPlanId == plan.Id, currency, options))
+            .ToList();
+
+        return ApiResponse<IReadOnlyCollection<BillingPlanResponse>>.Ok(plans);
+    }
+
+    public async Task<ApiResponse<IReadOnlyCollection<BillingPaymentOptionResponse>>> GetPaymentOptionsAsync(CancellationToken cancellationToken)
+    {
+        if (!TryGetTenant(out var companyId, out var error))
+        {
+            return ApiResponse<IReadOnlyCollection<BillingPaymentOptionResponse>>.Fail(error);
+        }
+
+        var authorization = await EnsureOwnerOrAdministratorAsync(cancellationToken);
+        if (!authorization.Success)
+        {
+            return ApiResponse<IReadOnlyCollection<BillingPaymentOptionResponse>>.Fail(authorization.Error);
+        }
+
+        var company = await dbContext.Companies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
+        if (company is null)
+        {
+            return ApiResponse<IReadOnlyCollection<BillingPaymentOptionResponse>>.Fail("Organization was not found.");
+        }
+
+        var methods = ResolvePaymentMethods(company.CountryCode, billingProvider.ProviderName, billingOptions.Value)
+            .Select(MapPaymentOption)
+            .ToList();
+
+        return ApiResponse<IReadOnlyCollection<BillingPaymentOptionResponse>>.Ok(methods);
     }
 
     public async Task<ApiResponse<BillingSubscriptionResponse>> ChangeSubscriptionPlanAsync(ChangeSubscriptionPlanRequest request, CancellationToken cancellationToken)
@@ -411,7 +482,17 @@ public sealed class BillingService(
             return ApiResponse<UsageSummaryResponse>.Fail(authorization.Error);
         }
 
-        var snapshot = await subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
+        var snapshot = await subscriptionEntitlementService.TryGetCurrentSnapshotAsync(companyId, cancellationToken);
+        if (snapshot is null)
+        {
+            return ApiResponse<UsageSummaryResponse>.Ok(new UsageSummaryResponse
+            {
+                CompanyId = companyId,
+                GeneratedAtUtc = DateTimeOffset.UtcNow,
+                Metrics = []
+            });
+        }
+
         var metrics = snapshot.Quotas
             .OrderBy(item => item.Metric)
             .Select(item => new UsageMetricSummaryDto
@@ -822,6 +903,120 @@ public sealed class BillingService(
             PlanName = subscription.SubscriptionPlan?.DisplayName ?? subscription.SubscriptionPlan?.Name,
             ExternalSubscriptionId = subscription.ExternalSubscriptionId,
             ExternalPriceId = subscription.ExternalPriceId
+        };
+    }
+
+    private static BillingPlanResponse MapPlanResponse(
+        SubscriptionPlan plan,
+        bool isCurrentPlan,
+        string currency,
+        BillingOptions options)
+    {
+        var propertyLimit = ReadQuotaLimit(plan, UsageMetric.Properties.ToQuotaEntitlementKey());
+        var teamLimit = ReadQuotaLimit(plan, UsageMetric.Users.ToQuotaEntitlementKey());
+        var aiRequestLimit = ReadQuotaLimit(plan, UsageMetric.AiRequests.ToQuotaEntitlementKey());
+        var whatsAppLimit = ReadQuotaLimit(plan, UsageMetric.WhatsAppMessages.ToQuotaEntitlementKey());
+
+        options.PlanMonthlyAmountsMinor.TryGetValue(plan.Name, out var amountByName);
+        options.PlanMonthlyAmountsMinor.TryGetValue(plan.DisplayName, out var amountByDisplay);
+
+        options.PlanTrialDays.TryGetValue(plan.Name, out var trialByName);
+        options.PlanTrialDays.TryGetValue(plan.DisplayName, out var trialByDisplay);
+
+        var amountMinor = amountByName > 0 ? amountByName : amountByDisplay > 0 ? amountByDisplay : (long?)null;
+        var trialDays = trialByName > 0 ? trialByName : trialByDisplay > 0 ? trialByDisplay : (int?)null;
+
+        return new BillingPlanResponse
+        {
+            Name = plan.Name,
+            DisplayName = string.IsNullOrWhiteSpace(plan.DisplayName) ? plan.Name : plan.DisplayName,
+            Description = plan.Description,
+            SortOrder = plan.SortOrder,
+            IsEnterprise = plan.IsEnterprise,
+            IsCurrentPlan = isCurrentPlan,
+            Currency = currency,
+            MonthlyAmountMinor = amountMinor,
+            TrialDays = trialDays,
+            PropertyLimit = propertyLimit,
+            TeamLimit = teamLimit,
+            AiRequestLimit = aiRequestLimit,
+            WhatsAppMessageLimit = whatsAppLimit
+        };
+    }
+
+    private static long? ReadQuotaLimit(SubscriptionPlan plan, string quotaKey)
+    {
+        var entitlement = plan.Entitlements.FirstOrDefault(item => string.Equals(item.Key, quotaKey, StringComparison.Ordinal));
+        if (entitlement is null || !entitlement.IsEnabled)
+        {
+            return null;
+        }
+
+        return entitlement.IsUnlimited ? null : entitlement.QuotaLimit;
+    }
+
+    private static string ResolveCurrency(string? countryCode, BillingOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(countryCode)
+            && options.CountryCurrencies.TryGetValue(countryCode.Trim().ToUpperInvariant(), out var countryCurrency)
+            && !string.IsNullOrWhiteSpace(countryCurrency))
+        {
+            return countryCurrency.Trim().ToUpperInvariant();
+        }
+
+        return string.IsNullOrWhiteSpace(options.DefaultCurrency)
+            ? "USD"
+            : options.DefaultCurrency.Trim().ToUpperInvariant();
+    }
+
+    private static IReadOnlyCollection<string> ResolvePaymentMethods(string? countryCode, string providerName, BillingOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(countryCode)
+            && options.CountryPaymentMethods.TryGetValue(countryCode.Trim().ToUpperInvariant(), out var methods)
+            && methods.Length > 0)
+        {
+            return methods;
+        }
+
+        if (string.Equals(providerName, "Stripe", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Card"];
+        }
+
+        if (string.Equals(countryCode, "KE", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(providerName, "Development", StringComparison.OrdinalIgnoreCase))
+        {
+            return ["Mpesa", "Card"];
+        }
+
+        return options.DefaultPaymentMethods.Length > 0
+            ? options.DefaultPaymentMethods
+            : ["Card"];
+    }
+
+    private static BillingPaymentOptionResponse MapPaymentOption(string key)
+    {
+        var normalized = key.Trim();
+        return normalized.ToLowerInvariant() switch
+        {
+            "mpesa" => new BillingPaymentOptionResponse
+            {
+                Key = "Mpesa",
+                Label = "M-Pesa",
+                Description = "Pay securely with M-Pesa mobile money."
+            },
+            "card" => new BillingPaymentOptionResponse
+            {
+                Key = "Card",
+                Label = "Pay by Card",
+                Description = "Pay using debit or credit card where supported."
+            },
+            _ => new BillingPaymentOptionResponse
+            {
+                Key = normalized,
+                Label = normalized,
+                Description = "Pay with the configured provider option."
+            }
         };
     }
 

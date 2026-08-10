@@ -5,6 +5,7 @@ namespace StayFlow.Api.Services;
 public interface ISubscriptionEntitlementService
 {
     Task<SubscriptionSnapshot> GetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken);
+    Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken);
     Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken);
     Task<UsageConsumptionResult> ConsumeQuotaAsync(Guid companyId, UsageMetric metric, long quantity, string idempotencyKey, CancellationToken cancellationToken);
     Task<SubscriptionSnapshot> UpdatePlanAsync(Guid companyId, Guid? planId, string? planName, string? notes, CancellationToken cancellationToken);

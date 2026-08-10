@@ -119,8 +119,14 @@ public sealed class BillingControllerTests
         public Task<ApiResponse<CreateBillingPortalSessionResponse>> CreatePaymentMethodManagementSessionAsync(CancellationToken cancellationToken)
             => Task.FromResult(ApiResponse<CreateBillingPortalSessionResponse>.Fail("not implemented"));
 
-        public Task<ApiResponse<BillingSubscriptionResponse>> GetSubscriptionAsync(CancellationToken cancellationToken)
-            => Task.FromResult(ApiResponse<BillingSubscriptionResponse>.Fail("not implemented"));
+        public Task<ApiResponse<BillingSubscriptionResponse?>> GetSubscriptionAsync(CancellationToken cancellationToken)
+            => Task.FromResult(ApiResponse<BillingSubscriptionResponse?>.Ok(null));
+
+        public Task<ApiResponse<IReadOnlyCollection<BillingPlanResponse>>> GetPlansAsync(CancellationToken cancellationToken)
+            => Task.FromResult(ApiResponse<IReadOnlyCollection<BillingPlanResponse>>.Ok([]));
+
+        public Task<ApiResponse<IReadOnlyCollection<BillingPaymentOptionResponse>>> GetPaymentOptionsAsync(CancellationToken cancellationToken)
+            => Task.FromResult(ApiResponse<IReadOnlyCollection<BillingPaymentOptionResponse>>.Ok([]));
 
         public Task<ApiResponse<BillingSubscriptionResponse>> ChangeSubscriptionPlanAsync(ChangeSubscriptionPlanRequest request, CancellationToken cancellationToken)
             => Task.FromResult(ApiResponse<BillingSubscriptionResponse>.Fail("not implemented"));

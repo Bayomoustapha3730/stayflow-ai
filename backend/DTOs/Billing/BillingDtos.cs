@@ -4,6 +4,7 @@ public sealed class CreateCheckoutSessionRequest
 {
     public string PlanName { get; init; } = string.Empty;
     public int? TrialDays { get; init; }
+    public string? PaymentMethod { get; init; }
 }
 
 public sealed class CreateCheckoutSessionResponse
@@ -29,6 +30,30 @@ public sealed class BillingSubscriptionResponse
     public string? PlanName { get; init; }
     public string? ExternalSubscriptionId { get; init; }
     public string? ExternalPriceId { get; init; }
+}
+
+public sealed class BillingPlanResponse
+{
+    public string Name { get; init; } = string.Empty;
+    public string DisplayName { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
+    public int SortOrder { get; init; }
+    public bool IsEnterprise { get; init; }
+    public bool IsCurrentPlan { get; init; }
+    public string Currency { get; init; } = string.Empty;
+    public long? MonthlyAmountMinor { get; init; }
+    public int? TrialDays { get; init; }
+    public long? PropertyLimit { get; init; }
+    public long? TeamLimit { get; init; }
+    public long? AiRequestLimit { get; init; }
+    public long? WhatsAppMessageLimit { get; init; }
+}
+
+public sealed class BillingPaymentOptionResponse
+{
+    public string Key { get; init; } = string.Empty;
+    public string Label { get; init; } = string.Empty;
+    public string Description { get; init; } = string.Empty;
 }
 
 public sealed class ChangeSubscriptionPlanRequest

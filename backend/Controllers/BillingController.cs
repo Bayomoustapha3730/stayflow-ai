@@ -46,9 +46,25 @@ public sealed class BillingController(
 
     [HttpGet("subscription")]
     [Authorize(Policy = OrganizationPolicyNames.Administrator)]
-    public async Task<ActionResult<ApiResponse<BillingSubscriptionResponse>>> GetSubscription(CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<BillingSubscriptionResponse?>>> GetSubscription(CancellationToken cancellationToken)
     {
         var response = await billingService.GetSubscriptionAsync(cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpGet("plans")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<BillingPlanResponse>>>> GetPlans(CancellationToken cancellationToken)
+    {
+        var response = await billingService.GetPlansAsync(cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpGet("payment-options")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<BillingPaymentOptionResponse>>>> GetPaymentOptions(CancellationToken cancellationToken)
+    {
+        var response = await billingService.GetPaymentOptionsAsync(cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);
     }
 

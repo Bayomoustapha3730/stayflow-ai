@@ -1,6 +1,7 @@
 export interface CreateCheckoutSessionRequest {
   planName: string;
   trialDays?: number;
+  paymentMethod?: string;
 }
 
 export interface CreateCheckoutSessionResponse {
@@ -23,6 +24,28 @@ export interface BillingSubscriptionResponse {
   planName?: string | null;
   externalSubscriptionId?: string | null;
   externalPriceId?: string | null;
+}
+
+export interface BillingPlanResponse {
+  name: string;
+  displayName: string;
+  description: string;
+  sortOrder: number;
+  isEnterprise: boolean;
+  isCurrentPlan: boolean;
+  currency: string;
+  monthlyAmountMinor?: number | null;
+  trialDays?: number | null;
+  propertyLimit?: number | null;
+  teamLimit?: number | null;
+  aiRequestLimit?: number | null;
+  whatsAppMessageLimit?: number | null;
+}
+
+export interface BillingPaymentOptionResponse {
+  key: string;
+  label: string;
+  description: string;
 }
 
 export interface TenantInvoiceDto {

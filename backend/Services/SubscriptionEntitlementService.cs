@@ -23,6 +23,23 @@ public sealed class SubscriptionEntitlementService(
         return await BuildSnapshotAsync(subscription, cancellationToken);
     }
 
+    public async Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken)
+    {
+        var subscription = await dbContext.TenantSubscriptions
+            .Include(item => item.SubscriptionPlan)
+            .ThenInclude(plan => plan.Entitlements)
+            .OrderByDescending(item => item.CurrentPeriodStartUtc)
+            .FirstOrDefaultAsync(item => item.CompanyId == companyId
+                && ActiveStatuses.Contains(item.Status), cancellationToken);
+
+        if (subscription is null)
+        {
+            return null;
+        }
+
+        return await BuildSnapshotAsync(subscription, cancellationToken);
+    }
+
     public async Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(featureKey))

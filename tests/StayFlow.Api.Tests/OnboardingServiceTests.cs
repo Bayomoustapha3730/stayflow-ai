@@ -532,6 +532,9 @@ public sealed class OnboardingServiceTests
                 [],
                 []));
 
+        public Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyIdArg, CancellationToken cancellationToken)
+            => Task.FromResult<SubscriptionSnapshot?>(null);
+
         public Task EnsureFeatureEnabledAsync(Guid companyIdArg, string featureKey, CancellationToken cancellationToken)
             => Task.CompletedTask;
 

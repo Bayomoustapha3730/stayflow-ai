@@ -28,6 +28,11 @@ public sealed class NoOpSubscriptionEntitlementService : ISubscriptionEntitlemen
             []));
     }
 
+    public Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken)
+    {
+        return Task.FromResult<SubscriptionSnapshot?>(null);
+    }
+
     public Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken)
     {
         return Task.CompletedTask;
