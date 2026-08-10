@@ -173,6 +173,20 @@ export function useConversationRealtime({
         joinedConversationRef.current = null;
       }
 
+      if (state === "offline" && connection.state !== HubConnectionState.Connected) {
+        setConnectionState((current) => {
+          if (current !== "offline") {
+            return current;
+          }
+
+          if (connection.state === HubConnectionState.Reconnecting) {
+            return "reconnecting";
+          }
+
+          return "connecting";
+        });
+      }
+
       if (state !== "online") {
         return;
       }

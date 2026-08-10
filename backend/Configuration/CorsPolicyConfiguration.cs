@@ -68,7 +68,7 @@ public static partial class CorsPolicyConfiguration
         policy
             .WithOrigins(allowedOrigins)
             .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-            .WithHeaders("Authorization", "Content-Type", "Accept", "X-Correlation-Id")
+            .AllowAnyHeader()
             .AllowCredentials();
 
         if (allowedOriginPatterns.Length > 0)

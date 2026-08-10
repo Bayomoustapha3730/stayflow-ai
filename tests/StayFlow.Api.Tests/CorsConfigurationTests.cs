@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
@@ -47,6 +48,38 @@ public sealed class CorsConfigurationTests
         Assert.Equal(2, patterns.Length);
         Assert.Contains("https://*.example.dev", patterns);
         Assert.Contains("https://*.app.github.dev", patterns);
+    }
+
+    [Fact]
+    public void ConfigurePolicy_AllowsSignalRAndAuthHeaders_WhileRejectingWildcardOrigins()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Cors:AllowedOrigins:0"] = "https://app.example.com"
+            })
+            .Build();
+
+        var environment = new FakeHostEnvironment("Production");
+        var policyBuilder = new CorsPolicyBuilder();
+
+        CorsPolicyConfiguration.ConfigurePolicy(policyBuilder, configuration, environment);
+        var policy = policyBuilder.Build();
+
+        Assert.True(policy.SupportsCredentials);
+        Assert.True(policy.Headers.Contains("*"));
+        Assert.DoesNotContain(policy.Origins, origin => string.Equals(origin, "*", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void IsOriginAllowed_AcceptsTrustedConfiguredOrigin_AndRejectsUntrustedOrigin()
+    {
+        var allowedOrigins = new[] { "https://app.example.com" };
+        var allowedOriginPatterns = new[] { "https://*.app.github.dev" };
+
+        Assert.True(CorsPolicyConfiguration.IsOriginAllowed("https://app.example.com", allowedOrigins, allowedOriginPatterns));
+        Assert.True(CorsPolicyConfiguration.IsOriginAllowed("https://demo-123.app.github.dev", allowedOrigins, allowedOriginPatterns));
+        Assert.False(CorsPolicyConfiguration.IsOriginAllowed("https://evil.example.test", allowedOrigins, allowedOriginPatterns));
     }
 
     private sealed class FakeHostEnvironment(string environmentName) : IHostEnvironment

@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -86,6 +87,60 @@ public sealed class SignalRTenantContextIntegrationTests : IClassFixture<SignalR
         using var response = await client.PostAsync("/hubs/conversations/negotiate?negotiateVersion=1", new StringContent(string.Empty));
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Negotiate_Preflight_AllowsSignalRHeaders_ForTrustedFrontendOrigin()
+    {
+        using var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://demo-123.app.github.dev")
+        });
+
+        var request = new HttpRequestMessage(HttpMethod.Options, "/hubs/conversations/negotiate?negotiateVersion=1")
+        {
+            Content = new StringContent(string.Empty)
+        };
+
+        request.Headers.Add("Origin", "https://demo-123.app.github.dev");
+        request.Headers.Add("Access-Control-Request-Method", "POST");
+        request.Headers.Add("Access-Control-Request-Headers", "authorization, content-type, x-requested-with, x-signalr-user-agent");
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal("https://demo-123.app.github.dev", response.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        var allowedMethods = response.Headers.GetValues("Access-Control-Allow-Methods").SelectMany(v => v.Split(',')).Select(m => m.Trim()).ToList();
+        Assert.Contains(allowedMethods, method => string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("true", response.Headers.GetValues("Access-Control-Allow-Credentials").Single());
+        var allowedHeaders = response.Headers.GetValues("Access-Control-Allow-Headers").SelectMany(v => v.Split(',')).Select(h => h.Trim()).ToList();
+        Assert.Contains(allowedHeaders, h => string.Equals(h, "authorization", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(allowedHeaders, h => string.Equals(h, "content-type", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(allowedHeaders, h => string.Equals(h, "x-requested-with", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(allowedHeaders, h => string.Equals(h, "x-signalr-user-agent", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Negotiate_Preflight_RejectsUntrustedOrigin()
+    {
+        using var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://evil.example.test")
+        });
+
+        var request = new HttpRequestMessage(HttpMethod.Options, "/hubs/conversations/negotiate?negotiateVersion=1")
+        {
+            Content = new StringContent(string.Empty)
+        };
+
+        request.Headers.Add("Origin", "https://evil.example.test");
+        request.Headers.Add("Access-Control-Request-Method", "POST");
+        request.Headers.Add("Access-Control-Request-Headers", "authorization, content-type, x-requested-with, x-signalr-user-agent");
+
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.DoesNotContain(response.Headers, header => string.Equals(header.Key, "Access-Control-Allow-Origin", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

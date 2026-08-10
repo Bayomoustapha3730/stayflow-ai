@@ -109,6 +109,20 @@ describe("useConversationRealtime", () => {
     expect(mocks.ensureConversationConnectionStarted).not.toHaveBeenCalled();
   });
 
+  it("uses connecting state before the shared connection reports online", async () => {
+    const { result } = renderHook(() =>
+      useConversationRealtime({
+        accessToken: "token",
+        conversationId: "conversation-1",
+        enabled: true
+      })
+    );
+
+    await flushAsyncWork();
+
+    expect(result.current.connectionState).toBe("connecting");
+  });
+
   it("joins once after connection becomes online", async () => {
     renderHook(() =>
       useConversationRealtime({
