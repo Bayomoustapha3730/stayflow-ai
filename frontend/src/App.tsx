@@ -106,7 +106,7 @@ export default function App() {
   }
 
   if (/^\/get-started\/?$/.test(path)) {
-    return <OnboardingPage routeStep="completed" />;
+    return <OnboardingPage />;
   }
 
   if (path === "/host/copilot" || path === "/host/copilot/") {

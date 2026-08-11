@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createAuthApi } from "../api/authApi";
 import { ApiError, HttpClient } from "../api/httpClient";
@@ -14,6 +15,14 @@ function formatDateTime(value?: string | null): string {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.valueOf()) ? "Not available" : parsed.toLocaleString();
+}
+
+function isSessionNotFoundError(failure: unknown): boolean {
+  if (!(failure instanceof Error)) {
+    return false;
+  }
+
+  return failure.message.toLowerCase().includes("session was not found");
 }
 
 export function AccountSettingsPage() {
@@ -45,11 +54,13 @@ export function AccountSettingsPage() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
   const [isSendingVerification, setIsSendingVerification] = useState(false);
+  const [isRevokingAllSessions, setIsRevokingAllSessions] = useState(false);
+  const [revokingSessionIds, setRevokingSessionIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const http = useMemo(() => new HttpClient({
-    baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
+    baseUrl: getRuntimeApiUrl(),
     getAccessToken: () => accessToken
   }), [accessToken]);
   const api = useMemo(() => createAuthApi(http), [http]);
@@ -301,12 +312,18 @@ export function AccountSettingsPage() {
                   </div>
                   <button
                     type="button"
+                    disabled={isRevokingAllSessions || revokingSessionIds.includes(session.sessionId)}
                     onClick={() => {
+                      if (isRevokingAllSessions || revokingSessionIds.includes(session.sessionId)) {
+                        return;
+                      }
+
                       setError(null);
                       setMessage(null);
+                      setRevokingSessionIds((current) => current.concat(session.sessionId));
                       void api.revokeSession(session.sessionId)
                         .then(() => {
-                          void loadSessions();
+                          setSessions((current) => current.filter((item) => item.sessionId !== session.sessionId));
                           setMessage(session.isCurrent ? "Current refresh session revoked. Sign in again when needed." : "Session revoked.");
                         })
                         .catch((failure) => {
@@ -315,23 +332,38 @@ export function AccountSettingsPage() {
                             return;
                           }
 
+                          if (isSessionNotFoundError(failure)) {
+                            setSessions((current) => current.filter((item) => item.sessionId !== session.sessionId));
+                            setMessage("Session already revoked.");
+                            return;
+                          }
+
                           setError(failure instanceof Error ? failure.message : "Unable to revoke session.");
+                        })
+                        .finally(() => {
+                          setRevokingSessionIds((current) => current.filter((id) => id !== session.sessionId));
                         });
                     }}
                   >
-                    Revoke
+                    {revokingSessionIds.includes(session.sessionId) ? "Revoking..." : "Revoke"}
                   </button>
                 </div>
               ))}
             </div>
             <button
               type="button"
+              disabled={isRevokingAllSessions || sessions.length === 0}
               onClick={() => {
+                if (isRevokingAllSessions) {
+                  return;
+                }
+
                 setError(null);
                 setMessage(null);
+                setIsRevokingAllSessions(true);
                 void api.revokeAllSessions()
                   .then(() => {
-                    void loadSessions();
+                    setSessions([]);
                     setMessage("All refresh sessions revoked.");
                   })
                   .catch((failure) => {
@@ -341,10 +373,14 @@ export function AccountSettingsPage() {
                     }
 
                     setError(failure instanceof Error ? failure.message : "Unable to revoke all sessions.");
+                  })
+                  .finally(() => {
+                    setIsRevokingAllSessions(false);
+                    setRevokingSessionIds([]);
                   });
               }}
             >
-              Revoke All Sessions
+              {isRevokingAllSessions ? "Revoking all sessions..." : "Revoke All Sessions"}
             </button>
           </article>
         </section>

@@ -430,6 +430,11 @@ public sealed class HostCopilotWorkspaceService(
             return;
         }
 
+        if (conversation.PropertyId is not { } propertyId || propertyId == Guid.Empty)
+        {
+            return;
+        }
+
         openAlertsByConversation.TryGetValue(conversation.Id, out var existing);
 
         if (existing is not null)
@@ -447,7 +452,7 @@ public sealed class HostCopilotWorkspaceService(
             Id = Guid.NewGuid(),
             CompanyId = companyId,
             ConversationId = conversation.Id,
-            PropertyId = conversation.PropertyId ?? Guid.Empty,
+            PropertyId = propertyId,
             ReservationId = conversation.ReservationId,
             Priority = priority.Priority,
             IsEmergency = isEmergency,

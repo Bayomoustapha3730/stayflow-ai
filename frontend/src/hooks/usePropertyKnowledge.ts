@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { createPropertyKnowledgeApi } from "../api/propertyKnowledgeApi";
@@ -97,7 +98,7 @@ export function usePropertyKnowledge({ propertyId, accessToken, onUnauthorized }
   const detailAbortRef = useRef<AbortController | null>(null);
 
   const http = useMemo(
-    () => new HttpClient({ baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243", getAccessToken: () => accessToken }),
+    () => new HttpClient({ baseUrl: getRuntimeApiUrl(), getAccessToken: () => accessToken }),
     [accessToken]
   );
 

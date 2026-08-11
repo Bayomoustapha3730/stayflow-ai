@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { HostLoginPanel } from "../components/host";
@@ -78,7 +79,7 @@ export function PropertyKnowledgePage({ propertyId }: PropertyKnowledgePageProps
 
       try {
         const http = new HttpClient({
-          baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
+          baseUrl: getRuntimeApiUrl(),
           getAccessToken: () => auth.accessToken
         });
 

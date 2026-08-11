@@ -185,8 +185,124 @@ describe("AccountSettingsPage sessions lifecycle", () => {
         const method = init?.method ?? "GET";
         return url.endsWith("/auth/sessions") && method === "GET";
       });
-      expect(listCalls.length).toBeLessThanOrEqual(2);
+      expect(listCalls).toHaveLength(1);
     });
+  });
+
+  it("blocks duplicate revoke clicks while one revoke is in-flight", async () => {
+    const sessionsPayload = [
+      {
+        sessionId: "session-1",
+        createdAtUtc: "2026-08-10T00:00:00Z",
+        lastUsedAtUtc: "2026-08-10T01:00:00Z",
+        expiresAtUtc: "2026-08-20T00:00:00Z",
+        isCurrent: false
+      }
+    ];
+
+    let resolveRevoke!: () => void;
+    const revokePromise = new Promise((resolve) => {
+      resolveRevoke = () => resolve(apiSuccess({}));
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+
+      if (url.endsWith("/auth/sessions") && method === "GET") {
+        return apiSuccess(sessionsPayload);
+      }
+
+      if (url.endsWith("/auth/sessions/session-1/revoke") && method === "POST") {
+        return revokePromise;
+      }
+
+      return apiSuccess({});
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AccountSettingsPage />);
+
+    const revokeButton = await screen.findByRole("button", { name: "Revoke" });
+    fireEvent.click(revokeButton);
+    fireEvent.click(revokeButton);
+
+    expect(fetchMock.mock.calls.filter(([input, init]) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      return url.endsWith("/auth/sessions/session-1/revoke") && method === "POST";
+    })).toHaveLength(1);
+
+    expect(await screen.findByRole("button", { name: "Revoking..." })).toBeDisabled();
+
+    resolveRevoke();
+
+    await waitFor(() => {
+      expect(screen.queryByText("Active session")).not.toBeInTheDocument();
+      expect(screen.getByText("Session revoked.")).toBeInTheDocument();
+    });
+  });
+
+  it("revoke all sessions clears list without triggering an extra list fetch", async () => {
+    const sessionsPayload = [
+      {
+        sessionId: "session-1",
+        createdAtUtc: "2026-08-10T00:00:00Z",
+        lastUsedAtUtc: "2026-08-10T01:00:00Z",
+        expiresAtUtc: "2026-08-20T00:00:00Z",
+        isCurrent: false
+      },
+      {
+        sessionId: "session-2",
+        createdAtUtc: "2026-08-10T00:00:00Z",
+        lastUsedAtUtc: "2026-08-10T01:00:00Z",
+        expiresAtUtc: "2026-08-20T00:00:00Z",
+        isCurrent: true
+      }
+    ];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+
+      if (url.endsWith("/auth/sessions") && method === "GET") {
+        return apiSuccess(sessionsPayload);
+      }
+
+      if (url.endsWith("/auth/sessions/revoke-all") && method === "POST") {
+        return apiSuccess({});
+      }
+
+      return apiSuccess({});
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<AccountSettingsPage />);
+
+    await screen.findByText("Active session");
+
+    fireEvent.click(screen.getByRole("button", { name: "Revoke All Sessions" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("All refresh sessions revoked.")).toBeInTheDocument();
+      expect(screen.getByText("No active refresh sessions found.")).toBeInTheDocument();
+    });
+
+    const listCalls = fetchMock.mock.calls.filter(([input, init]) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      return url.endsWith("/auth/sessions") && method === "GET";
+    });
+    expect(listCalls).toHaveLength(1);
+
+    const revokeAllCalls = fetchMock.mock.calls.filter(([input, init]) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = init?.method ?? "GET";
+      return url.endsWith("/auth/sessions/revoke-all") && method === "POST";
+    });
+    expect(revokeAllCalls).toHaveLength(1);
   });
 
   it("429 on sessions does not auto-retry in a loop", async () => {

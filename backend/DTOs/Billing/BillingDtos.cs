@@ -30,6 +30,13 @@ public sealed class BillingSubscriptionResponse
     public string? PlanName { get; init; }
     public string? ExternalSubscriptionId { get; init; }
     public string? ExternalPriceId { get; init; }
+    public bool HasStripeCustomer { get; init; }
+    public bool HasStripeSubscription { get; init; }
+    public bool CanOpenBillingPortal { get; init; }
+    public bool CanManagePaymentMethod { get; init; }
+    public bool CanCancel { get; init; }
+    public bool CanResume { get; init; }
+    public bool CanStartCheckout { get; init; }
 }
 
 public sealed class BillingPlanResponse

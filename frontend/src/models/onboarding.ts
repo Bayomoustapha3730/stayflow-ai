@@ -18,6 +18,31 @@ export interface OnboardingSafeLink {
   href: string;
 }
 
+export interface OnboardingReviewInvitation {
+  email: string;
+  role: string;
+  status: string;
+}
+
+export interface OnboardingReviewSummary {
+  organizationName?: string | null;
+  organizationSlug?: string | null;
+  organizationSupportEmail?: string | null;
+  organizationTimeZone?: string | null;
+  selectedPlanName?: string | null;
+  firstPropertyId?: string | null;
+  firstPropertyName?: string | null;
+  teamInvitationsState: string;
+  teamInvitations: OnboardingReviewInvitation[];
+  whatsAppSetupState: string;
+  whatsAppIntegrationName?: string | null;
+  aiProviderState: string;
+  aiProvider: string;
+  knowledgeSetupState: string;
+  knowledgeTitle?: string | null;
+  demoDataState: string;
+}
+
 export interface OnboardingStatus {
   companyId: string;
   userId: string;
@@ -28,6 +53,7 @@ export interface OnboardingStatus {
   skippedSteps: string[];
   blockers: OnboardingBlocker[];
   checklist: OnboardingChecklistItem[];
+  reviewSummary?: OnboardingReviewSummary;
   percentComplete: number;
   nextRecommendedAction?: string | null;
   safeLinks: OnboardingSafeLink[];

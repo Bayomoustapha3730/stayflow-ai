@@ -349,15 +349,18 @@ public sealed class SubscriptionEntitlementService(
 
     private async Task<SubscriptionPlan> ResolveDefaultProvisioningPlanAsync(CancellationToken cancellationToken)
     {
+        const string freePlanName = "FREE";
+        const string professionalPlanName = "PROFESSIONAL";
+
         var defaultPlan = await dbContext.SubscriptionPlans
             .OrderBy(plan => plan.SortOrder)
             .FirstOrDefaultAsync(plan => plan.IsActive
-                && string.Equals(plan.Name, "Free", StringComparison.OrdinalIgnoreCase), cancellationToken);
+                && plan.Name.ToUpper() == freePlanName, cancellationToken);
 
         defaultPlan ??= await dbContext.SubscriptionPlans
             .OrderBy(plan => plan.SortOrder)
             .FirstOrDefaultAsync(plan => plan.IsActive
-                && string.Equals(plan.Name, "Professional", StringComparison.OrdinalIgnoreCase), cancellationToken);
+                && plan.Name.ToUpper() == professionalPlanName, cancellationToken);
 
         defaultPlan ??= await dbContext.SubscriptionPlans
             .OrderBy(plan => plan.SortOrder)
@@ -394,10 +397,10 @@ public sealed class SubscriptionEntitlementService(
 
         if (plan is null && !string.IsNullOrWhiteSpace(planName))
         {
-            var normalized = planName.Trim();
+            var normalized = planName.Trim().ToUpperInvariant();
             plan = await query.FirstOrDefaultAsync(item =>
-                string.Equals(item.Name, normalized, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(item.DisplayName, normalized, StringComparison.OrdinalIgnoreCase), cancellationToken);
+                item.Name.ToUpper() == normalized
+                || item.DisplayName.ToUpper() == normalized, cancellationToken);
         }
 
         if (plan is null)

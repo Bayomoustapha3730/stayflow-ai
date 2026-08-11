@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useMemo, useState } from "react";
 import { createInvitationApi } from "../api/invitationApi";
 import { ApiError, HttpClient } from "../api/httpClient";
@@ -13,10 +14,10 @@ export function InvitationDecisionPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const anonymousApi = useMemo(() => createInvitationApi(new HttpClient({
-    baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243"
+    baseUrl: getRuntimeApiUrl()
   })), []);
   const authenticatedApi = useMemo(() => createInvitationApi(new HttpClient({
-    baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
+    baseUrl: getRuntimeApiUrl(),
     getAccessToken: () => auth.accessToken
   })), [auth.accessToken]);
 

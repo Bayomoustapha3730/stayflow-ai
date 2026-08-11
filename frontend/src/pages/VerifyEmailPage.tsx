@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useMemo, useState } from "react";
 import { createAuthApi } from "../api/authApi";
 import { HttpClient } from "../api/httpClient";
@@ -10,7 +11,7 @@ export function VerifyEmailPage() {
   const [error, setError] = useState<string | null>(null);
 
   const api = useMemo(() => createAuthApi(new HttpClient({
-    baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243"
+    baseUrl: getRuntimeApiUrl()
   })), []);
 
   return (

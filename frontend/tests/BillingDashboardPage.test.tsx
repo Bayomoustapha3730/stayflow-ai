@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { useBillingDashboard } from "../src/hooks/useBillingDashboard";
 
 const hostAuthState = {
   accessToken: "token",
@@ -36,7 +37,7 @@ vi.mock("../src/hooks/useHostAuth", () => ({
 }));
 
 vi.mock("../src/hooks/useBillingDashboard", () => ({
-  useBillingDashboard: () => ({
+  useBillingDashboard: vi.fn(() => ({
     subscription: {
       companyId: "c1",
       status: "Active",
@@ -44,7 +45,14 @@ vi.mock("../src/hooks/useBillingDashboard", () => ({
       currentPeriodStartUtc: "2026-08-01T00:00:00Z",
       currentPeriodEndUtc: "2026-09-01T00:00:00Z",
       trialEndsAtUtc: "2026-08-20T00:00:00Z",
-      planName: "Starter"
+      planName: "Starter",
+      canStartCheckout: true,
+      canOpenBillingPortal: true,
+      canManagePaymentMethod: true,
+      canCancel: true,
+      canResume: false,
+      hasStripeCustomer: true,
+      hasStripeSubscription: true
     },
     invoices: [],
     usage: {
@@ -75,7 +83,7 @@ vi.mock("../src/hooks/useBillingDashboard", () => ({
     changePlan,
     cancelSubscription: vi.fn(),
     resumeSubscription: vi.fn()
-  })
+  }))
 }));
 
 import { BillingDashboardPage } from "../src/pages/BillingDashboardPage";
@@ -89,12 +97,57 @@ describe("BillingDashboardPage", () => {
     expect(screen.getByText("Usage Summary")).toBeInTheDocument();
   });
 
-  it("invokes plan change action", () => {
+  it("invokes plan change action", async () => {
     render(<BillingDashboardPage />);
 
     fireEvent.click(screen.getAllByRole("button", { name: /(Upgrade|Downgrade|Change) Plan/ })[0]);
     fireEvent.click(screen.getByRole("button", { name: /Confirm (Upgrade|Downgrade|Change)/ }));
 
-    expect(changePlan).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(changePlan).toHaveBeenCalled();
+    });
+  });
+
+  it("hides portal and cancellation controls for free tenants that have no Stripe relationship", () => {
+    const freeTenantSubscription = {
+      companyId: "c1",
+      status: "Active",
+      cancelAtPeriodEnd: false,
+      currentPeriodStartUtc: "2026-08-01T00:00:00Z",
+      currentPeriodEndUtc: "2026-09-01T00:00:00Z",
+      trialEndsAtUtc: null,
+      planName: "Free",
+      canStartCheckout: true,
+      canOpenBillingPortal: false,
+      canManagePaymentMethod: false,
+      canCancel: false,
+      canResume: false,
+      hasStripeCustomer: false,
+      hasStripeSubscription: false
+    };
+
+    vi.mocked(useBillingDashboard).mockReturnValueOnce({
+      subscription: freeTenantSubscription,
+      invoices: [],
+      usage: null,
+      isLoading: false,
+      isMutating: false,
+      error: null,
+      message: null,
+      refresh: vi.fn(),
+      openCheckout: vi.fn(),
+      openBillingPortal: vi.fn(),
+      openPaymentMethodPortal: vi.fn(),
+      changePlan,
+      cancelSubscription: vi.fn(),
+      resumeSubscription: vi.fn()
+    });
+
+    render(<BillingDashboardPage />);
+
+    expect(screen.queryByRole("button", { name: /Open Billing Portal/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Manage Payment Method/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Cancel at Period End/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Resume/i })).not.toBeInTheDocument();
   });
 });

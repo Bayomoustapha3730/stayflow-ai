@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.InMemory;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using StayFlow.Api.Data;
 using StayFlow.Api.Models;
@@ -12,10 +14,13 @@ public sealed class DevelopmentSeedServiceTests
     private static readonly Guid DemoDemoUserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid DemoDemoGuestId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid DemoDemoReservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid OnboardingTestCompanyId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1");
+    private static readonly Guid OnboardingTestUserId = Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1");
     private const string DemoOrganizationRole = "Owner";
 
     private const string DemoUserEmail = "demo.user@stayflow.local";
     private const string DemoUserFullName = "Demo User";
+    private const string OnboardingTestUserEmail = "onboarding.user@stayflow.local";
     private const string TestPassword = "TestPassword123!";
 
     [Fact]
@@ -225,7 +230,6 @@ public sealed class DevelopmentSeedServiceTests
 
         var demoReservation = await dbContext.Reservations.FirstOrDefaultAsync(r => r.Id == DemoDemoReservationId);
         Assert.NotNull(demoReservation);
-        // Should be CheckedIn or similar status that's eligible
         Assert.Equal(ReservationStatus.CheckedIn, demoReservation.Status);
     }
 
@@ -395,14 +399,151 @@ public sealed class DevelopmentSeedServiceTests
         Assert.Equal(SeedData.DemoPropertyId, repairedReservation.PropertyId);
     }
 
+    [Fact]
+    public async Task SeedAsync_CreatesOnboardingTestIdentity_WithNotStartedOnboarding()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?>
+        {
+            ["DevelopmentSeed:DemoPassword"] = TestPassword,
+            ["DevelopmentSeed:OnboardingTestPassword"] = TestPassword
+        });
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        var company = await dbContext.Companies.SingleAsync(item => item.Id == OnboardingTestCompanyId);
+        var user = await dbContext.Users.SingleAsync(item => item.Id == OnboardingTestUserId);
+        var membership = await dbContext.OrganizationMembers.SingleAsync(item => item.CompanyId == OnboardingTestCompanyId && item.UserId == OnboardingTestUserId);
+
+        Assert.Equal("StayFlow Onboarding Test", company.Name);
+        Assert.Equal(OnboardingStep.Welcome.ToStorageValue(), company.OnboardingState);
+        Assert.Equal(OnboardingTestUserEmail, user.Email);
+        Assert.Equal(OnboardingTestCompanyId, user.CompanyId);
+        Assert.Equal(DemoOrganizationRole, membership.Role);
+        Assert.Equal(OrganizationMemberStatus.Active.ToStorageValue(), membership.Status);
+        Assert.False(await dbContext.OnboardingProgressRecords.AnyAsync(item => item.CompanyId == OnboardingTestCompanyId && item.UserId == OnboardingTestUserId));
+    }
+
+    [Fact]
+    public async Task SeedAsync_CreatesOnboardingTestIdentity_UsingRelationalProviderWithoutCircularDependency()
+    {
+        await using var fixture = await CreateRelationalFixtureAsync(new Dictionary<string, string?>
+        {
+            ["DevelopmentSeed:DemoPassword"] = TestPassword,
+            ["DevelopmentSeed:OnboardingTestPassword"] = TestPassword
+        });
+
+        await fixture.Seeder.SeedAsync(CancellationToken.None);
+        await fixture.Seeder.SeedAsync(CancellationToken.None);
+
+        var company = await fixture.DbContext.Companies.SingleAsync(item => item.Id == OnboardingTestCompanyId);
+        var user = await fixture.DbContext.Users.SingleAsync(item => item.Id == OnboardingTestUserId);
+        var membership = await fixture.DbContext.OrganizationMembers.SingleAsync(item => item.CompanyId == OnboardingTestCompanyId && item.UserId == OnboardingTestUserId);
+
+        Assert.Equal(OnboardingTestUserId, company.OwnerUserId);
+        Assert.Equal(OnboardingTestCompanyId, user.CompanyId);
+        Assert.Equal(DemoOrganizationRole, membership.Role);
+        Assert.Equal(OrganizationMemberStatus.Active.ToStorageValue(), membership.Status);
+        Assert.Equal(OnboardingStep.Welcome.ToStorageValue(), company.OnboardingState);
+        Assert.False(await fixture.DbContext.OnboardingProgressRecords.AnyAsync(item => item.CompanyId == OnboardingTestCompanyId && item.UserId == OnboardingTestUserId));
+        Assert.Equal(1, await fixture.DbContext.Companies.CountAsync(item => item.Id == OnboardingTestCompanyId));
+        Assert.Equal(1, await fixture.DbContext.Users.CountAsync(item => item.Id == OnboardingTestUserId));
+        Assert.Equal(1, await fixture.DbContext.OrganizationMembers.CountAsync(item => item.CompanyId == OnboardingTestCompanyId && item.UserId == OnboardingTestUserId));
+    }
+
+    [Fact]
+    public async Task SeedAsync_OnboardingTestIdentity_DoesNotSeedOperationalResources()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?>
+        {
+            ["DevelopmentSeed:DemoPassword"] = TestPassword,
+            ["DevelopmentSeed:OnboardingTestPassword"] = TestPassword
+        });
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        Assert.False(await dbContext.Properties.AnyAsync(item => item.CompanyId == OnboardingTestCompanyId && !item.IsDeleted));
+        Assert.False(await dbContext.TenantSubscriptions.AnyAsync(item => item.CompanyId == OnboardingTestCompanyId));
+        Assert.False(await dbContext.WhatsAppIntegrations.AnyAsync(item => item.CompanyId == OnboardingTestCompanyId));
+        Assert.False(await dbContext.PropertyKnowledgeArticles.AnyAsync(item => item.CompanyId == OnboardingTestCompanyId && !item.IsDeleted));
+        Assert.False(await dbContext.Reservations.AnyAsync(item => item.CompanyId == OnboardingTestCompanyId && !item.IsDeleted));
+    }
+
+    [Fact]
+    public async Task SeedAsync_OnboardingTestIdentity_RepairsPartiallySeededTenantSafely()
+    {
+        await using var fixture = await CreateRelationalFixtureAsync(new Dictionary<string, string?>
+        {
+            ["DevelopmentSeed:DemoPassword"] = TestPassword,
+            ["DevelopmentSeed:OnboardingTestPassword"] = TestPassword
+        });
+
+        fixture.DbContext.Companies.Add(new Company
+        {
+            Id = OnboardingTestCompanyId,
+            Name = "Partial Tenant",
+            Slug = "partial-tenant",
+            NormalizedSlug = "PARTIAL-TENANT",
+            Status = "Active",
+            Email = OnboardingTestUserEmail,
+            PhoneNumber = "+254700000201",
+            CountryCode = "KE",
+            TimeZone = "Africa/Nairobi",
+            IsActive = true
+        });
+        await fixture.DbContext.SaveChangesAsync();
+
+        await fixture.Seeder.SeedAsync(CancellationToken.None);
+
+        var company = await fixture.DbContext.Companies.SingleAsync(item => item.Id == OnboardingTestCompanyId);
+        var user = await fixture.DbContext.Users.SingleAsync(item => item.Id == OnboardingTestUserId);
+
+        Assert.Equal(OnboardingTestUserId, company.OwnerUserId);
+        Assert.Equal(OnboardingTestCompanyId, user.CompanyId);
+        Assert.Equal(OnboardingStep.Welcome.ToStorageValue(), company.OnboardingState);
+        Assert.False(await fixture.DbContext.OnboardingProgressRecords.AnyAsync(item => item.CompanyId == OnboardingTestCompanyId && item.UserId == OnboardingTestUserId));
+    }
+
+    [Fact]
+    public async Task SeedAsync_OnboardingTestIdentity_ResetsExistingOnboardingProgress()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?>
+        {
+            ["DevelopmentSeed:DemoPassword"] = TestPassword,
+            ["DevelopmentSeed:OnboardingTestPassword"] = TestPassword
+        });
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        dbContext.OnboardingProgressRecords.Add(new OnboardingProgress
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = OnboardingTestCompanyId,
+            UserId = OnboardingTestUserId,
+            CurrentStep = OnboardingStep.Completed.ToStorageValue(),
+            CompletedStepsCsv = "Welcome,OrganizationProfile,PlanConfirmation,FirstProperty,TeamInvitations,WhatsAppSetup,AiProviderSetup,KnowledgeBaseSetup,DemoData,Review",
+            IsCompleted = true,
+            StartedAtUtc = DateTimeOffset.UtcNow.AddHours(-1),
+            LastUpdatedAtUtc = DateTimeOffset.UtcNow,
+            Version = 3
+        });
+        await dbContext.SaveChangesAsync();
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        Assert.False(await dbContext.OnboardingProgressRecords.AnyAsync(item => item.CompanyId == OnboardingTestCompanyId && item.UserId == OnboardingTestUserId));
+    }
+
     private static ApplicationDbContext CreateInMemoryDbContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
+            .ConfigureWarnings(builder => builder.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
         var dbContext = new ApplicationDbContext(options);
-        // Ensure seed data is applied
         dbContext.Database.EnsureCreated();
         return dbContext;
     }
@@ -414,5 +555,37 @@ public sealed class DevelopmentSeedServiceTests
             .Build();
         var hasher = new Pbkdf2PasswordHasher();
         return new DevelopmentSeedService(dbContext, hasher, config);
+    }
+
+    private static async Task<RelationalFixture> CreateRelationalFixtureAsync(Dictionary<string, string?> configValues)
+    {
+        var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        var dbContext = new ApplicationDbContext(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(configValues)
+            .Build();
+        var seeder = new DevelopmentSeedService(dbContext, new Pbkdf2PasswordHasher(), config);
+        return new RelationalFixture(dbContext, seeder, connection);
+    }
+
+    private sealed class RelationalFixture(ApplicationDbContext dbContext, DevelopmentSeedService seeder, SqliteConnection connection) : IAsyncDisposable
+    {
+        public ApplicationDbContext DbContext { get; } = dbContext;
+        public DevelopmentSeedService Seeder { get; } = seeder;
+        private SqliteConnection Connection { get; } = connection;
+
+        public async ValueTask DisposeAsync()
+        {
+            await DbContext.DisposeAsync();
+            await Connection.DisposeAsync();
+        }
     }
 }

@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { createWhatsAppSettingsApi } from "../api/whatsAppSettingsApi";
@@ -91,7 +92,7 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
 
   const http = useMemo(
     () => new HttpClient({
-      baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
+      baseUrl: getRuntimeApiUrl(),
       getAccessToken: () => accessToken
     }),
     [accessToken]

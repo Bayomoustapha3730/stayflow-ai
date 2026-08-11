@@ -90,10 +90,10 @@ export function PlanComparisonPage() {
                     <button
                       type="button"
                       onClick={() => setPendingPlan(plan.name)}
-                      disabled={isBusy || plan.name.toLowerCase() === (currentPlan ?? "").toLowerCase()}>
+                      disabled={isBusy || !subscription?.hasStripeSubscription || plan.name.toLowerCase() === (currentPlan ?? "").toLowerCase()}>
                       {actionLabel(currentPlan, plan.name)} Plan
                     </button>
-                    <button type="button" onClick={() => void billing.openCheckout(plan.name, plan.trialDays)} disabled={isBusy}>Start Trial / Checkout</button>
+                    <button type="button" onClick={() => void billing.openCheckout(plan.name, plan.trialDays)} disabled={isBusy || !subscription?.canStartCheckout}>Start Trial / Checkout</button>
                   </div>
                 </div>
               ))}

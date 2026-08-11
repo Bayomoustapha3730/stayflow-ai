@@ -24,6 +24,13 @@ export interface BillingSubscriptionResponse {
   planName?: string | null;
   externalSubscriptionId?: string | null;
   externalPriceId?: string | null;
+  hasStripeCustomer: boolean;
+  hasStripeSubscription: boolean;
+  canOpenBillingPortal: boolean;
+  canManagePaymentMethod: boolean;
+  canCancel: boolean;
+  canResume: boolean;
+  canStartCheckout: boolean;
 }
 
 export interface BillingPlanResponse {

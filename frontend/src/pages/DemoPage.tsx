@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { StayFlowChatWidget } from "../components";
 
 const demoGuestId =
@@ -13,9 +14,7 @@ const demoPropertyId =
 const demoEmail =
   import.meta.env.VITE_DEMO_EMAIL;
 
-const apiBaseUrl =
-  import.meta.env.VITE_STAYFLOW_API_URL ??
-  "http://localhost:5243";
+const apiBaseUrl = getRuntimeApiUrl();
 
 export function DemoPage() {
   return (

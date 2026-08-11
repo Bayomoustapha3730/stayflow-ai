@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import { useChat } from "../hooks/useChat";
@@ -20,7 +21,7 @@ export function StayFlowChatWidget({
   reservationId,
   propertyId,
   channelIdentity,
-  apiBaseUrl = import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
+  apiBaseUrl = getRuntimeApiUrl(),
   demoEmail,
   theme
 }: StayFlowChatWidgetProps) {

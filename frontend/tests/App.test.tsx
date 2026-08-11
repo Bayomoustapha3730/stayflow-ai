@@ -205,6 +205,6 @@ describe("App routing", () => {
 
     render(<App />);
 
-    expect(screen.getByTestId("onboarding-page")).toHaveTextContent("completed");
+    expect(screen.getByTestId("onboarding-page")).toHaveTextContent("root");
   });
 });

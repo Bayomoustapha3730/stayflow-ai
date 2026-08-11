@@ -25,6 +25,41 @@ public sealed class BillingServiceTests
     }
 
     [Fact]
+    public async Task CreateCheckoutSessionAsync_ReturnsActionableError_WhenPriceMappingMissing()
+    {
+        var fixture = await CreateFixtureAsync();
+
+        var response = await fixture.Service.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest
+        {
+            PlanName = "Scale"
+        }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Contains("Scale", response.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Billing:PlanPriceIds", response.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetSubscriptionAsync_ExposesBillingCapabilitiesForFreeTenant()
+    {
+        var fixture = await CreateFixtureAsync();
+        var company = await fixture.DbContext.Companies.FindAsync(fixture.CompanyId);
+        company!.StripeCustomerId = null;
+        await fixture.DbContext.SaveChangesAsync();
+
+        var response = await fixture.Service.GetSubscriptionAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        Assert.False(response.Data!.HasStripeCustomer);
+        Assert.False(response.Data.CanOpenBillingPortal);
+        Assert.False(response.Data.CanManagePaymentMethod);
+        Assert.False(response.Data.CanCancel);
+        Assert.False(response.Data.CanResume);
+        Assert.True(response.Data.CanStartCheckout);
+    }
+
+    [Fact]
     public async Task GetUsageSummaryAsync_ReturnsUsageForTenant()
     {
         var fixture = await CreateFixtureAsync();

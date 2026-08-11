@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { FormEvent, useMemo, useState } from "react";
 import { createAuthApi } from "../api/authApi";
 import { HttpClient } from "../api/httpClient";
@@ -12,7 +13,7 @@ export function ResetPasswordPage() {
   const [error, setError] = useState<string | null>(null);
 
   const api = useMemo(() => createAuthApi(new HttpClient({
-    baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243"
+    baseUrl: getRuntimeApiUrl()
   })), []);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {

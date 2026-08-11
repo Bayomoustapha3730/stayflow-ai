@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HubConnectionState } from "@microsoft/signalr";
 import {
@@ -96,7 +97,7 @@ export function useConversationRealtime({
     latestConversationIdRef.current = conversationId;
   }, [conversationId]);
 
-  const baseUrl = useMemo(() => import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243", []);
+  const baseUrl = useMemo(() => getRuntimeApiUrl(), []);
 
   useEffect(() => {
     if (isTestMode || !enabled || !accessToken) {

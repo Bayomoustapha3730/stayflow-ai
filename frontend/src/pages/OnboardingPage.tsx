@@ -4,6 +4,7 @@ import { useHostAuth } from "../hooks/useHostAuth";
 import { useOnboardingWizard } from "../hooks/useOnboardingWizard";
 import "../styles/host-inbox.css";
 import "../styles/onboarding.css";
+import { getBillingCapabilityMessage } from "./billingCapabilityMessages";
 
 type StepKey =
   | "welcome"
@@ -24,6 +25,19 @@ interface StepDefinition {
   route: string;
   canSkip: boolean;
   requiredRole?: "Owner" | "Administrator";
+}
+
+function resolveCurrentStepHref(status: { safeLinks?: Array<{ rel: string; href: string }> } | null | undefined): string | null {
+  if (!status?.safeLinks?.length) {
+    return null;
+  }
+
+  const currentStepLink = status.safeLinks.find((item) => item.rel === "current_step");
+  if (!currentStepLink?.href?.trim() || !currentStepLink.href.startsWith("/")) {
+    return null;
+  }
+
+  return currentStepLink.href;
 }
 
 const steps: StepDefinition[] = [
@@ -116,7 +130,7 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
   const [knowledgeTitle, setKnowledgeTitle] = useState("House Rules");
   const [knowledgeContent, setKnowledgeContent] = useState("Quiet hours after 10 PM. Please avoid loud music.");
 
-  const currentStep = routeStep ?? parseStep(onboarding.status?.currentStep);
+  const currentStep = routeStep && !onboarding.status ? routeStep : parseStep(onboarding.status?.currentStep);
   const step = steps.find((item) => item.key === currentStep) ?? steps[0];
   const isAdmin = isAdminLike(auth.currentUser?.organizationRole ?? null);
   const hasTenant = Boolean(auth.currentUser?.companyId);
@@ -228,7 +242,32 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
         <section className="sf-onboarding-card">
           <h2>Welcome</h2>
           <p>Start onboarding now and resume later at any time.</p>
-          <button type="button" onClick={() => void onboarding.start()} disabled={onboarding.isSaving}>Start Onboarding</button>
+          <button
+            type="button"
+            onClick={() => {
+              void onboarding.start().then((nextStatus) => {
+                const canonicalStepRoute = resolveCurrentStepHref(nextStatus);
+                if (canonicalStepRoute && canonicalStepRoute !== window.location.pathname) {
+                  window.history.pushState({}, "", canonicalStepRoute);
+                  window.dispatchEvent(new PopStateEvent("popstate"));
+                  return;
+                }
+
+                if (!nextStatus) {
+                  return;
+                }
+
+                const parsedStep = parseStep(nextStatus.currentStep);
+                const target = steps.find((item) => item.key === parsedStep);
+                if (target && target.route !== window.location.pathname) {
+                  goToStep(target);
+                }
+              });
+            }}
+            disabled={onboarding.isSaving}
+          >
+            Start Onboarding
+          </button>
         </section>
       ) : null}
 
@@ -260,7 +299,8 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
         <section className="sf-onboarding-card">
           <h2>Plan Confirmation</h2>
           <p>Current plan from trusted billing state: <strong>{onboarding.status?.selectedPlanName ?? "Unknown"}</strong></p>
-          <button type="button" disabled={onboarding.isSaving} onClick={() => void onboarding.confirmPlan({ planName: onboarding.status?.selectedPlanName ?? undefined })}>Confirm Plan</button>
+          <p>{getBillingCapabilityMessage(undefined, onboarding.status?.selectedPlanName)}</p>
+          <button type="button" disabled={onboarding.isSaving} onClick={() => void onboarding.confirmPlan({ planName: onboarding.status?.selectedPlanName ?? "Starter" })}>Confirm Plan</button>
           <a href="/host/settings/billing">Open Billing</a>
         </section>
       ) : null}
@@ -384,6 +424,43 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
               </li>
             ))}
           </ul>
+
+          <h3>Review Summary</h3>
+          <ul className="sf-onboarding-checklist">
+            <li>
+              <strong>Organization profile</strong>: {onboarding.status?.reviewSummary?.organizationName ?? "Not provided"}
+              {onboarding.status?.reviewSummary?.organizationSlug ? ` (${onboarding.status.reviewSummary.organizationSlug})` : ""}
+            </li>
+            <li>
+              <strong>Organization contact/time zone</strong>: {onboarding.status?.reviewSummary?.organizationSupportEmail ?? "Not provided"}
+              {onboarding.status?.reviewSummary?.organizationTimeZone ? ` / ${onboarding.status.reviewSummary.organizationTimeZone}` : ""}
+            </li>
+            <li>
+              <strong>Selected plan</strong>: {onboarding.status?.reviewSummary?.selectedPlanName ?? "Not confirmed"}
+            </li>
+            <li>
+              <strong>First property</strong>: {onboarding.status?.reviewSummary?.firstPropertyName ?? "Not configured"}
+            </li>
+            <li>
+              <strong>Team invitations</strong>: {onboarding.status?.reviewSummary?.teamInvitationsState ?? "NotStarted"}
+              {onboarding.status?.reviewSummary?.teamInvitations?.length ? ` (${onboarding.status.reviewSummary.teamInvitations.length} invite(s))` : ""}
+            </li>
+            <li>
+              <strong>WhatsApp setup</strong>: {onboarding.status?.reviewSummary?.whatsAppSetupState ?? "NotStarted"}
+              {onboarding.status?.reviewSummary?.whatsAppIntegrationName ? ` (${onboarding.status.reviewSummary.whatsAppIntegrationName})` : ""}
+            </li>
+            <li>
+              <strong>AI provider</strong>: {onboarding.status?.reviewSummary?.aiProvider ?? "Unknown"} ({onboarding.status?.reviewSummary?.aiProviderState ?? "NotStarted"})
+            </li>
+            <li>
+              <strong>Knowledge setup</strong>: {onboarding.status?.reviewSummary?.knowledgeSetupState ?? "NotStarted"}
+              {onboarding.status?.reviewSummary?.knowledgeTitle ? ` (${onboarding.status.reviewSummary.knowledgeTitle})` : ""}
+            </li>
+            <li>
+              <strong>Demo data choice</strong>: {onboarding.status?.reviewSummary?.demoDataState ?? "NotStarted"}
+            </li>
+          </ul>
+
           <button type="button" disabled={onboarding.isSaving} onClick={() => void onboarding.complete()}>Complete Onboarding</button>
         </section>
       ) : null}

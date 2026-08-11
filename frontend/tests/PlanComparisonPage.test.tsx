@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const hostAuthState = {
@@ -65,7 +65,7 @@ vi.mock("../src/hooks/useBillingDashboard", () => ({
 import { PlanComparisonPage } from "../src/pages/PlanComparisonPage";
 
 describe("PlanComparisonPage", () => {
-  it("opens upgrade dialog and confirms plan change", () => {
+  it("opens upgrade dialog and confirms plan change", async () => {
     render(<PlanComparisonPage />);
 
     fireEvent.click(screen.getAllByRole("button", { name: "Upgrade Plan" })[0]);
@@ -74,6 +74,8 @@ describe("PlanComparisonPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Confirm Upgrade" }));
 
-    expect(changePlan).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(changePlan).toHaveBeenCalled();
+    });
   });
 });

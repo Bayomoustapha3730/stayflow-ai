@@ -53,6 +53,86 @@ public sealed class HostCopilotControllerIntegrationTests : IClassFixture<Signal
     }
 
     [Fact]
+    public async Task GetWorkspace_WhenNoOpenConversations_ReturnsEmptyWorkspace()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var tenantConversations = db.Conversations
+                .Where(item => item.CompanyId == CompanyA)
+                .ToList();
+
+            foreach (var conversation in tenantConversations)
+            {
+                conversation.Status = ConversationStatus.Closed;
+            }
+
+            db.SaveChanges();
+        }
+
+        using var client = CreateClientWithToken(CompanyA, UserA, ["conversations.read"]);
+
+        using var response = await client.GetAsync("/host/copilot/workspace");
+        var payload = await ParseJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(payload.RootElement.GetProperty("success").GetBoolean());
+
+        var data = payload.RootElement.GetProperty("data");
+        Assert.Equal(0, data.GetProperty("totalOpenItems").GetInt32());
+        Assert.Equal(0, data.GetProperty("totalBreachedSlaItems").GetInt32());
+        Assert.Empty(data.GetProperty("items").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task GetWorkspace_ConversationWithoutProperty_DoesNotFail()
+    {
+        var conversationId = Guid.Parse("eeeeeeee-1111-1111-1111-111111111111");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            if (!db.Conversations.Any(item => item.Id == conversationId))
+            {
+                db.Conversations.Add(new Conversation
+                {
+                    Id = conversationId,
+                    CompanyId = CompanyA,
+                    GuestId = GuestA,
+                    PropertyId = null,
+                    Channel = DTOs.ReservationContext.GuestChannel.Web,
+                    Status = ConversationStatus.Open,
+                    StartedAt = DateTimeOffset.UtcNow.AddHours(-4),
+                    LastActivityAt = DateTimeOffset.UtcNow.AddHours(-3)
+                });
+
+                db.ConversationMessages.Add(new ConversationMessage
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = CompanyA,
+                    ConversationId = conversationId,
+                    SenderType = ConversationSenderType.Guest,
+                    MessageType = ConversationMessageType.Text,
+                    Content = "Hello, please help.",
+                    SentAt = DateTimeOffset.UtcNow.AddHours(-3),
+                    IsInternal = false
+                });
+
+                db.SaveChanges();
+            }
+        }
+
+        using var client = CreateClientWithToken(CompanyA, UserA, ["conversations.read"]);
+        using var response = await client.GetAsync("/host/copilot/workspace");
+        var payload = await ParseJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(payload.RootElement.GetProperty("success").GetBoolean());
+        var items = payload.RootElement.GetProperty("data").GetProperty("items").EnumerateArray().ToList();
+        Assert.Contains(items, item => Guid.Parse(item.GetProperty("conversationId").GetString()!) == conversationId);
+    }
+
+    [Fact]
     public async Task GetWorkspace_WithCrossTenantPropertyFilter_ReturnsBadRequest()
     {
         using var client = CreateClientWithToken(CompanyA, UserA, ["conversations.read"]);

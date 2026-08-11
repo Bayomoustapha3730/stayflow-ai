@@ -155,36 +155,46 @@ export function OrganizationSettingsPage() {
             {!settings.isLoading && settings.members.length === 0 ? <p>No active members found.</p> : null}
 
             <div className="sf-organization-member-list" role="list">
-              {settings.members.map((member) => (
-                <div key={member.userId} className="sf-organization-member-row" role="listitem">
-                  <div>
-                    <p className="sf-organization-member-name">{member.fullName}</p>
-                    <p className="sf-organization-member-meta">{member.email}</p>
+              {settings.members.map((member) => {
+                const isSelfMember = member.userId === auth.currentUser?.id;
+                const isProtectedSelfOwner = isSelfMember && member.role === "Owner";
+
+                return (
+                  <div key={member.userId} className="sf-organization-member-row" role="listitem">
+                    <div>
+                      <p className="sf-organization-member-name">{member.fullName}</p>
+                      <p className="sf-organization-member-meta">{member.email}</p>
+                      {isProtectedSelfOwner ? <p className="sf-host-muted-note">Your owner role cannot be changed from this account.</p> : null}
+                    </div>
+                    <div className="sf-organization-member-actions">
+                      <select
+                        value={member.role}
+                        disabled={!canUpdateMembers || settings.isSaving || isProtectedSelfOwner}
+                        onChange={(event) => {
+                          if (isProtectedSelfOwner) {
+                            return;
+                          }
+
+                          void settings.updateMemberRole(member.userId, event.target.value);
+                        }}
+                      >
+                        {roleOptions.map((item) => (
+                          <option key={item} value={item}>{item}</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={!canRemove || settings.isSaving || member.userId === auth.currentUser?.id}
+                        onClick={() => {
+                          void settings.removeMember(member.userId);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
-                  <div className="sf-organization-member-actions">
-                    <select
-                      value={member.role}
-                      disabled={!canUpdateMembers || settings.isSaving}
-                      onChange={(event) => {
-                        void settings.updateMemberRole(member.userId, event.target.value);
-                      }}
-                    >
-                      {roleOptions.map((item) => (
-                        <option key={item} value={item}>{item}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      disabled={!canRemove || settings.isSaving || member.userId === auth.currentUser?.id}
-                      onClick={() => {
-                        void settings.removeMember(member.userId);
-                      }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {!canUpdateMembers ? <p className="sf-host-muted-note">Read-only: your role can view members but cannot change roles.</p> : null}

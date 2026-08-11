@@ -39,7 +39,7 @@ public sealed class BillingService(
         var options = billingOptions.Value;
         if (!options.PlanPriceIds.TryGetValue(planName, out var priceId) || string.IsNullOrWhiteSpace(priceId))
         {
-            return ApiResponse<CreateCheckoutSessionResponse>.Fail("Plan price mapping is not configured.");
+            return ApiResponse<CreateCheckoutSessionResponse>.Fail($"Plan price mapping for '{planName}' is not configured. Add a value under Billing:PlanPriceIds for this plan.");
         }
 
         var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
@@ -194,6 +194,10 @@ public sealed class BillingService(
             return ApiResponse<BillingSubscriptionResponse?>.Fail(authorization.Error);
         }
 
+        var company = await dbContext.Companies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
+
         var subscription = await dbContext.TenantSubscriptions
             .AsNoTracking()
             .Include(item => item.SubscriptionPlan)
@@ -201,10 +205,10 @@ public sealed class BillingService(
             .FirstOrDefaultAsync(item => item.CompanyId == companyId, cancellationToken);
         if (subscription is null)
         {
-            return ApiResponse<BillingSubscriptionResponse?>.Ok(null, "No active subscription.");
+            return ApiResponse<BillingSubscriptionResponse?>.Ok(MapSubscriptionResponse(companyId, null, company?.StripeCustomerId), "No active subscription.");
         }
 
-        return ApiResponse<BillingSubscriptionResponse?>.Ok(MapSubscriptionResponse(companyId, subscription));
+        return ApiResponse<BillingSubscriptionResponse?>.Ok(MapSubscriptionResponse(companyId, subscription, company?.StripeCustomerId));
     }
 
     public async Task<ApiResponse<IReadOnlyCollection<BillingPlanResponse>>> GetPlansAsync(CancellationToken cancellationToken)
@@ -300,8 +304,12 @@ public sealed class BillingService(
         var options = billingOptions.Value;
         if (!options.PlanPriceIds.TryGetValue(planName, out var priceId) || string.IsNullOrWhiteSpace(priceId))
         {
-            return ApiResponse<BillingSubscriptionResponse>.Fail("Plan price mapping is not configured.");
+            return ApiResponse<BillingSubscriptionResponse>.Fail($"Plan price mapping for '{planName}' is not configured. Add a value under Billing:PlanPriceIds for this plan.");
         }
+
+        var company = await dbContext.Companies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
 
         var subscription = await dbContext.TenantSubscriptions
             .Include(item => item.SubscriptionPlan)
@@ -335,7 +343,7 @@ public sealed class BillingService(
         }, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription), "Plan changed successfully.");
+        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription, company?.StripeCustomerId), "Plan changed successfully.");
     }
 
     public async Task<ApiResponse<BillingSubscriptionResponse>> CancelSubscriptionAsync(CancelSubscriptionRequest request, CancellationToken cancellationToken)
@@ -350,6 +358,10 @@ public sealed class BillingService(
         {
             return ApiResponse<BillingSubscriptionResponse>.Fail(authorization.Error);
         }
+
+        var company = await dbContext.Companies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
 
         var subscription = await dbContext.TenantSubscriptions
             .Include(item => item.SubscriptionPlan)
@@ -383,7 +395,7 @@ public sealed class BillingService(
         }, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription), "Subscription cancellation updated.");
+        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription, company?.StripeCustomerId), "Subscription cancellation updated.");
     }
 
     public async Task<ApiResponse<BillingSubscriptionResponse>> ResumeSubscriptionAsync(CancellationToken cancellationToken)
@@ -398,6 +410,10 @@ public sealed class BillingService(
         {
             return ApiResponse<BillingSubscriptionResponse>.Fail(authorization.Error);
         }
+
+        var company = await dbContext.Companies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
 
         var subscription = await dbContext.TenantSubscriptions
             .Include(item => item.SubscriptionPlan)
@@ -430,7 +446,7 @@ public sealed class BillingService(
         }, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription), "Subscription resumed.");
+        return ApiResponse<BillingSubscriptionResponse>.Ok(MapSubscriptionResponse(companyId, subscription, company?.StripeCustomerId), "Subscription resumed.");
     }
 
     public async Task<ApiResponse<IReadOnlyCollection<TenantInvoiceDto>>> GetInvoicesAsync(CancellationToken cancellationToken)
@@ -890,19 +906,31 @@ public sealed class BillingService(
             || exception.InnerException?.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase) == true;
     }
 
-    private static BillingSubscriptionResponse MapSubscriptionResponse(Guid companyId, TenantSubscription subscription)
+    private static BillingSubscriptionResponse MapSubscriptionResponse(Guid companyId, TenantSubscription? subscription, string? stripeCustomerId = null)
     {
+        var hasStripeCustomer = !string.IsNullOrWhiteSpace(stripeCustomerId);
+        var hasStripeSubscription = subscription is not null && !string.IsNullOrWhiteSpace(subscription.ExternalSubscriptionId);
+        var status = subscription?.Status ?? SubscriptionStatus.Active.ToStorageValue();
+        var planName = subscription?.SubscriptionPlan?.DisplayName ?? subscription?.SubscriptionPlan?.Name ?? "Free";
+
         return new BillingSubscriptionResponse
         {
             CompanyId = companyId,
-            Status = subscription.Status,
-            CancelAtPeriodEnd = subscription.CancelAtPeriodEnd,
-            CurrentPeriodStartUtc = subscription.CurrentPeriodStartUtc,
-            CurrentPeriodEndUtc = subscription.CurrentPeriodEndUtc,
-            TrialEndsAtUtc = subscription.TrialEndsAtUtc,
-            PlanName = subscription.SubscriptionPlan?.DisplayName ?? subscription.SubscriptionPlan?.Name,
-            ExternalSubscriptionId = subscription.ExternalSubscriptionId,
-            ExternalPriceId = subscription.ExternalPriceId
+            Status = status,
+            CancelAtPeriodEnd = subscription?.CancelAtPeriodEnd ?? false,
+            CurrentPeriodStartUtc = subscription?.CurrentPeriodStartUtc ?? DateTimeOffset.MinValue,
+            CurrentPeriodEndUtc = subscription?.CurrentPeriodEndUtc ?? DateTimeOffset.MinValue,
+            TrialEndsAtUtc = subscription?.TrialEndsAtUtc,
+            PlanName = planName,
+            ExternalSubscriptionId = subscription?.ExternalSubscriptionId,
+            ExternalPriceId = subscription?.ExternalPriceId,
+            HasStripeCustomer = hasStripeCustomer,
+            HasStripeSubscription = hasStripeSubscription,
+            CanOpenBillingPortal = hasStripeCustomer,
+            CanManagePaymentMethod = hasStripeCustomer,
+            CanCancel = hasStripeCustomer && hasStripeSubscription && !string.Equals(status, SubscriptionStatus.Cancelled.ToStorageValue(), StringComparison.OrdinalIgnoreCase),
+            CanResume = hasStripeCustomer && hasStripeSubscription && string.Equals(status, SubscriptionStatus.CancelAtPeriodEnd.ToStorageValue(), StringComparison.OrdinalIgnoreCase),
+            CanStartCheckout = subscription is null || !hasStripeCustomer || string.Equals(status, SubscriptionStatus.CancelAtPeriodEnd.ToStorageValue(), StringComparison.OrdinalIgnoreCase)
         };
     }
 

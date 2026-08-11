@@ -1,4 +1,53 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+
+function toCanonicalOnboardingPath(step: string | null | undefined): string | null {
+  if (!step) {
+    return null;
+  }
+
+  const normalized = step.toLowerCase();
+  if (normalized.includes("complete")) {
+    return "/get-started";
+  }
+
+  if (normalized.includes("organization")) {
+    return "/onboarding/organization";
+  }
+
+  if (normalized.includes("plan")) {
+    return "/onboarding/plan";
+  }
+
+  if (normalized.includes("property")) {
+    return "/onboarding/property";
+  }
+
+  if (normalized.includes("team")) {
+    return "/onboarding/team";
+  }
+
+  if (normalized.includes("whatsapp")) {
+    return "/onboarding/whatsapp";
+  }
+
+  if (normalized.includes("ai")) {
+    return "/onboarding/ai";
+  }
+
+  if (normalized.includes("knowledge")) {
+    return "/onboarding/knowledge";
+  }
+
+  if (normalized.includes("demo")) {
+    return "/onboarding/demo";
+  }
+
+  if (normalized.includes("review")) {
+    return "/onboarding/review";
+  }
+
+  return "/onboarding/welcome";
+}
 import { createOnboardingApi } from "../api/onboardingApi";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { getRuntimeApiUrl } from "../runtimeConfig";
@@ -50,9 +99,7 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
     setIsLoading(true);
     setError(null);
     try {
-      const current = await api.getStatus().catch(async () => {
-        return api.start();
-      });
+      const current = await api.getStatus();
       setStatus(current);
     } catch (failure) {
       handleFailure(failure, "Unable to load onboarding status.");
@@ -64,6 +111,22 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const canonicalPath = toCanonicalOnboardingPath(status?.currentStep);
+    if (!canonicalPath) {
+      return;
+    }
+
+    const currentPath = window.location.pathname.toLowerCase();
+    if (currentPath === canonicalPath) {
+      return;
+    }
+
+    if (currentPath === "/onboarding" || currentPath === "/onboarding/" || currentPath.startsWith("/onboarding/") || currentPath === "/get-started" || currentPath === "/get-started/") {
+      window.history.replaceState({}, "", canonicalPath);
+    }
+  }, [status?.currentStep]);
 
   const withStatusMutation = useCallback(async (action: () => Promise<OnboardingStatus>, successMessage: string) => {
     if (!accessToken) {

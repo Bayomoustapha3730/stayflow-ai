@@ -3,6 +3,7 @@ import { HostConsoleNav, HostLoginPanel } from "../components/host";
 import { useHostAuth } from "../hooks/useHostAuth";
 import { useBillingDashboard } from "../hooks/useBillingDashboard";
 import { billingPlanCards, getPlanRank } from "./billingPlans";
+import { getBillingCapabilityMessage } from "./billingCapabilityMessages";
 import "../styles/host-inbox.css";
 import "../styles/organization-settings.css";
 import "../styles/billing-dashboard.css";
@@ -126,7 +127,9 @@ export function BillingDashboardPage() {
             <p>
               Trial active until <strong>{toDateLabel(subscription.trialEndsAtUtc)}</strong>. Add a payment method before expiry to avoid service interruption.
             </p>
-            <button type="button" onClick={() => void billing.openPaymentMethodPortal()} disabled={isBusy}>Add Payment Method</button>
+            {subscription?.canManagePaymentMethod ? (
+              <button type="button" onClick={() => void billing.openPaymentMethodPortal()} disabled={isBusy}>Add Payment Method</button>
+            ) : null}
           </section>
         ) : null}
 
@@ -150,15 +153,33 @@ export function BillingDashboardPage() {
               <span>Cancel at period end</span>
               <strong>{subscription?.cancelAtPeriodEnd ? "Yes" : "No"}</strong>
             </div>
-            <div className="sf-billing-actions">
-              <button type="button" onClick={() => void billing.openBillingPortal()} disabled={isBusy}>Open Billing Portal</button>
-              <button type="button" onClick={() => void billing.openPaymentMethodPortal()} disabled={isBusy}>Manage Payment Method</button>
+            <div className="sf-billing-key-value">
+              <span>Billing status</span>
+              <strong>{getBillingCapabilityMessage(subscription)}</strong>
             </div>
-            <div className="sf-billing-actions">
-              <button type="button" onClick={() => void billing.cancelSubscription(true)} disabled={isBusy}>Cancel at Period End</button>
-              <button type="button" onClick={() => void billing.cancelSubscription(false)} disabled={isBusy}>Cancel Now</button>
-              <button type="button" onClick={() => void billing.resumeSubscription()} disabled={isBusy}>Resume</button>
-            </div>
+            {(subscription?.canOpenBillingPortal || subscription?.canManagePaymentMethod) ? (
+              <div className="sf-billing-actions">
+                {subscription?.canOpenBillingPortal ? (
+                  <button type="button" onClick={() => void billing.openBillingPortal()} disabled={isBusy}>Open Billing Portal</button>
+                ) : null}
+                {subscription?.canManagePaymentMethod ? (
+                  <button type="button" onClick={() => void billing.openPaymentMethodPortal()} disabled={isBusy}>Manage Payment Method</button>
+                ) : null}
+              </div>
+            ) : null}
+            {(subscription?.canCancel || subscription?.canResume) ? (
+              <div className="sf-billing-actions">
+                {subscription?.canCancel ? (
+                  <>
+                    <button type="button" onClick={() => void billing.cancelSubscription(true)} disabled={isBusy}>Cancel at Period End</button>
+                    <button type="button" onClick={() => void billing.cancelSubscription(false)} disabled={isBusy}>Cancel Now</button>
+                  </>
+                ) : null}
+                {subscription?.canResume ? (
+                  <button type="button" onClick={() => void billing.resumeSubscription()} disabled={isBusy}>Resume</button>
+                ) : null}
+              </div>
+            ) : null}
           </article>
 
           <article className="sf-organization-card">
@@ -175,8 +196,8 @@ export function BillingDashboardPage() {
                     {plan.highlights.map((item) => <li key={item}>{item}</li>)}
                   </ul>
                   <div className="sf-plan-actions">
-                    <button type="button" onClick={() => setPendingPlan(plan.name)} disabled={isBusy}>{planChangeLabel(subscription?.planName, plan.name)} Plan</button>
-                    <button type="button" onClick={() => void billing.openCheckout(plan.name, plan.trialDays)} disabled={isBusy}>Start Trial / Checkout</button>
+                    <button type="button" onClick={() => setPendingPlan(plan.name)} disabled={isBusy || !subscription?.hasStripeSubscription}>{planChangeLabel(subscription?.planName, plan.name)} Plan</button>
+                    <button type="button" onClick={() => void billing.openCheckout(plan.name, plan.trialDays)} disabled={isBusy || !subscription?.canStartCheckout}>Start Trial / Checkout</button>
                   </div>
                 </div>
               ))}
@@ -206,14 +227,14 @@ export function BillingDashboardPage() {
                 })}
               </div>
             ) : (
-              <p>No usage data available yet.</p>
+              <p>{getBillingCapabilityMessage(subscription)} No usage data is available yet.</p>
             )}
           </article>
 
           <article className="sf-organization-card">
             <h2>Invoice History</h2>
             {billing.invoices.length === 0 ? (
-              <p>No invoices yet.</p>
+              <p>{getBillingCapabilityMessage(subscription)} No invoices are available yet.</p>
             ) : (
               <div className="sf-invoice-table-wrap">
                 <table className="sf-invoice-table">
@@ -248,7 +269,7 @@ export function BillingDashboardPage() {
             <h2 id="dashboard-plan-dialog-title">Confirm {pendingAction}</h2>
             <p>
               Confirm {pendingAction.toLowerCase()} from <strong>{subscription?.planName ?? "no active plan"}</strong> to <strong>{pendingPlan}</strong>.
-              Stripe will handle proration automatically.
+              {subscription?.hasStripeSubscription ? "Stripe will handle proration automatically." : "Checkout will activate the selected plan once completed."}
             </p>
             <div className="sf-billing-dialog-actions">
               <button type="button" onClick={() => setPendingPlan(null)} disabled={isBusy}>Keep Current Plan</button>

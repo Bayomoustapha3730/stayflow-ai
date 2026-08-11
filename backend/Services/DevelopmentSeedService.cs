@@ -19,18 +19,25 @@ public sealed class DevelopmentSeedService(
     private static readonly Guid DemoDemoGuestId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid DemoDemoReservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid DemoDemoRoleId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+    private static readonly Guid DemoSubscriptionId = Guid.Parse("99999999-9999-4999-8999-999999999999");
     private static readonly Guid DemoWhatsAppIntegrationId = Guid.Parse("77777777-7777-7777-7777-777777777777");
     private static readonly Guid DemoTemplateWelcomeGuestId = Guid.Parse("88888888-8888-4888-8888-888888888881");
     private static readonly Guid DemoTemplateBookingConfirmationId = Guid.Parse("88888888-8888-4888-8888-888888888882");
     private static readonly Guid DemoTemplateLateCheckoutId = Guid.Parse("88888888-8888-4888-8888-888888888883");
     private static readonly Guid DemoTemplateCheckinInstructionsId = Guid.Parse("88888888-8888-4888-8888-888888888884");
     private static readonly Guid DemoTemplateCheckoutReminderId = Guid.Parse("88888888-8888-4888-8888-888888888885");
+    private static readonly Guid OnboardingTestCompanyId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1");
+    private static readonly Guid OnboardingTestUserId = Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1");
 
     private const string DemoUserEmail = "demo.user@stayflow.local";
     private const string DemoUserFullName = "Demo User";
     private const string DemoReservationReference = "DEMO-2026-001";
     private const string DemoRoleName = "Demo Administrator";
     private const string DemoOrganizationRole = nameof(OrganizationRole.Owner);
+    private const string OnboardingTestUserEmail = "onboarding.user@stayflow.local";
+    private const string OnboardingTestUserFullName = "Onboarding Test User";
+    private const string OnboardingTestCompanyName = "StayFlow Onboarding Test";
+    private const string OnboardingTestCompanySlug = "stayflow-onboarding-test";
 
     public async Task SeedAsync(CancellationToken cancellationToken)
     {
@@ -46,14 +53,107 @@ public sealed class DevelopmentSeedService(
 
         var currentDate = DateOnly.FromDateTime(DateTime.UtcNow);
         await EnsureDemoReservationAsync(currentDate, cancellationToken);
+        await EnsureDemoSubscriptionAsync(cancellationToken);
         await EnsureDemoPropertyKnowledgeAsync(cancellationToken);
         await EnsureDemoWhatsAppIntegrationAsync(cancellationToken);
         await EnsureDemoWhatsAppTemplatesAsync(cancellationToken);
+        await EnsureDemoOnboardingAsync(cancellationToken);
         await EnsureDemoUserRoleAsync(demoUser.Id, role.Id, cancellationToken);
         await EnsureDemoOrganizationMembershipAsync(demoUser.Id, cancellationToken);
         await EnsureDemoCompanyOwnershipAsync(demoUser.Id, cancellationToken);
 
+        var onboardingPassword = configuration["DevelopmentSeed:OnboardingTestPassword"] ?? demoPassword;
+        await EnsureOnboardingTestTenantAsync(role, onboardingPassword, cancellationToken);
+
         await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task EnsureOnboardingTestTenantAsync(Role role, string onboardingPassword, CancellationToken cancellationToken)
+    {
+        var company = await dbContext.Companies
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(item => item.Id == OnboardingTestCompanyId, cancellationToken);
+
+        if (company is null)
+        {
+            company = new Company { Id = OnboardingTestCompanyId };
+            dbContext.Companies.Add(company);
+        }
+
+        company.Name = OnboardingTestCompanyName;
+        company.Slug = OnboardingTestCompanySlug;
+        company.NormalizedSlug = OnboardingTestCompanySlug.ToUpperInvariant();
+        company.Status = "Active";
+        company.LegalName = "StayFlow Onboarding Test Ltd";
+        company.Email = OnboardingTestUserEmail;
+        company.PhoneNumber = "+254700000101";
+        company.CountryCode = "KE";
+        company.TimeZone = "Africa/Nairobi";
+        company.IsActive = true;
+        company.OnboardingState = OnboardingStep.Welcome.ToStorageValue();
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var user = await dbContext.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(item => item.Id == OnboardingTestUserId, cancellationToken);
+
+        if (user is null)
+        {
+            user = new User { Id = OnboardingTestUserId };
+            dbContext.Users.Add(user);
+        }
+
+        user.CompanyId = OnboardingTestCompanyId;
+        user.Email = OnboardingTestUserEmail;
+        user.FullName = OnboardingTestUserFullName;
+        user.PhoneNumber = "+254700000102";
+        user.PasswordHash = passwordHasher.HashPassword(onboardingPassword);
+        user.IsEmailVerified = true;
+        user.IsActive = true;
+        user.Role = DemoOrganizationRole;
+
+        var membership = await dbContext.OrganizationMembers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(member => member.CompanyId == OnboardingTestCompanyId && member.UserId == user.Id, cancellationToken);
+
+        if (membership is null)
+        {
+            membership = new OrganizationMember
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = OnboardingTestCompanyId,
+                UserId = user.Id,
+                JoinedAt = DateTimeOffset.UtcNow
+            };
+            dbContext.OrganizationMembers.Add(membership);
+        }
+
+        membership.Role = DemoOrganizationRole;
+        membership.Status = OrganizationMemberStatus.Active.ToStorageValue();
+
+        await EnsureDemoUserRoleAsync(user.Id, role.Id, cancellationToken);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        company.OwnerUserId = user.Id;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var progressRows = await dbContext.OnboardingProgressRecords
+            .Where(item => item.CompanyId == OnboardingTestCompanyId && item.UserId == OnboardingTestUserId)
+            .ToListAsync(cancellationToken);
+        if (progressRows.Count > 0)
+        {
+            dbContext.OnboardingProgressRecords.RemoveRange(progressRows);
+        }
+
+        var onboardingEvents = await dbContext.OnboardingEvents
+            .Where(item => item.CompanyId == OnboardingTestCompanyId && item.UserId == OnboardingTestUserId)
+            .ToListAsync(cancellationToken);
+        if (onboardingEvents.Count > 0)
+        {
+            dbContext.OnboardingEvents.RemoveRange(onboardingEvents);
+        }
     }
 
     private async Task<User> GetOrCreateDemoUserAsync(Role role, string demoPassword, CancellationToken cancellationToken)
@@ -116,6 +216,60 @@ public sealed class DevelopmentSeedService(
         }
 
         company.OwnerUserId = userId;
+    }
+
+    private async Task EnsureDemoOnboardingAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+
+        var progress = await dbContext.OnboardingProgressRecords
+            .FirstOrDefaultAsync(item => item.CompanyId == SeedData.DemoCompanyId && item.UserId == DemoDemoUserId, cancellationToken);
+
+        if (progress is null)
+        {
+            progress = new OnboardingProgress
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = SeedData.DemoCompanyId,
+                UserId = DemoDemoUserId
+            };
+            dbContext.OnboardingProgressRecords.Add(progress);
+        }
+
+        progress.CurrentStep = OnboardingStep.Completed.ToStorageValue();
+        progress.CompletedStepsCsv = string.Join(',', new[]
+        {
+            OnboardingStep.Welcome,
+            OnboardingStep.OrganizationProfile,
+            OnboardingStep.PlanConfirmation,
+            OnboardingStep.FirstProperty,
+            OnboardingStep.WhatsAppSetup,
+            OnboardingStep.AiProviderSetup,
+            OnboardingStep.KnowledgeBaseSetup,
+            OnboardingStep.Review,
+            OnboardingStep.Completed
+        }.Select(step => step.ToStorageValue()));
+        progress.SkippedStepsCsv = string.Join(',', new[]
+        {
+            OnboardingStep.TeamInvitations,
+            OnboardingStep.DemoData
+        }.Select(step => step.ToStorageValue()));
+        progress.SelectedPlanName = "Starter";
+        progress.FirstPropertyId = SeedData.DemoPropertyId;
+        progress.IsCompleted = true;
+        progress.CompletedAtUtc = now;
+        progress.CompletedByUserId = DemoDemoUserId;
+        progress.StartedAtUtc = progress.StartedAtUtc == default ? now : progress.StartedAtUtc;
+        progress.LastUpdatedAtUtc = now;
+        progress.Version = progress.Version <= 0 ? 1 : progress.Version + 1;
+
+        var company = await dbContext.Companies
+            .FirstOrDefaultAsync(item => item.Id == SeedData.DemoCompanyId, cancellationToken);
+
+        if (company is not null)
+        {
+            company.OnboardingState = OnboardingStep.Completed.ToStorageValue();
+        }
     }
 
     private async Task EnsureDemoGuestAsync(CancellationToken cancellationToken)
@@ -188,6 +342,69 @@ public sealed class DevelopmentSeedService(
                 UserId = userId,
                 RoleId = roleId
             });
+        }
+    }
+
+    private async Task EnsureDemoSubscriptionAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var periodStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEnd = periodStart.AddMonths(1).AddTicks(-1);
+
+        var activeStatuses = new[]
+        {
+            SubscriptionStatus.Active.ToStorageValue(),
+            SubscriptionStatus.Trialing.ToStorageValue(),
+            SubscriptionStatus.PastDue.ToStorageValue(),
+            SubscriptionStatus.CancelAtPeriodEnd.ToStorageValue()
+        };
+
+        var subscriptions = await dbContext.TenantSubscriptions
+            .Where(item => item.CompanyId == SeedData.DemoCompanyId)
+            .ToListAsync(cancellationToken);
+        subscriptions = subscriptions
+            .OrderByDescending(item => item.CurrentPeriodStartUtc)
+            .ToList();
+
+        var primary = subscriptions.FirstOrDefault(item => item.Id == DemoSubscriptionId)
+            ?? subscriptions.FirstOrDefault(item => activeStatuses.Contains(item.Status));
+
+        if (primary is null)
+        {
+            primary = new TenantSubscription
+            {
+                Id = DemoSubscriptionId,
+                CompanyId = SeedData.DemoCompanyId
+            };
+
+            dbContext.TenantSubscriptions.Add(primary);
+        }
+
+        primary.SubscriptionPlanId = SeedData.StarterPlanId;
+        primary.Status = SubscriptionStatus.Active.ToStorageValue();
+        primary.CancelAtPeriodEnd = false;
+        primary.EndedAtUtc = null;
+        primary.CurrentPeriodStartUtc = periodStart;
+        primary.CurrentPeriodEndUtc = periodEnd;
+        primary.TrialEndsAtUtc = null;
+        primary.Notes = "Development seed: demo tenant pinned to Starter plan for WhatsApp-enabled validation.";
+
+        foreach (var subscription in subscriptions)
+        {
+            if (subscription.Id == primary.Id)
+            {
+                continue;
+            }
+
+            if (!activeStatuses.Contains(subscription.Status))
+            {
+                continue;
+            }
+
+            subscription.Status = SubscriptionStatus.Cancelled.ToStorageValue();
+            subscription.CancelAtPeriodEnd = false;
+            subscription.EndedAtUtc = now;
+            subscription.Notes = "Development seed: superseded by deterministic demo Starter subscription.";
         }
     }
 

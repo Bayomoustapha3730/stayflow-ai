@@ -1,5 +1,28 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const start = vi.fn().mockResolvedValue({
+  companyId: "c1",
+  userId: "u1",
+  currentStep: "OrganizationProfile",
+  currentStepState: "InProgress",
+  completedSteps: ["Welcome"],
+  remainingSteps: ["OrganizationProfile"],
+  skippedSteps: [],
+  blockers: [],
+  checklist: [],
+  percentComplete: 10,
+  nextRecommendedAction: "Complete OrganizationProfile",
+  safeLinks: [{ rel: "current_step", href: "/onboarding/organization" }],
+  startedAtUtc: "2026-08-01T00:00:00Z",
+  selectedPlanName: null,
+  firstPropertyId: null,
+  isCompleted: false,
+  completedAtUtc: null,
+  completedByUserId: null,
+  lastUpdatedAtUtc: "2026-08-01T00:00:00Z",
+  version: 1
+});
 
 const hostAuthState = {
   accessToken: "token",
@@ -24,56 +47,98 @@ const hostAuthState = {
 
 const saveOrganization = vi.fn().mockResolvedValue(undefined);
 
+const onboardingState = {
+  status: {
+    companyId: "c1",
+    userId: "u1",
+    currentStep: "OrganizationProfile",
+    currentStepState: "InProgress",
+    completedSteps: ["Welcome"],
+    remainingSteps: ["OrganizationProfile"],
+    skippedSteps: [],
+    blockers: [],
+    checklist: [],
+    reviewSummary: {
+      organizationName: "StayFlow KE",
+      organizationSlug: "stayflow-ke",
+      organizationSupportEmail: "support@stayflow.test",
+      organizationTimeZone: "Africa/Nairobi",
+      selectedPlanName: "Growth",
+      firstPropertyId: "p1",
+      firstPropertyName: "Nairobi Loft",
+      teamInvitationsState: "Completed",
+      teamInvitations: [{ email: "host1@test.io", role: "Host", status: "Pending" }],
+      whatsAppSetupState: "Skipped",
+      whatsAppIntegrationName: "Demo WhatsApp Concierge",
+      aiProviderState: "Completed",
+      aiProvider: "Development",
+      knowledgeSetupState: "Completed",
+      knowledgeTitle: "House Rules",
+      demoDataState: "Skipped"
+    },
+    percentComplete: 10,
+    nextRecommendedAction: "Complete OrganizationProfile",
+    safeLinks: [],
+    startedAtUtc: "2026-08-01T00:00:00Z",
+    selectedPlanName: null,
+    firstPropertyId: null,
+    isCompleted: false,
+    completedAtUtc: null,
+    completedByUserId: null,
+    lastUpdatedAtUtc: "2026-08-01T00:00:00Z",
+    version: 1
+  },
+  isLoading: false,
+  isSaving: false,
+  error: null,
+  message: null,
+  refresh: vi.fn(),
+  start,
+  saveOrganization,
+  confirmPlan: vi.fn(),
+  createProperty: vi.fn(),
+  submitInvitations: vi.fn(),
+  configureWhatsApp: vi.fn(),
+  configureAi: vi.fn(),
+  submitKnowledge: vi.fn(),
+  generateDemoData: vi.fn(),
+  skipStep: vi.fn(),
+  complete: vi.fn()
+};
+
 vi.mock("../src/hooks/useHostAuth", () => ({
   useHostAuth: () => hostAuthState
 }));
 
 vi.mock("../src/hooks/useOnboardingWizard", () => ({
-  useOnboardingWizard: () => ({
-    status: {
-      companyId: "c1",
-      userId: "u1",
-      currentStep: "OrganizationProfile",
-      currentStepState: "InProgress",
-      completedSteps: ["Welcome"],
-      remainingSteps: ["OrganizationProfile"],
-      skippedSteps: [],
-      blockers: [],
-      checklist: [],
-      percentComplete: 10,
-      nextRecommendedAction: "Complete OrganizationProfile",
-      safeLinks: [],
-      startedAtUtc: "2026-08-01T00:00:00Z",
-      selectedPlanName: null,
-      firstPropertyId: null,
-      isCompleted: false,
-      completedAtUtc: null,
-      completedByUserId: null,
-      lastUpdatedAtUtc: "2026-08-01T00:00:00Z",
-      version: 1
-    },
-    isLoading: false,
-    isSaving: false,
-    error: null,
-    message: null,
-    refresh: vi.fn(),
-    start: vi.fn(),
-    saveOrganization,
-    confirmPlan: vi.fn(),
-    createProperty: vi.fn(),
-    submitInvitations: vi.fn(),
-    configureWhatsApp: vi.fn(),
-    configureAi: vi.fn(),
-    submitKnowledge: vi.fn(),
-    generateDemoData: vi.fn(),
-    skipStep: vi.fn(),
-    complete: vi.fn()
-  })
+  useOnboardingWizard: () => onboardingState
 }));
 
 import { OnboardingPage } from "../src/pages/OnboardingPage";
 
 describe("OnboardingPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onboardingState.status.currentStep = "OrganizationProfile";
+    onboardingState.status.completedSteps = ["Welcome"];
+    window.history.pushState({}, "", "/onboarding/organization");
+  });
+
+  it("starts onboarding and navigates to backend canonical current step", async () => {
+    window.history.pushState({}, "", "/onboarding/welcome");
+    onboardingState.status.currentStep = "Welcome";
+    onboardingState.status.completedSteps = [];
+
+    render(<OnboardingPage routeStep="welcome" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Onboarding" }));
+
+    expect(start).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/onboarding/organization");
+    });
+  });
+
   it("renders organization step and submits save", () => {
     render(<OnboardingPage routeStep="organization" />);
 
@@ -88,5 +153,14 @@ describe("OnboardingPage", () => {
 
     expect(screen.getByText("You're Ready")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Go to Host Inbox" })).toBeInTheDocument();
+  });
+
+  it("renders review summary with persisted onboarding inputs", () => {
+    render(<OnboardingPage routeStep="review" />);
+
+    expect(screen.getByText(/StayFlow KE/)).toBeInTheDocument();
+    expect(screen.getByText(/Growth/)).toBeInTheDocument();
+    expect(screen.getByText(/Nairobi Loft/)).toBeInTheDocument();
+    expect(screen.getByText(/Demo data choice/i)).toBeInTheDocument();
   });
 });

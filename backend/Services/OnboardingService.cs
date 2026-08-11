@@ -54,7 +54,10 @@ public sealed class OnboardingService(
         var progress = await FindProgressAsync(companyId, userId, cancellationToken);
         if (progress is null)
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Onboarding has not been initialized.");
+            var notStarted = await BuildNotStartedStatusAsync(companyId, userId, cancellationToken);
+            await AddOnboardingEventAsync(companyId, userId, "onboarding.step_viewed", notStarted.CurrentStep, notStarted.CurrentStepState, null, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return ApiResponse<OnboardingStatusDto>.Ok(notStarted);
         }
 
         var status = await BuildStatusAsync(progress, cancellationToken);
@@ -92,6 +95,41 @@ public sealed class OnboardingService(
         else
         {
             await AddOnboardingEventAsync(companyId, userId, "onboarding.resumed", progress.CurrentStep, OnboardingStepState.InProgress.ToString(), null, cancellationToken);
+        }
+
+        if (!progress.IsCompleted)
+        {
+            var completed = ParseSteps(progress.CompletedStepsCsv).ToHashSet();
+            var skipped = ParseSteps(progress.SkippedStepsCsv).ToHashSet();
+
+            // Starting onboarding should move the workflow past Welcome exactly once.
+            if (!completed.Contains(OnboardingStep.Welcome))
+            {
+                completed.Add(OnboardingStep.Welcome);
+                skipped.Remove(OnboardingStep.Welcome);
+                progress.CompletedStepsCsv = ToCsv(completed);
+                progress.SkippedStepsCsv = ToCsv(skipped);
+                await AddOnboardingEventAsync(
+                    companyId,
+                    userId,
+                    "onboarding.step_completed",
+                    OnboardingStep.Welcome.ToStorageValue(),
+                    OnboardingStepState.Completed.ToString(),
+                    null,
+                    cancellationToken);
+            }
+
+            var completedOrSkipped = completed.Union(skipped).ToHashSet();
+            var blockers = await CalculateBlockersAsync(progress, completedOrSkipped, cancellationToken);
+            progress.CurrentStep = ResolveCurrentStep(progress, completedOrSkipped, blockers).ToStorageValue();
+        }
+
+        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
+        if (company is not null)
+        {
+            company.OnboardingState = progress.IsCompleted
+                ? OnboardingStep.Completed.ToStorageValue()
+                : progress.CurrentStep;
         }
 
         progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -179,22 +217,33 @@ public sealed class OnboardingService(
             return ApiResponse<OnboardingStatusDto>.Fail("Plan confirmation step is not available yet.");
         }
 
-        var snapshot = await subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
-        if (string.IsNullOrWhiteSpace(snapshot.PlanName))
+        var snapshot = await subscriptionEntitlementService.TryGetCurrentSnapshotAsync(companyId, cancellationToken);
+        var effectivePlanName = snapshot?.PlanName;
+        if (string.IsNullOrWhiteSpace(effectivePlanName))
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("No active plan was found. Use billing checkout to activate a plan first.");
+            if (hostEnvironment.IsProduction())
+            {
+                return ApiResponse<OnboardingStatusDto>.Fail("No active plan was found. Use billing checkout to activate a plan first.");
+            }
+
+            effectivePlanName = NormalizeOptional(request.PlanName);
+            if (string.IsNullOrWhiteSpace(effectivePlanName))
+            {
+                return ApiResponse<OnboardingStatusDto>.Fail("No active plan was found. Provide a plan name in development onboarding.");
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(request.PlanName)
-            && !string.Equals(snapshot.PlanName, request.PlanName.Trim(), StringComparison.OrdinalIgnoreCase))
+        if (snapshot is not null
+            && !string.IsNullOrWhiteSpace(request.PlanName)
+            && !string.Equals(effectivePlanName, request.PlanName.Trim(), StringComparison.OrdinalIgnoreCase))
         {
             return ApiResponse<OnboardingStatusDto>.Fail("Plan changes must be completed through the billing flow.");
         }
 
-        progress.SelectedPlanName = snapshot.PlanName;
+        progress.SelectedPlanName = effectivePlanName;
         CompleteStep(progress, OnboardingStep.PlanConfirmation);
 
-        await AddAuditLogAsync(companyId, progress.Id, "OnboardingPlanConfirmed", new { snapshot.PlanName }, cancellationToken);
+        await AddAuditLogAsync(companyId, progress.Id, "OnboardingPlanConfirmed", new { planName = effectivePlanName }, cancellationToken);
         await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.PlanConfirmation.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
 
         progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -484,51 +533,75 @@ public sealed class OnboardingService(
             return ApiResponse<OnboardingStatusDto>.Fail("Knowledge title and content are required.");
         }
 
-        var existing = await dbContext.PropertyKnowledgeArticles
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.CompanyId == companyId
-                && item.PropertyId == propertyId
-                && !item.IsDeleted
-                && item.Title == request.Title.Trim()
-                && item.Content == request.Content.Trim(), cancellationToken);
-
-        if (existing is null)
+        Guid? createdArticleId = null;
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
         {
-            var created = await propertyKnowledgeService.CreateAsync(propertyId.Value, new CreatePropertyKnowledgeRequest
+            var existing = await dbContext.PropertyKnowledgeArticles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.CompanyId == companyId
+                    && item.PropertyId == propertyId
+                    && !item.IsDeleted
+                    && item.Title == request.Title.Trim()
+                    && item.Content == request.Content.Trim(), cancellationToken);
+
+            if (existing is null)
             {
-                Category = PropertyKnowledgeCategory.Other,
-                Title = request.Title,
-                Summary = request.Summary,
-                Content = request.Content,
-                Tags = request.Tags,
-                IsActive = true,
-                Priority = 0
+                var created = await propertyKnowledgeService.CreateAsync(propertyId.Value, new CreatePropertyKnowledgeRequest
+                {
+                    Category = PropertyKnowledgeCategory.Other,
+                    Title = request.Title,
+                    Summary = request.Summary,
+                    Content = request.Content,
+                    Tags = request.Tags,
+                    IsActive = true,
+                    Priority = 0
+                }, cancellationToken);
+
+                if (!created.Success || created.Data is null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return ApiResponse<OnboardingStatusDto>.Fail(created.Message, created.Errors);
+                }
+
+                createdArticleId = created.Data.Id;
+                if (!created.Data.IsApproved)
+                {
+                    var approved = await propertyKnowledgeService.ApproveAsync(propertyId.Value, created.Data.Id, cancellationToken);
+                    if (!approved.Success || approved.Data is null)
+                    {
+                        await CleanupCreatedKnowledgeArticleAsync(createdArticleId.Value, cancellationToken);
+                        await transaction.RollbackAsync(cancellationToken);
+                        return ApiResponse<OnboardingStatusDto>.Fail(approved.Message, approved.Errors);
+                    }
+                }
+            }
+
+            CompleteStep(progress, OnboardingStep.KnowledgeBaseSetup);
+
+            await AddAuditLogAsync(companyId, progress.Id, "OnboardingKnowledgeAdded", new
+            {
+                propertyId,
+                request.IdempotencyKey
             }, cancellationToken);
+            await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.KnowledgeBaseSetup.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
 
-            if (!created.Success || created.Data is null)
-            {
-                return ApiResponse<OnboardingStatusDto>.Fail(created.Message, created.Errors);
-            }
-
-            if (!created.Data.IsApproved)
-            {
-                await propertyKnowledgeService.ApproveAsync(propertyId.Value, created.Data.Id, cancellationToken);
-            }
+            progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+            progress.Version++;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
         }
-
-        CompleteStep(progress, OnboardingStep.KnowledgeBaseSetup);
-
-        await AddAuditLogAsync(companyId, progress.Id, "OnboardingKnowledgeAdded", new
+        catch (Exception ex)
         {
-            propertyId,
-            request.IdempotencyKey
-        }, cancellationToken);
-        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.KnowledgeBaseSetup.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
+            if (createdArticleId.HasValue)
+            {
+                await CleanupCreatedKnowledgeArticleAsync(createdArticleId.Value, cancellationToken);
+            }
 
-        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
-        progress.Version++;
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
+            await transaction.RollbackAsync(cancellationToken);
+            return ApiResponse<OnboardingStatusDto>.Fail($"Knowledge setup failed: {ex.Message}", [ex.Message]);
+        }
     }
 
     public async Task<ApiResponse<OnboardingStatusDto>> CompleteDemoDataStepAsync(OnboardingDemoDataRequest request, CancellationToken cancellationToken)
@@ -555,148 +628,180 @@ public sealed class OnboardingService(
             return ApiResponse<OnboardingStatusDto>.Fail("First property must be configured before demo data.");
         }
 
+        var property = await dbContext.Properties.AsNoTracking().FirstOrDefaultAsync(item => item.CompanyId == companyId && item.Id == propertyId.Value && !item.IsDeleted, cancellationToken);
+        if (property is null)
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("The selected onboarding property does not belong to this tenant.");
+        }
+
         var marker = $"[DEMO][ONBOARDING][{companyId:N}]";
 
-        Guest? guest = null;
-        if (request.CreateSampleReservation || request.CreateSampleConversation)
-        {
-            guest = await dbContext.Guests.FirstOrDefaultAsync(item => item.CompanyId == companyId && item.Email == $"demo+{companyId:N}@stayflow.invalid" && !item.IsDeleted, cancellationToken);
-            if (guest is null)
-            {
-                guest = new Guest
-                {
-                    Id = Guid.NewGuid(),
-                    CompanyId = companyId,
-                    FirstName = "Demo",
-                    LastName = "Guest",
-                    Email = $"demo+{companyId:N}@stayflow.invalid",
-                    PreferredLanguage = "en",
-                    CountryCode = "KE",
-                    IsActive = true,
-                    Notes = marker
-                };
+        var createdGuests = new List<Guest>();
+        var createdReservations = new List<Reservation>();
+        var createdConversations = new List<Conversation>();
+        var createdMessages = new List<ConversationMessage>();
+        var createdKnowledgeItems = new List<PropertyKnowledgeArticle>();
 
-                await dbContext.Guests.AddAsync(guest, cancellationToken);
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            Guest? guest = null;
+            if (request.CreateSampleReservation || request.CreateSampleConversation)
+            {
+                guest = await dbContext.Guests.FirstOrDefaultAsync(item => item.CompanyId == companyId && item.Email == $"demo+{companyId:N}@stayflow.invalid" && !item.IsDeleted, cancellationToken);
+                if (guest is null)
+                {
+                    guest = new Guest
+                    {
+                        Id = Guid.NewGuid(),
+                        CompanyId = companyId,
+                        FirstName = "Demo",
+                        LastName = "Guest",
+                        Email = $"demo+{companyId:N}@stayflow.invalid",
+                        PreferredLanguage = "en",
+                        CountryCode = "KE",
+                        IsActive = true,
+                        Notes = marker
+                    };
+
+                    await dbContext.Guests.AddAsync(guest, cancellationToken);
+                    createdGuests.Add(guest);
+                }
             }
+
+            Reservation? reservation = null;
+            if (request.CreateSampleReservation && guest is not null)
+            {
+                var externalRef = $"{marker}:reservation";
+                reservation = await dbContext.Reservations.FirstOrDefaultAsync(item => item.CompanyId == companyId && item.ExternalReservationReference == externalRef && !item.IsDeleted, cancellationToken);
+                if (reservation is null)
+                {
+                    var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                    reservation = new Reservation
+                    {
+                        Id = Guid.NewGuid(),
+                        CompanyId = companyId,
+                        PropertyId = propertyId.Value,
+                        PrimaryGuestId = guest.Id,
+                        ExternalReservationReference = externalRef,
+                        ReservationSource = "Demo",
+                        CheckInDate = today,
+                        CheckOutDate = today.AddDays(2),
+                        Adults = 2,
+                        Children = 0,
+                        TotalGuestCount = 2,
+                        Status = ReservationStatus.Confirmed,
+                        IsActive = true,
+                        InternalNotes = marker
+                    };
+
+                    await dbContext.Reservations.AddAsync(reservation, cancellationToken);
+                    createdReservations.Add(reservation);
+                }
+            }
+
+            Conversation? conversation = null;
+            if (request.CreateSampleConversation && guest is not null)
+            {
+                var subject = $"{marker} First guest conversation";
+                conversation = await dbContext.Conversations.FirstOrDefaultAsync(item => item.CompanyId == companyId && item.Subject == subject && !item.IsDeleted, cancellationToken);
+                if (conversation is null)
+                {
+                    conversation = new Conversation
+                    {
+                        Id = Guid.NewGuid(),
+                        CompanyId = companyId,
+                        GuestId = guest.Id,
+                        PropertyId = propertyId,
+                        ReservationId = reservation?.Id,
+                        Subject = subject,
+                        Channel = DTOs.ReservationContext.GuestChannel.Web,
+                        Status = ConversationStatus.Open,
+                        StartedAt = DateTimeOffset.UtcNow,
+                        LastActivityAt = DateTimeOffset.UtcNow,
+                        HumanTakeoverEnabled = true
+                    };
+
+                    await dbContext.Conversations.AddAsync(conversation, cancellationToken);
+                    createdConversations.Add(conversation);
+                }
+
+                var hasDemoMessage = await dbContext.ConversationMessages
+                    .AnyAsync(item => item.CompanyId == companyId
+                        && item.ConversationId == conversation.Id
+                        && item.Content.Contains(marker, StringComparison.Ordinal), cancellationToken);
+                if (!hasDemoMessage)
+                {
+                    var message = new ConversationMessage
+                    {
+                        Id = Guid.NewGuid(),
+                        CompanyId = companyId,
+                        ConversationId = conversation.Id,
+                        SenderType = ConversationSenderType.Guest,
+                        Content = $"{marker} Hello, can I check in early?",
+                        MessageType = ConversationMessageType.Text,
+                        Provider = ConversationMessageProvider.None,
+                        SentAt = DateTimeOffset.UtcNow,
+                        IsInternal = false
+                    };
+
+                    await dbContext.ConversationMessages.AddAsync(message, cancellationToken);
+                    createdMessages.Add(message);
+                }
+            }
+
+            if (request.CreateSampleKnowledge)
+            {
+                var knowledgeTitle = $"{marker} Welcome Instructions";
+                var knowledgeExists = await dbContext.PropertyKnowledgeArticles.AnyAsync(item =>
+                    item.CompanyId == companyId
+                    && item.PropertyId == propertyId
+                    && !item.IsDeleted
+                    && item.Title == knowledgeTitle, cancellationToken);
+                if (!knowledgeExists)
+                {
+                    var knowledgeItem = new PropertyKnowledgeArticle
+                    {
+                        Id = Guid.NewGuid(),
+                        CompanyId = companyId,
+                        PropertyId = propertyId.Value,
+                        Category = PropertyKnowledgeCategory.CheckIn,
+                        Title = knowledgeTitle,
+                        Content = "Guest check-in starts at 3 PM. Use self-check-in lock instructions in your reservation message.",
+                        Tags = "demo,onboarding",
+                        IsApproved = true,
+                        IsActive = true,
+                        ApprovedAt = DateTimeOffset.UtcNow,
+                        Summary = marker,
+                        Priority = 0
+                    };
+
+                    await dbContext.PropertyKnowledgeArticles.AddAsync(knowledgeItem, cancellationToken);
+                    createdKnowledgeItems.Add(knowledgeItem);
+                }
+            }
+
+            CompleteStep(progress, OnboardingStep.DemoData);
+
+            await AddAuditLogAsync(companyId, progress.Id, "OnboardingDemoDataCreated", new
+            {
+                request.IdempotencyKey,
+                environment = hostEnvironment.EnvironmentName
+            }, cancellationToken);
+            await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.DemoData.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
+
+            progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+            progress.Version++;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
         }
-
-        Reservation? reservation = null;
-        if (request.CreateSampleReservation && guest is not null)
+        catch (Exception ex)
         {
-            var externalRef = $"{marker}:reservation";
-            reservation = await dbContext.Reservations.FirstOrDefaultAsync(item => item.CompanyId == companyId && item.ExternalReservationReference == externalRef && !item.IsDeleted, cancellationToken);
-            if (reservation is null)
-            {
-                var today = DateOnly.FromDateTime(DateTime.UtcNow);
-                reservation = new Reservation
-                {
-                    Id = Guid.NewGuid(),
-                    CompanyId = companyId,
-                    PropertyId = propertyId.Value,
-                    PrimaryGuestId = guest.Id,
-                    ExternalReservationReference = externalRef,
-                    ReservationSource = "Demo",
-                    CheckInDate = today,
-                    CheckOutDate = today.AddDays(2),
-                    Adults = 2,
-                    Children = 0,
-                    TotalGuestCount = 2,
-                    Status = ReservationStatus.Confirmed,
-                    IsActive = true,
-                    InternalNotes = marker
-                };
-
-                await dbContext.Reservations.AddAsync(reservation, cancellationToken);
-            }
+            await CleanupCreatedDemoDataAsync(createdGuests, createdReservations, createdConversations, createdMessages, createdKnowledgeItems, cancellationToken);
+            await transaction.RollbackAsync(cancellationToken);
+            return ApiResponse<OnboardingStatusDto>.Fail($"Demo data generation failed: {ex.Message}", [ex.Message]);
         }
-
-        Conversation? conversation = null;
-        if (request.CreateSampleConversation && guest is not null)
-        {
-            var subject = $"{marker} First guest conversation";
-            conversation = await dbContext.Conversations.FirstOrDefaultAsync(item => item.CompanyId == companyId && item.Subject == subject && !item.IsDeleted, cancellationToken);
-            if (conversation is null)
-            {
-                conversation = new Conversation
-                {
-                    Id = Guid.NewGuid(),
-                    CompanyId = companyId,
-                    GuestId = guest.Id,
-                    PropertyId = propertyId,
-                    ReservationId = reservation?.Id,
-                    Subject = subject,
-                    Channel = DTOs.ReservationContext.GuestChannel.Web,
-                    Status = ConversationStatus.Open,
-                    StartedAt = DateTimeOffset.UtcNow,
-                    LastActivityAt = DateTimeOffset.UtcNow,
-                    HumanTakeoverEnabled = true
-                };
-
-                await dbContext.Conversations.AddAsync(conversation, cancellationToken);
-            }
-
-            var hasDemoMessage = await dbContext.ConversationMessages
-                .AnyAsync(item => item.CompanyId == companyId
-                    && item.ConversationId == conversation.Id
-                    && item.Content.Contains(marker, StringComparison.Ordinal), cancellationToken);
-            if (!hasDemoMessage)
-            {
-                await dbContext.ConversationMessages.AddAsync(new ConversationMessage
-                {
-                    Id = Guid.NewGuid(),
-                    CompanyId = companyId,
-                    ConversationId = conversation.Id,
-                    SenderType = ConversationSenderType.Guest,
-                    Content = $"{marker} Hello, can I check in early?",
-                    MessageType = ConversationMessageType.Text,
-                    Provider = ConversationMessageProvider.None,
-                    SentAt = DateTimeOffset.UtcNow,
-                    IsInternal = false
-                }, cancellationToken);
-            }
-        }
-
-        if (request.CreateSampleKnowledge)
-        {
-            var knowledgeTitle = $"{marker} Welcome Instructions";
-            var knowledgeExists = await dbContext.PropertyKnowledgeArticles.AnyAsync(item =>
-                item.CompanyId == companyId
-                && item.PropertyId == propertyId
-                && !item.IsDeleted
-                && item.Title == knowledgeTitle, cancellationToken);
-            if (!knowledgeExists)
-            {
-                await dbContext.PropertyKnowledgeArticles.AddAsync(new PropertyKnowledgeArticle
-                {
-                    Id = Guid.NewGuid(),
-                    CompanyId = companyId,
-                    PropertyId = propertyId.Value,
-                    Category = PropertyKnowledgeCategory.CheckIn,
-                    Title = knowledgeTitle,
-                    Content = "Guest check-in starts at 3 PM. Use self-check-in lock instructions in your reservation message.",
-                    Tags = "demo,onboarding",
-                    IsApproved = true,
-                    IsActive = true,
-                    ApprovedAt = DateTimeOffset.UtcNow,
-                    Summary = marker,
-                    Priority = 0
-                }, cancellationToken);
-            }
-        }
-
-        CompleteStep(progress, OnboardingStep.DemoData);
-
-        await AddAuditLogAsync(companyId, progress.Id, "OnboardingDemoDataCreated", new
-        {
-            request.IdempotencyKey,
-            environment = hostEnvironment.EnvironmentName
-        }, cancellationToken);
-        await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.DemoData.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
-
-        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
-        progress.Version++;
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
     }
 
     public async Task<ApiResponse<OnboardingStatusDto>> SkipStepAsync(string step, OnboardingSkipStepRequest request, CancellationToken cancellationToken)
@@ -749,43 +854,59 @@ public sealed class OnboardingService(
             return ApiResponse<OnboardingStatusDto>.Fail("Review confirmation is required before completion.");
         }
 
-        var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
-        var status = await BuildStatusAsync(progress, cancellationToken);
-
-        var blockingItems = status.Checklist.Where(item =>
-            !item.Optional
-            && !string.Equals(item.Status, "complete", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (blockingItems.Count > 0 || status.Blockers.Count > 0)
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Onboarding completion is blocked by remaining required setup.");
+            var progress = await GetOrCreateProgressAsync(companyId, userId, cancellationToken);
+            if (!progress.IsCompleted)
+            {
+                CompleteStep(progress, OnboardingStep.Review);
+            }
+
+            var status = await BuildStatusAsync(progress, cancellationToken);
+
+            var blockingItems = status.Checklist.Where(item =>
+                !item.Optional
+                && !string.Equals(item.Status, "complete", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (blockingItems.Count > 0 || status.Blockers.Count > 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return ApiResponse<OnboardingStatusDto>.Fail("Onboarding completion is blocked by remaining required setup.");
+            }
+
+            progress.IsCompleted = true;
+            progress.CompletedAtUtc = DateTimeOffset.UtcNow;
+            progress.CompletedByUserId = userId;
+            progress.CurrentStep = OnboardingStep.Completed.ToStorageValue();
+            progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
+            progress.Version++;
+
+            var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
+            if (company is not null)
+            {
+                company.OnboardingState = OnboardingStep.Completed.ToStorageValue();
+            }
+
+            await AddAuditLogAsync(companyId, progress.Id, "OnboardingCompleted", new
+            {
+                elapsedMinutes = (int)Math.Max(0, (progress.CompletedAtUtc.Value - progress.StartedAtUtc).TotalMinutes)
+            }, cancellationToken);
+            await AddOnboardingEventAsync(companyId, userId, "onboarding.completed", OnboardingStep.Completed.ToStorageValue(), OnboardingStepState.Completed.ToString(), new
+            {
+                elapsedSeconds = (int)Math.Max(0, (progress.CompletedAtUtc.Value - progress.StartedAtUtc).TotalSeconds)
+            }, cancellationToken);
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
         }
-
-        progress.IsCompleted = true;
-        progress.CompletedAtUtc = DateTimeOffset.UtcNow;
-        progress.CompletedByUserId = userId;
-        progress.CurrentStep = OnboardingStep.Completed.ToStorageValue();
-        progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
-        progress.Version++;
-
-        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
-        if (company is not null)
+        catch (Exception ex)
         {
-            company.OnboardingState = OnboardingStep.Completed.ToStorageValue();
+            await transaction.RollbackAsync(cancellationToken);
+            return ApiResponse<OnboardingStatusDto>.Fail($"Onboarding completion failed: {ex.Message}", [ex.Message]);
         }
-
-        await AddAuditLogAsync(companyId, progress.Id, "OnboardingCompleted", new
-        {
-            elapsedMinutes = (int)Math.Max(0, (progress.CompletedAtUtc.Value - progress.StartedAtUtc).TotalMinutes)
-        }, cancellationToken);
-        await AddOnboardingEventAsync(companyId, userId, "onboarding.completed", OnboardingStep.Completed.ToStorageValue(), OnboardingStepState.Completed.ToString(), new
-        {
-            elapsedSeconds = (int)Math.Max(0, (progress.CompletedAtUtc.Value - progress.StartedAtUtc).TotalSeconds)
-        }, cancellationToken);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
     }
 
     public async Task<ApiResponse<OnboardingStatusDto>> ResetAsync(OnboardingResetRequest request, CancellationToken cancellationToken)
@@ -793,6 +914,11 @@ public sealed class OnboardingService(
         if (!TryGetContext(out var companyId, out var userId, out var error))
         {
             return ApiResponse<OnboardingStatusDto>.Fail(error);
+        }
+
+        if (hostEnvironment.IsProduction())
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("Onboarding reset is blocked in production.");
         }
 
         if (!request.Confirm)
@@ -834,6 +960,7 @@ public sealed class OnboardingService(
         completedOrSkipped.UnionWith(skipped);
 
         var blockers = await CalculateBlockersAsync(progress, completedOrSkipped, cancellationToken);
+        var reviewSummary = await BuildReviewSummaryAsync(progress, completed, skipped, blockers, cancellationToken);
 
         var currentStep = ResolveCurrentStep(progress, completedOrSkipped, blockers);
         var remainingSteps = WorkflowSteps
@@ -859,6 +986,7 @@ public sealed class OnboardingService(
             SkippedSteps = skipped.Select(item => item.ToStorageValue()).ToList(),
             Blockers = blockers,
             Checklist = checklist,
+            ReviewSummary = reviewSummary,
             PercentComplete = Math.Clamp(percent, 0, 100),
             NextRecommendedAction = blockers.FirstOrDefault(item => item.Step == currentStep.ToStorageValue())?.Message
                 ?? (currentStep == OnboardingStep.Completed ? "Open /get-started to continue." : $"Complete {currentStep.ToStorageValue()}"),
@@ -872,6 +1000,97 @@ public sealed class OnboardingService(
             LastUpdatedAtUtc = progress.LastUpdatedAtUtc,
             Version = progress.Version
         };
+    }
+
+    private async Task<OnboardingStatusDto> BuildNotStartedStatusAsync(Guid companyId, Guid userId, CancellationToken cancellationToken)
+    {
+        var emptyProgress = new OnboardingProgress
+        {
+            CompanyId = companyId,
+            UserId = userId,
+            CurrentStep = OnboardingStep.Welcome.ToStorageValue(),
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            LastUpdatedAtUtc = DateTimeOffset.UtcNow,
+            Version = 0,
+            IsCompleted = false
+        };
+
+        var completed = new HashSet<OnboardingStep>();
+        var skipped = new HashSet<OnboardingStep>();
+        var blockers = await CalculateBlockersAsync(emptyProgress, completed, cancellationToken);
+        var reviewSummary = await BuildReviewSummaryAsync(emptyProgress, completed, skipped, blockers, cancellationToken);
+        var checklist = await BuildChecklistAsync(emptyProgress, completed, skipped, blockers, cancellationToken);
+
+        return new OnboardingStatusDto
+        {
+            CompanyId = companyId,
+            UserId = userId,
+            CurrentStep = OnboardingStep.Welcome.ToStorageValue(),
+            CurrentStepState = OnboardingStepState.NotStarted.ToString(),
+            CompletedSteps = [],
+            RemainingSteps = WorkflowSteps.Select(step => step.ToStorageValue()).ToList(),
+            SkippedSteps = [],
+            Blockers = blockers,
+            Checklist = checklist,
+            ReviewSummary = reviewSummary,
+            PercentComplete = 0,
+            NextRecommendedAction = "Start onboarding.",
+            SafeLinks = BuildSafeLinks(OnboardingStep.Welcome),
+            StartedAtUtc = emptyProgress.StartedAtUtc,
+            SelectedPlanName = null,
+            FirstPropertyId = null,
+            IsCompleted = false,
+            CompletedAtUtc = null,
+            CompletedByUserId = null,
+            LastUpdatedAtUtc = emptyProgress.LastUpdatedAtUtc,
+            Version = 0
+        };
+    }
+
+    private async Task CleanupCreatedKnowledgeArticleAsync(Guid articleId, CancellationToken cancellationToken)
+    {
+        var article = await dbContext.PropertyKnowledgeArticles.FirstOrDefaultAsync(item => item.Id == articleId, cancellationToken);
+        if (article is not null)
+        {
+            dbContext.PropertyKnowledgeArticles.Remove(article);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private async Task CleanupCreatedDemoDataAsync(
+        IReadOnlyCollection<Guest> createdGuests,
+        IReadOnlyCollection<Reservation> createdReservations,
+        IReadOnlyCollection<Conversation> createdConversations,
+        IReadOnlyCollection<ConversationMessage> createdMessages,
+        IReadOnlyCollection<PropertyKnowledgeArticle> createdKnowledgeItems,
+        CancellationToken cancellationToken)
+    {
+        if (createdMessages.Count > 0)
+        {
+            dbContext.ConversationMessages.RemoveRange(createdMessages);
+        }
+
+        if (createdConversations.Count > 0)
+        {
+            dbContext.Conversations.RemoveRange(createdConversations);
+        }
+
+        if (createdReservations.Count > 0)
+        {
+            dbContext.Reservations.RemoveRange(createdReservations);
+        }
+
+        if (createdGuests.Count > 0)
+        {
+            dbContext.Guests.RemoveRange(createdGuests);
+        }
+
+        if (createdKnowledgeItems.Count > 0)
+        {
+            dbContext.PropertyKnowledgeArticles.RemoveRange(createdKnowledgeItems);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static IReadOnlyCollection<OnboardingSafeLinkDto> BuildSafeLinks(OnboardingStep currentStep)
@@ -897,33 +1116,6 @@ public sealed class OnboardingService(
         IReadOnlyCollection<OnboardingBlockerDto> blockers,
         CancellationToken cancellationToken)
     {
-        var ownerOrAdminCount = await dbContext.OrganizationMembers
-            .AsNoTracking()
-            .CountAsync(item => item.CompanyId == progress.CompanyId
-                && item.Status == OrganizationMemberStatus.Active.ToStorageValue()
-                && (item.Role == OrganizationRole.Owner.ToStorageValue() || item.Role == OrganizationRole.Administrator.ToStorageValue()), cancellationToken);
-
-        var hasProperty = await dbContext.Properties.AsNoTracking().AnyAsync(item => item.CompanyId == progress.CompanyId && !item.IsDeleted, cancellationToken);
-        var hasKnowledge = progress.FirstPropertyId.HasValue && await dbContext.PropertyKnowledgeArticles
-            .AsNoTracking()
-            .AnyAsync(item => item.CompanyId == progress.CompanyId
-                && item.PropertyId == progress.FirstPropertyId
-                && !item.IsDeleted
-                && item.IsActive, cancellationToken);
-
-        var hasInvitation = await dbContext.OrganizationInvitations
-            .AsNoTracking()
-            .AnyAsync(item => item.CompanyId == progress.CompanyId
-                && item.RevokedAtUtc == null
-                && item.ExpiresAtUtc > DateTimeOffset.UtcNow, cancellationToken);
-
-        var hasPlan = !string.IsNullOrWhiteSpace(progress.SelectedPlanName)
-            || await dbContext.TenantSubscriptions.AsNoTracking().AnyAsync(item => item.CompanyId == progress.CompanyId, cancellationToken);
-
-        var aiReady = string.Equals(aiProviderOptions.Value.Provider, "OpenAI", StringComparison.OrdinalIgnoreCase)
-            ? !string.IsNullOrWhiteSpace(openAiOptions.Value.ApiKey)
-            : completedOrSkipped.Contains(OnboardingStep.AiProviderSetup);
-
         var items = new List<OnboardingChecklistItemDto>
         {
             new()
@@ -935,29 +1127,22 @@ public sealed class OnboardingService(
             },
             new()
             {
-                Key = "active_plan_available",
-                Status = hasPlan ? "complete" : "blocked",
+                Key = "plan_confirmation_complete",
+                Status = completedOrSkipped.Contains(OnboardingStep.PlanConfirmation) ? "complete" : "incomplete",
                 Optional = false,
-                Recommendation = "Activate or confirm your plan through billing if required."
+                Recommendation = "Confirm your selected plan in onboarding."
             },
             new()
             {
-                Key = "first_property_exists",
-                Status = hasProperty ? "complete" : "incomplete",
+                Key = "first_property_complete",
+                Status = completedOrSkipped.Contains(OnboardingStep.FirstProperty) ? "complete" : "incomplete",
                 Optional = false,
-                Recommendation = "Create your first property."
-            },
-            new()
-            {
-                Key = "owner_or_admin_exists",
-                Status = ownerOrAdminCount > 0 ? "complete" : "blocked",
-                Optional = false,
-                Recommendation = "Ensure at least one owner/administrator exists."
+                Recommendation = "Create or select your first property through onboarding."
             },
             new()
             {
                 Key = "team_invited_or_skipped",
-                Status = hasInvitation || skipped.Contains(OnboardingStep.TeamInvitations) || completedOrSkipped.Contains(OnboardingStep.TeamInvitations)
+                Status = completedOrSkipped.Contains(OnboardingStep.TeamInvitations) || skipped.Contains(OnboardingStep.TeamInvitations)
                     ? "complete"
                     : "optional",
                 Optional = true,
@@ -975,27 +1160,125 @@ public sealed class OnboardingService(
             new()
             {
                 Key = "ai_provider_ready",
-                Status = aiReady ? "complete" : "recommended",
+                Status = completedOrSkipped.Contains(OnboardingStep.AiProviderSetup) ? "complete" : "incomplete",
                 Optional = false,
                 Recommendation = "Confirm deterministic fallback or configure OpenAI provider."
             },
             new()
             {
-                Key = "knowledge_item_exists",
-                Status = hasKnowledge ? "complete" : "incomplete",
+                Key = "knowledge_setup_complete",
+                Status = completedOrSkipped.Contains(OnboardingStep.KnowledgeBaseSetup) ? "complete" : "incomplete",
                 Optional = false,
-                Recommendation = "Add your first knowledge item for the property."
+                Recommendation = "Add your first knowledge item through onboarding."
+            },
+            new()
+            {
+                Key = "demo_data_complete_or_skipped",
+                Status = completedOrSkipped.Contains(OnboardingStep.DemoData) || skipped.Contains(OnboardingStep.DemoData)
+                    ? "complete"
+                    : "optional",
+                Optional = true,
+                Recommendation = "Create demo data or skip this optional step."
+            },
+            new()
+            {
+                Key = "review_confirmed",
+                Status = completedOrSkipped.Contains(OnboardingStep.Review) ? "complete" : "incomplete",
+                Optional = false,
+                Recommendation = "Review and confirm onboarding details before completion."
             },
             new()
             {
                 Key = "readiness_checks_pass",
                 Status = blockers.Count == 0 ? "complete" : "blocked",
                 Optional = false,
-                Recommendation = "Resolve blockers to finish onboarding."
+                Recommendation = "Resolve blockers before completing onboarding."
             }
         };
 
+        _ = progress;
+        _ = cancellationToken;
         return items;
+    }
+
+    private async Task<OnboardingReviewSummaryDto> BuildReviewSummaryAsync(
+        OnboardingProgress progress,
+        IReadOnlySet<OnboardingStep> completed,
+        IReadOnlySet<OnboardingStep> skipped,
+        IReadOnlyCollection<OnboardingBlockerDto> blockers,
+        CancellationToken cancellationToken)
+    {
+        var company = await dbContext.Companies
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == progress.CompanyId, cancellationToken);
+
+        Property? property = null;
+        if (progress.FirstPropertyId.HasValue)
+        {
+            property = await dbContext.Properties
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.CompanyId == progress.CompanyId && item.Id == progress.FirstPropertyId.Value && !item.IsDeleted, cancellationToken);
+        }
+
+        var invitations = await dbContext.OrganizationInvitations
+            .AsNoTracking()
+            .Where(item => item.CompanyId == progress.CompanyId)
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(10)
+            .Select(item => new OnboardingReviewInvitationDto
+            {
+                Email = item.Email,
+                Role = item.Role,
+                Status = item.AcceptedAtUtc.HasValue
+                    ? "Accepted"
+                    : item.RevokedAtUtc.HasValue
+                        ? "Revoked"
+                        : item.ExpiresAtUtc <= DateTimeOffset.UtcNow
+                            ? "Expired"
+                            : "Pending"
+            })
+            .ToListAsync(cancellationToken);
+
+        string? knowledgeTitle = null;
+        if (progress.FirstPropertyId.HasValue)
+        {
+            knowledgeTitle = await dbContext.PropertyKnowledgeArticles
+                .AsNoTracking()
+                .Where(item => item.CompanyId == progress.CompanyId
+                    && item.PropertyId == progress.FirstPropertyId.Value
+                    && !item.IsDeleted
+                    && item.IsActive)
+                .OrderByDescending(item => item.UpdatedAt)
+                .Select(item => item.Title)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var integrationName = await dbContext.WhatsAppIntegrations
+            .AsNoTracking()
+            .Where(item => item.CompanyId == progress.CompanyId && item.IsActive)
+            .OrderBy(item => item.CreatedAt)
+            .Select(item => item.DisplayName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new OnboardingReviewSummaryDto
+        {
+            OrganizationName = company?.Name,
+            OrganizationSlug = company?.Slug,
+            OrganizationSupportEmail = company?.Email,
+            OrganizationTimeZone = company?.TimeZone,
+            SelectedPlanName = progress.SelectedPlanName,
+            FirstPropertyId = progress.FirstPropertyId,
+            FirstPropertyName = property?.Name,
+            TeamInvitationsState = ResolveStepState(OnboardingStep.TeamInvitations, completed, skipped, blockers).ToString(),
+            TeamInvitations = invitations,
+            WhatsAppSetupState = ResolveStepState(OnboardingStep.WhatsAppSetup, completed, skipped, blockers).ToString(),
+            WhatsAppIntegrationName = integrationName,
+            AiProviderState = ResolveStepState(OnboardingStep.AiProviderSetup, completed, skipped, blockers).ToString(),
+            AiProvider = aiProviderOptions.Value.Provider,
+            KnowledgeSetupState = ResolveStepState(OnboardingStep.KnowledgeBaseSetup, completed, skipped, blockers).ToString(),
+            KnowledgeTitle = knowledgeTitle,
+            DemoDataState = ResolveStepState(OnboardingStep.DemoData, completed, skipped, blockers).ToString()
+        };
     }
 
     private async Task<IReadOnlyCollection<OnboardingBlockerDto>> CalculateBlockersAsync(

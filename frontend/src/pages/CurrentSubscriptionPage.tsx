@@ -4,6 +4,7 @@ import { useBillingDashboard } from "../hooks/useBillingDashboard";
 import "../styles/host-inbox.css";
 import "../styles/organization-settings.css";
 import "../styles/billing-dashboard.css";
+import { getBillingCapabilityMessage } from "./billingCapabilityMessages";
 
 function toDateLabel(value: string | null | undefined): string {
   if (!value) {
@@ -92,7 +93,9 @@ export function CurrentSubscriptionPage() {
             <p>
               Trial active until <strong>{toDateLabel(subscription.trialEndsAtUtc)}</strong>. Add a payment method before expiry to avoid service interruption.
             </p>
-            <button type="button" onClick={() => void billing.openPaymentMethodPortal()} disabled={isBusy}>Add Payment Method</button>
+            {subscription?.canManagePaymentMethod ? (
+              <button type="button" onClick={() => void billing.openPaymentMethodPortal()} disabled={isBusy}>Add Payment Method</button>
+            ) : null}
           </section>
         ) : null}
 
@@ -115,15 +118,33 @@ export function CurrentSubscriptionPage() {
               <span>Cancel at period end</span>
               <strong>{subscription?.cancelAtPeriodEnd ? "Yes" : "No"}</strong>
             </div>
-            <div className="sf-billing-actions">
-              <button type="button" onClick={() => void billing.openBillingPortal()} disabled={isBusy}>Open Billing Portal</button>
-              <button type="button" onClick={() => void billing.openPaymentMethodPortal()} disabled={isBusy}>Manage Payment Method</button>
+            <div className="sf-billing-key-value">
+              <span>Billing status</span>
+              <strong>{getBillingCapabilityMessage(subscription)}</strong>
             </div>
-            <div className="sf-billing-actions">
-              <button type="button" onClick={() => void billing.cancelSubscription(true)} disabled={isBusy}>Cancel at Period End</button>
-              <button type="button" onClick={() => void billing.cancelSubscription(false)} disabled={isBusy}>Cancel Now</button>
-              <button type="button" onClick={() => void billing.resumeSubscription()} disabled={isBusy}>Resume</button>
-            </div>
+            {(subscription?.canOpenBillingPortal || subscription?.canManagePaymentMethod) ? (
+              <div className="sf-billing-actions">
+                {subscription?.canOpenBillingPortal ? (
+                  <button type="button" onClick={() => void billing.openBillingPortal()} disabled={isBusy}>Open Billing Portal</button>
+                ) : null}
+                {subscription?.canManagePaymentMethod ? (
+                  <button type="button" onClick={() => void billing.openPaymentMethodPortal()} disabled={isBusy}>Manage Payment Method</button>
+                ) : null}
+              </div>
+            ) : null}
+            {(subscription?.canCancel || subscription?.canResume) ? (
+              <div className="sf-billing-actions">
+                {subscription?.canCancel ? (
+                  <>
+                    <button type="button" onClick={() => void billing.cancelSubscription(true)} disabled={isBusy}>Cancel at Period End</button>
+                    <button type="button" onClick={() => void billing.cancelSubscription(false)} disabled={isBusy}>Cancel Now</button>
+                  </>
+                ) : null}
+                {subscription?.canResume ? (
+                  <button type="button" onClick={() => void billing.resumeSubscription()} disabled={isBusy}>Resume</button>
+                ) : null}
+              </div>
+            ) : null}
           </article>
         </section>
       </div>

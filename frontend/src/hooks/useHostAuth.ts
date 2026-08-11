@@ -1,3 +1,4 @@
+import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createAuthApi } from "../api/authApi";
 import { ApiError, HttpClient } from "../api/httpClient";
@@ -29,7 +30,7 @@ export function useHostAuth(): UseHostAuthResult {
   const http = useMemo(
     () =>
       new HttpClient({
-        baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243"
+        baseUrl: getRuntimeApiUrl()
       }),
     []
   );
@@ -43,7 +44,7 @@ export function useHostAuth(): UseHostAuthResult {
     }
 
     const authenticatedHttp = new HttpClient({
-      baseUrl: import.meta.env.VITE_STAYFLOW_API_URL ?? "http://localhost:5243",
+      baseUrl: getRuntimeApiUrl(),
       getAccessToken: () => accessToken
     });
     const authenticatedAuthApi = createAuthApi(authenticatedHttp);
