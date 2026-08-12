@@ -271,7 +271,7 @@ export function useConversationRealtime({
       unsubscribeConnectionState();
 
       if (activeConnection) {
-        void releaseConversationConnection(baseUrl).catch((error) => {
+        void releaseConversationConnection(baseUrl, activeConnection).catch((error) => {
           if (!isExpectedConnectionLifecycleCancellation(error)) {
             console.error("StayFlow realtime connection cleanup failed.", error);
           }

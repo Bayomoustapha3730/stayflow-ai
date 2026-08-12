@@ -12,7 +12,7 @@ public sealed class CompanyServiceTests
     public async Task CreateAsync_WithValidRequest_CreatesCompanyAndAuditLog()
     {
         var repository = new FakeCompanyRepository();
-        var service = new CompanyService(repository);
+        var service = new CompanyService(repository, AuthenticatedContext(Guid.NewGuid()));
 
         var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
@@ -30,7 +30,7 @@ public sealed class CompanyServiceTests
     public async Task CreateAsync_WithInvalidRequest_ReturnsValidationErrors()
     {
         var repository = new FakeCompanyRepository();
-        var service = new CompanyService(repository);
+        var service = new CompanyService(repository, AuthenticatedContext(Guid.NewGuid()));
 
         var response = await service.CreateAsync(new CreateCompanyRequest
         {
@@ -49,13 +49,14 @@ public sealed class CompanyServiceTests
     }
 
     [Fact]
-    public async Task GetAsync_ReturnsPagedNameSearchResults()
+    public async Task GetAsync_ReturnsOnlyActiveOrganizationMatchingSearch()
     {
         var repository = new FakeCompanyRepository();
-        repository.Companies.Add(NewCompany("Coast Stay Hosts"));
+        var activeCompany = NewCompany("Coast Stay Hosts");
+        repository.Companies.Add(activeCompany);
         repository.Companies.Add(NewCompany("Nairobi Homes"));
         repository.Companies.Add(NewCompany("Coast Villas"));
-        var service = new CompanyService(repository);
+        var service = new CompanyService(repository, AuthenticatedContext(activeCompany.Id));
 
         var response = await service.GetAsync(new CompanyQueryParameters
         {
@@ -66,9 +67,51 @@ public sealed class CompanyServiceTests
 
         Assert.True(response.Success);
         Assert.NotNull(response.Data);
-        Assert.Equal(2, response.Data.TotalCount);
+        Assert.Equal(1, response.Data.TotalCount);
         var company = Assert.Single(response.Data.Items);
+        Assert.Equal(activeCompany.Id, company.Id);
         Assert.Contains("Coast", company.Name);
+    }
+
+    [Fact]
+    public async Task GetAsync_WithSearchNotMatchingActiveOrganization_ReturnsEmptyResult()
+    {
+        var repository = new FakeCompanyRepository();
+        var activeCompany = NewCompany("Nairobi Homes");
+        repository.Companies.Add(activeCompany);
+        repository.Companies.Add(NewCompany("Coast Villas"));
+        var service = new CompanyService(repository, AuthenticatedContext(activeCompany.Id));
+
+        var response = await service.GetAsync(new CompanyQueryParameters
+        {
+            Search = "coast",
+            PageNumber = 1,
+            PageSize = 10
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        Assert.Equal(0, response.Data.TotalCount);
+        Assert.Empty(response.Data.Items);
+    }
+
+    [Fact]
+    public async Task GetAsync_WithoutTenantContext_ReturnsEmptyResult()
+    {
+        var repository = new FakeCompanyRepository();
+        repository.Companies.Add(NewCompany("Coast Villas"));
+        var service = new CompanyService(repository, AnonymousContext());
+
+        var response = await service.GetAsync(new CompanyQueryParameters
+        {
+            PageNumber = 1,
+            PageSize = 10
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        Assert.Equal(0, response.Data.TotalCount);
+        Assert.Empty(response.Data.Items);
     }
 
     [Fact]
@@ -77,7 +120,7 @@ public sealed class CompanyServiceTests
         var repository = new FakeCompanyRepository();
         var company = NewCompany("Old Name");
         repository.Companies.Add(company);
-        var service = new CompanyService(repository);
+        var service = new CompanyService(repository, AuthenticatedContext(company.Id));
 
         var response = await service.UpdateAsync(company.Id, new UpdateCompanyRequest
         {
@@ -103,7 +146,7 @@ public sealed class CompanyServiceTests
         var repository = new FakeCompanyRepository();
         var company = NewCompany("Delete Me");
         repository.Companies.Add(company);
-        var service = new CompanyService(repository);
+        var service = new CompanyService(repository, AuthenticatedContext(company.Id));
 
         var response = await service.DeleteAsync(company.Id, CancellationToken.None);
 
@@ -121,12 +164,76 @@ public sealed class CompanyServiceTests
         var company = NewCompany("Inactive");
         company.IsActive = false;
         repository.Companies.Add(company);
-        var service = new CompanyService(repository);
+        var service = new CompanyService(repository, AuthenticatedContext(company.Id));
 
         var response = await service.GetByIdAsync(company.Id, CancellationToken.None);
 
         Assert.False(response.Success);
         Assert.Null(response.Data);
+    }
+
+    [Fact]
+    public async Task GetByIdAsync_WithAnotherOrganization_ReturnsNotFound()
+    {
+        var repository = new FakeCompanyRepository();
+        var otherCompany = NewCompany("Other Org");
+        repository.Companies.Add(otherCompany);
+        var service = new CompanyService(repository, AuthenticatedContext(Guid.NewGuid()));
+
+        var response = await service.GetByIdAsync(otherCompany.Id, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Null(response.Data);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WithAnotherOrganization_ReturnsNotFoundAndLeavesCompanyUnchanged()
+    {
+        var repository = new FakeCompanyRepository();
+        var otherCompany = NewCompany("Other Org");
+        repository.Companies.Add(otherCompany);
+        var service = new CompanyService(repository, AuthenticatedContext(Guid.NewGuid()));
+
+        var response = await service.UpdateAsync(otherCompany.Id, new UpdateCompanyRequest
+        {
+            Name = "Hijacked",
+            Email = "attacker@example.com",
+            PhoneNumber = "+254711111111",
+            CountryCode = "KE",
+            TimeZone = "Africa/Nairobi",
+            IsActive = true
+        }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("Other Org", otherCompany.Name);
+        Assert.Empty(repository.AuditLogs);
+        Assert.Equal(0, repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WithAnotherOrganization_ReturnsNotFoundAndLeavesCompanyActive()
+    {
+        var repository = new FakeCompanyRepository();
+        var otherCompany = NewCompany("Other Org");
+        repository.Companies.Add(otherCompany);
+        var service = new CompanyService(repository, AuthenticatedContext(Guid.NewGuid()));
+
+        var response = await service.DeleteAsync(otherCompany.Id, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.True(otherCompany.IsActive);
+        Assert.Empty(repository.AuditLogs);
+        Assert.Equal(0, repository.SaveChangesCallCount);
+    }
+
+    private static ICurrentTenantContext AuthenticatedContext(Guid companyId)
+    {
+        return new FakeCurrentTenantContext(companyId, Guid.NewGuid(), true);
+    }
+
+    private static ICurrentTenantContext AnonymousContext()
+    {
+        return new FakeCurrentTenantContext(null, null, false);
     }
 
     private static CreateCompanyRequest ValidCreateRequest()
@@ -211,5 +318,13 @@ public sealed class CompanyServiceTests
             SaveChangesCallCount++;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FakeCurrentTenantContext(Guid? companyId, Guid? userId, bool isAuthenticated) : ICurrentTenantContext
+    {
+        public Guid? CompanyId { get; } = companyId;
+        public Guid? UserId { get; } = userId;
+        public string? CorrelationId { get; } = "test-correlation";
+        public bool IsAuthenticated { get; } = isAuthenticated;
     }
 }

@@ -179,6 +179,11 @@ beforeEach(() => {
   vi.unstubAllEnvs();
 });
 
+function tokenForCompany(companyId: string, nonce = "n"): string {
+  const payload = btoa(JSON.stringify({ company_id: companyId, nonce })).replace(/=+$/, "");
+  return `header.${payload}.signature`;
+}
+
 describe("conversationConnection", () => {
   it("maps transport values and falls back to auto for invalid values", async () => {
     const { mod, signalR } = await loadModule();
@@ -289,8 +294,34 @@ describe("conversationConnection", () => {
     await mod.releaseConversationConnection("http://localhost:5243");
   });
 
-  it("treats cleanup cancellation during negotiation as expected", async () => {
+  it("replaces the shared connection when the organization changes", async () => {
     const { mod, signalR } = await loadModule();
+
+    mod.acquireConversationConnection("http://localhost:5243", tokenForCompany("company-a"));
+    const organizationAConnection = signalR.__testing.createdConnections[0];
+    await mod.ensureConversationConnectionStarted("http://localhost:5243");
+
+    mod.acquireConversationConnection("http://localhost:5243", tokenForCompany("company-b"));
+
+    expect(signalR.__testing.createdConnections).toHaveLength(2);
+    expect(organizationAConnection.stopCalls).toBe(1);
+
+    const organizationBConnection = signalR.__testing.createdConnections[1];
+    expect(organizationBConnection.options.accessTokenFactory()).toBe(tokenForCompany("company-b"));
+  });
+
+  it("reuses the shared connection when the token is refreshed for the same organization", async () => {
+    const { mod, signalR } = await loadModule();
+
+    mod.acquireConversationConnection("http://localhost:5243", tokenForCompany("company-a", "first"));
+    mod.acquireConversationConnection("http://localhost:5243", tokenForCompany("company-a", "second"));
+
+    expect(signalR.__testing.createdConnections).toHaveLength(1);
+    expect(signalR.__testing.createdConnections[0].options.accessTokenFactory())
+      .toBe(tokenForCompany("company-a", "second"));
+  });
+
+  it("treats cleanup cancellation during negotiation as expected", async () => {    const { mod, signalR } = await loadModule();
 
     mod.acquireConversationConnection("http://localhost:5243", "token");
     const connection = signalR.__testing.createdConnections[0];

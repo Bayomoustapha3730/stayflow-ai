@@ -166,6 +166,7 @@ interface SharedConnection {
   key: string;
   connection: HubConnection;
   accessToken: string | null;
+  tenantKey: string;
   state: RealtimeConnectionState;
   stateListeners: Set<(state: RealtimeConnectionState) => void>;
   subscribers: number;
@@ -180,6 +181,35 @@ const eventListenerRefCounts = new WeakMap<HubConnection, Map<string, Map<(paylo
 
 function connectionKey(baseUrl: string): string {
   return normalizeBaseUrl(baseUrl);
+}
+
+// Hub group membership is bound to the token presented at negotiation, so the active
+// organization must be part of the connection identity.
+function tenantKeyFromAccessToken(accessToken: string): string {
+  const payload = accessToken.split(".")[1];
+  if (!payload) {
+    return "";
+  }
+
+  try {
+    const claims = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))) as { company_id?: unknown };
+    return typeof claims.company_id === "string" ? claims.company_id : "";
+  } catch {
+    return "";
+  }
+}
+
+function discardSharedConnection(shared: SharedConnection): void {
+  shared.subscribers = 0;
+  shared.stopRequested = true;
+
+  if (sharedConnections.get(shared.key) === shared) {
+    sharedConnections.delete(shared.key);
+  }
+
+  void stopSharedConnection(shared, true).catch(() => {
+    // The replaced connection is already detached; shutdown failures cannot be surfaced.
+  });
 }
 
 async function startSharedConnection(shared: SharedConnection): Promise<void> {
@@ -303,12 +333,19 @@ function wireLifecycleCallbacks(shared: SharedConnection): void {
 
 export function acquireConversationConnection(baseUrl: string, accessToken: string): HubConnection {
   const key = connectionKey(baseUrl);
+  const tenantKey = tenantKeyFromAccessToken(accessToken);
   const existing = sharedConnections.get(key);
   if (existing) {
-    existing.subscribers += 1;
-    existing.stopRequested = false;
-    existing.accessToken = accessToken;
-    return existing.connection;
+    const tenantChanged = tenantKey !== "" && existing.tenantKey !== "" && tenantKey !== existing.tenantKey;
+    if (!tenantChanged) {
+      existing.subscribers += 1;
+      existing.stopRequested = false;
+      existing.accessToken = accessToken;
+      existing.tenantKey = tenantKey || existing.tenantKey;
+      return existing.connection;
+    }
+
+    discardSharedConnection(existing);
   }
 
   let shared: SharedConnection;
@@ -318,6 +355,7 @@ export function acquireConversationConnection(baseUrl: string, accessToken: stri
     key,
     connection: createConversationConnection(baseUrl, getAccessToken),
     accessToken,
+    tenantKey,
     state: "offline",
     stateListeners: new Set(),
     subscribers: 1,
@@ -344,9 +382,9 @@ export async function ensureConversationConnectionStarted(baseUrl: string): Prom
   await startSharedConnection(shared);
 }
 
-export async function releaseConversationConnection(baseUrl: string): Promise<void> {
+export async function releaseConversationConnection(baseUrl: string, connection?: HubConnection): Promise<void> {
   const key = connectionKey(baseUrl);
-  const shared = sharedConnections.get(key);
+  const shared = connection ? sharedByConnection.get(connection) : sharedConnections.get(key);
   if (!shared) {
     return;
   }
@@ -372,8 +410,8 @@ export async function releaseConversationConnection(baseUrl: string): Promise<vo
 
   await stopSharedConnection(shared, true);
 
-  if (shared.subscribers === 0) {
-    sharedConnections.delete(key);
+  if (shared.subscribers === 0 && sharedConnections.get(shared.key) === shared) {
+    sharedConnections.delete(shared.key);
   }
 }
 

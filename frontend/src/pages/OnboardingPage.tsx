@@ -137,6 +137,10 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
   const hasTenant = Boolean(auth.currentUser?.companyId);
 
   const blockers = useMemo(() => (onboarding.status?.blockers ?? []).filter((item) => parseStep(item.step) === currentStep), [currentStep, onboarding.status?.blockers]);
+  const demoDataResolved = onboarding.status?.completedSteps.some((entry) => parseStep(entry) === "demo")
+    || onboarding.status?.skippedSteps.some((entry) => parseStep(entry) === "demo");
+  const isCompleted = onboarding.status?.isCompleted === true;
+  const visibleError = isCompleted ? null : onboarding.error;
 
   function goToStep(target: StepDefinition) {
     window.history.pushState({}, "", target.route);
@@ -224,7 +228,7 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
         })}
       </div>
 
-      {onboarding.error ? <div className="sf-host-inline-error" role="alert"><p>{onboarding.error}</p></div> : null}
+      {visibleError ? <div className="sf-host-inline-error" role="alert"><p>{visibleError}</p></div> : null}
       {onboarding.message ? <div className="sf-whatsapp-status" role="status"><p>{onboarding.message}</p></div> : null}
       {blockers.length > 0 ? (
         <div className="sf-onboarding-blockers" role="alert">
@@ -392,7 +396,7 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
         </section>
       ) : null}
 
-      {!readOnly && currentStep === "demo" ? (
+      {!readOnly && currentStep === "demo" && !isCompleted && !demoDataResolved ? (
         <section className="sf-onboarding-card">
           <h2>Demo Data</h2>
           <p>Create sample records for first-run exploration in non-production environments.</p>

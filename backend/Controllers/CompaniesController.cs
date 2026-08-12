@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Companies;
 using StayFlow.Api.Services;
@@ -9,6 +11,7 @@ namespace StayFlow.Api.Controllers;
 /// Manages companies that own or operate StayFlow AI properties.
 /// </summary>
 [ApiController]
+[Authorize]
 [Route("companies")]
 [Produces("application/json")]
 public sealed class CompaniesController(ICompanyService companyService) : ControllerBase
@@ -17,6 +20,7 @@ public sealed class CompaniesController(ICompanyService companyService) : Contro
     /// Gets active companies with pagination and optional name search.
     /// </summary>
     [HttpGet]
+    [Authorize(Policy = OrganizationPolicyNames.ReadOnly)]
     [ProducesResponseType(typeof(ApiResponse<PagedResult<CompanyDto>>), StatusCodes.Status200OK)]
     public async Task<ActionResult<ApiResponse<PagedResult<CompanyDto>>>> GetCompanies(
         [FromQuery] CompanyQueryParameters query,
@@ -30,6 +34,7 @@ public sealed class CompaniesController(ICompanyService companyService) : Contro
     /// Gets one active company by ID.
     /// </summary>
     [HttpGet("{id:guid}")]
+    [Authorize(Policy = OrganizationPolicyNames.ReadOnly)]
     [ProducesResponseType(typeof(ApiResponse<CompanyDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<CompanyDto>), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ApiResponse<CompanyDto>>> GetCompany(
@@ -44,6 +49,7 @@ public sealed class CompaniesController(ICompanyService companyService) : Contro
     /// Creates a company.
     /// </summary>
     [HttpPost]
+    [Authorize(Policy = OrganizationPolicyNames.PlatformAdmin)]
     [ProducesResponseType(typeof(ApiResponse<CompanyDto>), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ApiResponse<CompanyDto>), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ApiResponse<CompanyDto>>> CreateCompany(
@@ -63,6 +69,7 @@ public sealed class CompaniesController(ICompanyService companyService) : Contro
     /// Updates a company.
     /// </summary>
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = OrganizationPolicyNames.Administrator)]
     [ProducesResponseType(typeof(ApiResponse<CompanyDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<CompanyDto>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<CompanyDto>), StatusCodes.Status404NotFound)]
@@ -84,6 +91,7 @@ public sealed class CompaniesController(ICompanyService companyService) : Contro
     /// Soft deletes a company.
     /// </summary>
     [HttpDelete("{id:guid}")]
+    [Authorize(Policy = OrganizationPolicyNames.Owner)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ApiResponse<object>>> DeleteCompany(

@@ -6,26 +6,32 @@ using StayFlow.Api.Repositories;
 
 namespace StayFlow.Api.Services;
 
-public sealed class CompanyService(ICompanyRepository companyRepository) : ICompanyService
+public sealed class CompanyService(ICompanyRepository companyRepository, ICurrentTenantContext tenantContext) : ICompanyService
 {
     public async Task<ApiResponse<PagedResult<CompanyDto>>> GetAsync(
         CompanyQueryParameters query,
         CancellationToken cancellationToken)
     {
-        var companies = await companyRepository.GetAsync(query, cancellationToken);
+        // Company records are tenant roots: a caller may only ever see the organization they are acting in.
+        var activeCompany = await GetActiveCompanyAsync(cancellationToken);
+        var matchesSearch = activeCompany is not null
+            && (string.IsNullOrWhiteSpace(query.Search)
+                || activeCompany.Name.Contains(query.Search.Trim(), StringComparison.OrdinalIgnoreCase));
+
+        var items = matchesSearch ? new List<CompanyDto> { MapToDto(activeCompany!) } : [];
 
         return ApiResponse<PagedResult<CompanyDto>>.Ok(new PagedResult<CompanyDto>
         {
-            Items = companies.Items.Select(MapToDto).ToList(),
-            PageNumber = companies.PageNumber,
-            PageSize = companies.PageSize,
-            TotalCount = companies.TotalCount
+            Items = items,
+            PageNumber = query.NormalizedPageNumber,
+            PageSize = query.NormalizedPageSize,
+            TotalCount = items.Count
         });
     }
 
     public async Task<ApiResponse<CompanyDto>> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
-        var company = await companyRepository.GetByIdAsync(id, cancellationToken);
+        var company = await GetOwnedCompanyAsync(id, cancellationToken);
         return company is null
             ? ApiResponse<CompanyDto>.Fail("Company was not found.")
             : ApiResponse<CompanyDto>.Ok(MapToDto(company));
@@ -74,7 +80,7 @@ public sealed class CompanyService(ICompanyRepository companyRepository) : IComp
             return ApiResponse<CompanyDto>.Fail("Company validation failed.", validation.Errors);
         }
 
-        var company = await companyRepository.GetByIdAsync(id, cancellationToken);
+        var company = await GetOwnedCompanyAsync(id, cancellationToken);
         if (company is null)
         {
             return ApiResponse<CompanyDto>.Fail("Company was not found.");
@@ -103,7 +109,7 @@ public sealed class CompanyService(ICompanyRepository companyRepository) : IComp
 
     public async Task<ApiResponse<object>> DeleteAsync(Guid id, CancellationToken cancellationToken)
     {
-        var company = await companyRepository.GetByIdAsync(id, cancellationToken);
+        var company = await GetOwnedCompanyAsync(id, cancellationToken);
         if (company is null)
         {
             return ApiResponse<object>.Fail("Company was not found.");
@@ -115,6 +121,26 @@ public sealed class CompanyService(ICompanyRepository companyRepository) : IComp
         await companyRepository.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<object>.Ok(new { company.Id }, "Company deleted successfully.");
+    }
+
+    private Task<Company?> GetActiveCompanyAsync(CancellationToken cancellationToken)
+    {
+        if (!tenantContext.IsAuthenticated || tenantContext.CompanyId is not { } companyId || companyId == Guid.Empty)
+        {
+            return Task.FromResult<Company?>(null);
+        }
+
+        return companyRepository.GetByIdAsync(companyId, cancellationToken);
+    }
+
+    private async Task<Company?> GetOwnedCompanyAsync(Guid id, CancellationToken cancellationToken)
+    {
+        if (!tenantContext.IsAuthenticated || tenantContext.CompanyId != id || id == Guid.Empty)
+        {
+            return null;
+        }
+
+        return await companyRepository.GetByIdAsync(id, cancellationToken);
     }
 
     private async Task AddAuditLogAsync(string action, Company company, CancellationToken cancellationToken)

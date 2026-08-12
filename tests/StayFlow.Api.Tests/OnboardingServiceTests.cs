@@ -646,13 +646,38 @@ public sealed class OnboardingServiceTests
         Assert.Equal("House Rules", created.Title);
         Assert.True(created.IsApproved);
 
-        Assert.Equal(1, await dbContext.PropertyKnowledgeArticles.CountAsync(item => item.CompanyId == companyAId && !item.IsDeleted));
+        var demoResponse = await onboardingService.CompleteDemoDataStepAsync(new OnboardingDemoDataRequest
+        {
+            CreateSampleConversation = true,
+            CreateSampleKnowledge = true,
+            CreateSampleReservation = true
+        }, CancellationToken.None);
+
+        Assert.True(demoResponse.Success, demoResponse.Message);
 
         var orgBProgress = await dbContext.OnboardingProgressRecords.SingleAsync(item => item.CompanyId == companyBId && item.UserId == userId);
         Assert.Contains("KnowledgeBaseSetup", orgBProgress.CompletedStepsCsv);
-        Assert.Equal(OnboardingStep.DemoData.ToStorageValue(), orgBProgress.CurrentStep);
+        Assert.Contains(OnboardingStep.DemoData.ToStorageValue(), orgBProgress.CompletedStepsCsv);
+        Assert.Equal(OnboardingStep.Review.ToStorageValue(), orgBProgress.CurrentStep);
 
-        var orgAProgress = await dbContext.OnboardingProgressRecords.SingleAsync(item => item.CompanyId == companyAId && item.UserId == userId);
+        await using var verificationContext = new ApplicationDbContext(runtimeOptions);
+        var orgAKnowledge = await verificationContext.PropertyKnowledgeArticles
+            .Where(item => item.CompanyId == companyAId && !item.IsDeleted)
+            .ToListAsync();
+        var originalOrgAKnowledge = Assert.Single(orgAKnowledge);
+        Assert.Equal("Existing Org A Article", originalOrgAKnowledge.Title);
+        Assert.Empty(await verificationContext.Guests.Where(item => item.CompanyId == companyAId).ToListAsync());
+        Assert.Empty(await verificationContext.Reservations.Where(item => item.CompanyId == companyAId && !item.IsDeleted).ToListAsync());
+        Assert.Empty(await verificationContext.Conversations.Where(item => item.CompanyId == companyAId && !item.IsDeleted).ToListAsync());
+        Assert.Empty(await verificationContext.ConversationMessages.Where(item => item.CompanyId == companyAId).ToListAsync());
+
+        Assert.Single(await verificationContext.Guests.Where(item => item.CompanyId == companyBId).ToListAsync());
+        Assert.Single(await verificationContext.Reservations.Where(item => item.CompanyId == companyBId && !item.IsDeleted).ToListAsync());
+        Assert.Single(await verificationContext.Conversations.Where(item => item.CompanyId == companyBId && !item.IsDeleted).ToListAsync());
+        Assert.Single(await verificationContext.ConversationMessages.Where(item => item.CompanyId == companyBId).ToListAsync());
+
+        var orgAProgress = await verificationContext.OnboardingProgressRecords
+            .SingleAsync(item => item.CompanyId == companyAId && item.UserId == companyAUserId);
         Assert.Equal(OnboardingStep.Completed.ToStorageValue(), orgAProgress.CurrentStep);
         Assert.True(orgAProgress.IsCompleted);
     }
@@ -734,6 +759,108 @@ public sealed class OnboardingServiceTests
         Assert.Equal("Completed", response.Data.CurrentStep);
         Assert.Equal(100, response.Data.PercentComplete);
         Assert.Contains("Review", response.Data.CompletedSteps);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_AfterCompletion_KeepsCompletedStateForNewServiceInstance()
+    {
+        var fixture = await CreateFixtureAsync();
+        await PromoteToDemoStepAsync(fixture.Service);
+        await fixture.Service.SkipStepAsync("DemoData", new OnboardingSkipStepRequest { Reason = "later" }, CancellationToken.None);
+        await fixture.Service.CompleteOnboardingAsync(new OnboardingCompleteRequest
+        {
+            ConfirmChecklistReviewed = true
+        }, CancellationToken.None);
+
+        var resumedService = CreateService(fixture.DbContext, fixture.CompanyId, fixture.UserId);
+        var response = await resumedService.GetStatusAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.True(response.Data!.IsCompleted);
+        Assert.Equal("Completed", response.Data.CurrentStep);
+        Assert.Contains("Review", response.Data.CompletedSteps);
+
+        var progress = await fixture.DbContext.OnboardingProgressRecords
+            .SingleAsync(item => item.CompanyId == fixture.CompanyId, CancellationToken.None);
+        Assert.True(progress.IsCompleted);
+        Assert.Equal("Completed", progress.CurrentStep);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_ForAnotherMemberOfCompletedOrganization_ReportsCompleted()
+    {
+        var fixture = await CreateFixtureAsync();
+        await PromoteToDemoStepAsync(fixture.Service);
+        await fixture.Service.SkipStepAsync("DemoData", new OnboardingSkipStepRequest { Reason = "later" }, CancellationToken.None);
+        await fixture.Service.CompleteOnboardingAsync(new OnboardingCompleteRequest
+        {
+            ConfirmChecklistReviewed = true
+        }, CancellationToken.None);
+
+        var otherMemberService = CreateService(fixture.DbContext, fixture.CompanyId, Guid.NewGuid());
+        var response = await otherMemberService.GetStatusAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.True(response.Data!.IsCompleted);
+        Assert.Equal("Completed", response.Data.CurrentStep);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_DoesNotLeakCompletedStateFromAnotherOrganization()
+    {
+        var fixture = await CreateFixtureAsync();
+        var otherCompanyId = Guid.NewGuid();
+        var otherUserId = Guid.NewGuid();
+
+        var otherTenantOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(fixture.DatabaseName)
+            .ConfigureWarnings(builder => builder.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+
+        await using (var otherTenantContext = new ApplicationDbContext(
+            otherTenantOptions,
+            new FakeTenantContext(otherCompanyId, otherUserId, true)))
+        {
+            otherTenantContext.Companies.Add(new Company
+            {
+                Id = otherCompanyId,
+                Name = "Other Org",
+                Slug = "other-org",
+                NormalizedSlug = "OTHER-ORG",
+                Status = "Active",
+                OwnerUserId = otherUserId,
+                Email = "other@stayflow.test",
+                PhoneNumber = "+254700000009",
+                CountryCode = "KE",
+                TimeZone = "Africa/Nairobi",
+                IsActive = true,
+                OnboardingState = OnboardingStep.Completed.ToStorageValue()
+            });
+
+            otherTenantContext.OnboardingProgressRecords.Add(new OnboardingProgress
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = otherCompanyId,
+                UserId = otherUserId,
+                CurrentStep = OnboardingStep.Completed.ToStorageValue(),
+                CompletedStepsCsv = "Welcome,OrganizationProfile,PlanConfirmation,FirstProperty,TeamInvitations,WhatsAppSetup,AiProviderSetup,KnowledgeBaseSetup,DemoData,Review",
+                IsCompleted = true,
+                CompletedAtUtc = DateTimeOffset.UtcNow,
+                CompletedByUserId = otherUserId,
+                StartedAtUtc = DateTimeOffset.UtcNow.AddHours(-1),
+                LastUpdatedAtUtc = DateTimeOffset.UtcNow,
+                Version = 5
+            });
+
+            await otherTenantContext.SaveChangesAsync();
+        }
+
+        var response = await fixture.Service.GetStatusAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.False(response.Data!.IsCompleted);
+        Assert.Equal(fixture.CompanyId, response.Data.CompanyId);
+        Assert.Equal("Welcome", response.Data.CurrentStep);
     }
 
     [Fact]
@@ -908,8 +1035,9 @@ public sealed class OnboardingServiceTests
 
     private static async Task<Fixture> CreateFixtureAsync(string environmentName = "Development", bool includeActiveSubscription = true)
     {
+        var databaseName = $"onboarding-service-{Guid.NewGuid():N}";
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseInMemoryDatabase($"onboarding-service-{Guid.NewGuid():N}")
+            .UseInMemoryDatabase(databaseName)
             .ConfigureWarnings(builder => builder.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
@@ -990,7 +1118,7 @@ public sealed class OnboardingServiceTests
             Options.Create(new OpenAIOptions { Model = "gpt-5.1-mini" }),
             new FakeHostEnvironment(environmentName));
 
-        return new Fixture(service, dbContext, companyId, userId);
+        return new Fixture(service, dbContext, companyId, userId, databaseName);
     }
 
     private static OnboardingService CreateService(
@@ -1018,7 +1146,8 @@ public sealed class OnboardingServiceTests
         OnboardingService Service,
         ApplicationDbContext DbContext,
         Guid CompanyId,
-        Guid UserId);
+        Guid UserId,
+        string DatabaseName);
 
     private sealed class ThrowingPropertyKnowledgeService(ApplicationDbContext dbContext, Guid companyId, Guid userId) : IPropertyKnowledgeService
     {

@@ -51,7 +51,10 @@ public sealed class OnboardingService(
             return ApiResponse<OnboardingStatusDto>.Fail(error);
         }
 
-        var progress = await FindProgressAsync(companyId, userId, cancellationToken);
+        // Onboarding completion is an organization-level fact, so members without their own
+        // progress row must still observe the completed state of the active organization.
+        var progress = await FindProgressAsync(companyId, userId, cancellationToken)
+            ?? await FindCompletedCompanyProgressAsync(companyId, cancellationToken);
         if (progress is null)
         {
             var notStarted = await BuildNotStartedStatusAsync(companyId, userId, cancellationToken);
@@ -587,7 +590,7 @@ public sealed class OnboardingService(
                     var approved = await propertyKnowledgeService.ApproveAsync(propertyId.Value, created.Data.Id, cancellationToken);
                     if (!approved.Success || approved.Data is null)
                     {
-                        await CleanupCreatedKnowledgeArticleAsync(createdArticleId.Value, cancellationToken);
+                        await CleanupCreatedKnowledgeArticleAsync(companyId, createdArticleId.Value, cancellationToken);
                         await RollbackIfPendingAsync();
                         return ApiResponse<OnboardingStatusDto>.Fail(approved.Message, approved.Errors);
                     }
@@ -616,7 +619,7 @@ public sealed class OnboardingService(
             {
                 try
                 {
-                    await CleanupCreatedKnowledgeArticleAsync(createdArticleId.Value, cancellationToken);
+                    await CleanupCreatedKnowledgeArticleAsync(companyId, createdArticleId.Value, cancellationToken);
                 }
                 catch
                 {
@@ -754,7 +757,7 @@ public sealed class OnboardingService(
                 var hasDemoMessage = await dbContext.ConversationMessages
                     .AnyAsync(item => item.CompanyId == companyId
                         && item.ConversationId == conversation.Id
-                        && item.Content.Contains(marker, StringComparison.Ordinal), cancellationToken);
+                        && item.Content.Contains(marker), cancellationToken);
                 if (!hasDemoMessage)
                 {
                     var message = new ConversationMessage
@@ -1074,9 +1077,10 @@ public sealed class OnboardingService(
         };
     }
 
-    private async Task CleanupCreatedKnowledgeArticleAsync(Guid articleId, CancellationToken cancellationToken)
+    private async Task CleanupCreatedKnowledgeArticleAsync(Guid companyId, Guid articleId, CancellationToken cancellationToken)
     {
-        var article = await dbContext.PropertyKnowledgeArticles.FirstOrDefaultAsync(item => item.Id == articleId, cancellationToken);
+        var article = await dbContext.PropertyKnowledgeArticles
+            .FirstOrDefaultAsync(item => item.Id == articleId && item.CompanyId == companyId, cancellationToken);
         if (article is not null)
         {
             dbContext.PropertyKnowledgeArticles.Remove(article);
@@ -1250,6 +1254,17 @@ public sealed class OnboardingService(
         var invitations = await dbContext.OrganizationInvitations
             .AsNoTracking()
             .Where(item => item.CompanyId == progress.CompanyId)
+            .Select(item => new
+            {
+                item.Email,
+                item.Role,
+                item.AcceptedAtUtc,
+                item.RevokedAtUtc,
+                item.ExpiresAtUtc,
+                item.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+        var invitationSummaries = invitations
             .OrderByDescending(item => item.CreatedAt)
             .Take(10)
             .Select(item => new OnboardingReviewInvitationDto
@@ -1264,28 +1279,35 @@ public sealed class OnboardingService(
                             ? "Expired"
                             : "Pending"
             })
-            .ToListAsync(cancellationToken);
+            .ToList();
 
         string? knowledgeTitle = null;
         if (progress.FirstPropertyId.HasValue)
         {
-            knowledgeTitle = await dbContext.PropertyKnowledgeArticles
+            var activeKnowledgeItems = await dbContext.PropertyKnowledgeArticles
                 .AsNoTracking()
                 .Where(item => item.CompanyId == progress.CompanyId
                     && item.PropertyId == progress.FirstPropertyId.Value
                     && !item.IsDeleted
                     && item.IsActive)
-                .OrderByDescending(item => item.UpdatedAt.UtcDateTime)
+                .Select(item => new { item.Title, item.UpdatedAt })
+                .ToListAsync(cancellationToken);
+
+            knowledgeTitle = activeKnowledgeItems
+                .OrderByDescending(item => item.UpdatedAt)
                 .Select(item => item.Title)
-                .FirstOrDefaultAsync(cancellationToken);
+                .FirstOrDefault();
         }
 
-        var integrationName = await dbContext.WhatsAppIntegrations
+        var integrations = await dbContext.WhatsAppIntegrations
             .AsNoTracking()
             .Where(item => item.CompanyId == progress.CompanyId && item.IsActive)
+            .Select(item => new { item.DisplayName, item.CreatedAt })
+            .ToListAsync(cancellationToken);
+        var integrationName = integrations
             .OrderBy(item => item.CreatedAt)
             .Select(item => item.DisplayName)
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefault();
 
         return new OnboardingReviewSummaryDto
         {
@@ -1297,7 +1319,7 @@ public sealed class OnboardingService(
             FirstPropertyId = progress.FirstPropertyId,
             FirstPropertyName = property?.Name,
             TeamInvitationsState = ResolveStepState(OnboardingStep.TeamInvitations, completed, skipped, blockers).ToString(),
-            TeamInvitations = invitations,
+            TeamInvitations = invitationSummaries,
             WhatsAppSetupState = ResolveStepState(OnboardingStep.WhatsAppSetup, completed, skipped, blockers).ToString(),
             WhatsAppIntegrationName = integrationName,
             AiProviderState = ResolveStepState(OnboardingStep.AiProviderSetup, completed, skipped, blockers).ToString(),
@@ -1551,6 +1573,14 @@ public sealed class OnboardingService(
     {
         return dbContext.OnboardingProgressRecords
             .FirstOrDefaultAsync(item => item.CompanyId == companyId && item.UserId == userId, cancellationToken);
+    }
+
+    private Task<OnboardingProgress?> FindCompletedCompanyProgressAsync(Guid companyId, CancellationToken cancellationToken)
+    {
+        return dbContext.OnboardingProgressRecords
+            .Where(item => item.CompanyId == companyId && item.IsCompleted)
+            .OrderByDescending(item => item.CompletedAtUtc)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private async Task AddAuditLogAsync(Guid companyId, Guid entityId, string action, object? metadata, CancellationToken cancellationToken)

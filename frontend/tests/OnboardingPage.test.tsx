@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { OnboardingStatus } from "../src/models/onboarding";
 
 const start = vi.fn().mockResolvedValue({
   companyId: "c1",
@@ -47,7 +48,7 @@ const hostAuthState = {
 
 const saveOrganization = vi.fn().mockResolvedValue(undefined);
 
-const onboardingState = {
+const onboardingState: { status: OnboardingStatus; error: string | null; message: string | null } & Record<string, unknown> = {
   status: {
     companyId: "c1",
     userId: "u1",
@@ -91,8 +92,7 @@ const onboardingState = {
   isLoading: false,
   isSaving: false,
   error: null,
-  message: null,
-  refresh: vi.fn(),
+  message: null,  refresh: vi.fn(),
   start,
   saveOrganization,
   confirmPlan: vi.fn(),
@@ -121,6 +121,9 @@ describe("OnboardingPage", () => {
     vi.clearAllMocks();
     onboardingState.status.currentStep = "OrganizationProfile";
     onboardingState.status.completedSteps = ["Welcome"];
+    onboardingState.status.skippedSteps = [];
+    onboardingState.status.isCompleted = false;
+    onboardingState.error = null;
     window.history.pushState({}, "", "/onboarding/organization");
   });
 
@@ -153,6 +156,31 @@ describe("OnboardingPage", () => {
 
     expect(screen.getByText("You're Ready")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Go to Host Inbox" })).toBeInTheDocument();
+  });
+
+  it("does not show a stale demo error or demo actions after skipped onboarding is completed", () => {
+    onboardingState.status.currentStep = "Completed";
+    onboardingState.status.completedSteps = ["Welcome", "Completed"];
+    onboardingState.status.skippedSteps = ["DemoData"];
+    onboardingState.status.isCompleted = true;
+    onboardingState.error = "Demo data step is not available yet.";
+
+    render(<OnboardingPage routeStep="demo" />);
+
+    expect(screen.getByText("You're Ready")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Generate Demo Data" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Skip" })).not.toBeInTheDocument();
+  });
+
+  it("keeps demo actions available before demo data is generated or skipped", () => {
+    onboardingState.status.currentStep = "DemoData";
+    window.history.pushState({}, "", "/onboarding/demo");
+
+    render(<OnboardingPage routeStep="demo" />);
+
+    expect(screen.getByRole("button", { name: "Generate Demo Data" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Skip" })).toBeInTheDocument();
   });
 
   it("renders review summary with persisted onboarding inputs", () => {
