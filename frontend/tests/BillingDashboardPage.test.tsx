@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useBillingDashboard } from "../src/hooks/useBillingDashboard";
 
@@ -52,7 +52,16 @@ vi.mock("../src/hooks/useBillingDashboard", () => ({
       canCancel: true,
       canResume: false,
       hasStripeCustomer: true,
-      hasStripeSubscription: true
+      hasStripeSubscription: true,
+      capability: {
+        provider: "Stripe",
+        stripeConfigured: true,
+        checkoutAvailable: true,
+        portalAvailable: true,
+        paymentMethodManagementAvailable: true,
+        message: "Stripe billing is configured.",
+        missingConfiguration: []
+      }
     },
     invoices: [],
     usage: {
@@ -123,7 +132,16 @@ describe("BillingDashboardPage", () => {
       canCancel: false,
       canResume: false,
       hasStripeCustomer: false,
-      hasStripeSubscription: false
+      hasStripeSubscription: false,
+      capability: {
+        provider: "Development",
+        stripeConfigured: false,
+        checkoutAvailable: false,
+        portalAvailable: false,
+        paymentMethodManagementAvailable: false,
+        message: "Checkout is unavailable because Stripe billing is not fully configured in this environment.",
+        missingConfiguration: ["Billing:Provider", "Billing:StripeSecretKey"]
+      }
     };
 
     vi.mocked(useBillingDashboard).mockReturnValueOnce({
@@ -149,5 +167,69 @@ describe("BillingDashboardPage", () => {
     expect(screen.queryByRole("button", { name: /Manage Payment Method/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Cancel at Period End/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Resume/i })).not.toBeInTheDocument();
+  });
+
+  it("shows checkout capability message when Stripe billing is not configured", () => {
+    const noStripeSubscription = {
+      companyId: "c1",
+      status: "Active",
+      cancelAtPeriodEnd: false,
+      currentPeriodStartUtc: "2026-08-01T00:00:00Z",
+      currentPeriodEndUtc: "2026-09-01T00:00:00Z",
+      trialEndsAtUtc: null,
+      planName: "Free",
+      canStartCheckout: false,
+      canOpenBillingPortal: false,
+      canManagePaymentMethod: false,
+      canCancel: false,
+      canResume: false,
+      hasStripeCustomer: false,
+      hasStripeSubscription: false,
+      capability: {
+        provider: "Development",
+        stripeConfigured: false,
+        checkoutAvailable: false,
+        portalAvailable: false,
+        paymentMethodManagementAvailable: false,
+        message: "Checkout is unavailable because Stripe billing is not fully configured in this environment.",
+        missingConfiguration: ["Billing:Provider", "Billing:StripeSecretKey", "Billing:PlanPriceIds:Starter"]
+      }
+    };
+
+    vi.mocked(useBillingDashboard).mockReturnValueOnce({
+      subscription: noStripeSubscription,
+      invoices: [],
+      usage: null,
+      isLoading: false,
+      isMutating: false,
+      error: null,
+      message: null,
+      refresh: vi.fn(),
+      openCheckout: vi.fn(),
+      openBillingPortal: vi.fn(),
+      openPaymentMethodPortal: vi.fn(),
+      changePlan,
+      cancelSubscription: vi.fn(),
+      resumeSubscription: vi.fn()
+    });
+
+    render(<BillingDashboardPage />);
+
+    const capabilityMessage = /checkout is unavailable because stripe billing is not fully configured in this environment\./i;
+
+    const currentSubscriptionCard = screen.getByRole("heading", { name: "Current Subscription" }).closest("article");
+    const planComparisonCard = screen.getByRole("heading", { name: "Plan Comparison" }).closest("article");
+    const usageSummaryCard = screen.getByRole("heading", { name: "Usage Summary" }).closest("article");
+    const invoiceHistoryCard = screen.getByRole("heading", { name: "Invoice History" }).closest("article");
+
+    expect(currentSubscriptionCard).not.toBeNull();
+    expect(planComparisonCard).not.toBeNull();
+    expect(usageSummaryCard).not.toBeNull();
+    expect(invoiceHistoryCard).not.toBeNull();
+
+    expect(within(currentSubscriptionCard!).getByText(capabilityMessage)).toBeInTheDocument();
+    expect(within(planComparisonCard!).getByText(capabilityMessage)).toBeInTheDocument();
+    expect(within(usageSummaryCard!).getByText(capabilityMessage)).toBeInTheDocument();
+    expect(within(invoiceHistoryCard!).getByText(capabilityMessage)).toBeInTheDocument();
   });
 });

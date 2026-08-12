@@ -75,12 +75,14 @@ export function CurrentSubscriptionPage() {
         </header>
 
         <HostConsoleNav
+          auth={auth}
           conversationsHref="/host/conversations"
           copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={null}
           billingHref="/host/settings/billing"
           whatsappSettingsHref="/host/settings/whatsapp"
           organizationSettingsHref="/host/settings/organization"
+          organizationsHref="/host/organizations"
           accountSettingsHref="/host/settings/account"
           current="billing"
         />

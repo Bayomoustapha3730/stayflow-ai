@@ -217,27 +217,13 @@ public sealed class OnboardingService(
             return ApiResponse<OnboardingStatusDto>.Fail("Plan confirmation step is not available yet.");
         }
 
-        var snapshot = await subscriptionEntitlementService.TryGetCurrentSnapshotAsync(companyId, cancellationToken);
-        var effectivePlanName = snapshot?.PlanName;
-        if (string.IsNullOrWhiteSpace(effectivePlanName))
-        {
-            if (hostEnvironment.IsProduction())
-            {
-                return ApiResponse<OnboardingStatusDto>.Fail("No active plan was found. Use billing checkout to activate a plan first.");
-            }
+        var snapshot = await subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
+        var effectivePlanName = NormalizeOptional(snapshot.PlanDisplayName) ?? snapshot.PlanName;
 
-            effectivePlanName = NormalizeOptional(request.PlanName);
-            if (string.IsNullOrWhiteSpace(effectivePlanName))
-            {
-                return ApiResponse<OnboardingStatusDto>.Fail("No active plan was found. Provide a plan name in development onboarding.");
-            }
-        }
-
-        if (snapshot is not null
-            && !string.IsNullOrWhiteSpace(request.PlanName)
+        if (!string.IsNullOrWhiteSpace(request.PlanName)
             && !string.Equals(effectivePlanName, request.PlanName.Trim(), StringComparison.OrdinalIgnoreCase))
         {
-            return ApiResponse<OnboardingStatusDto>.Fail("Plan changes must be completed through the billing flow.");
+            return ApiResponse<OnboardingStatusDto>.Fail($"Plan changes must be completed through the billing flow. Current trusted plan is '{effectivePlanName}'.");
         }
 
         progress.SelectedPlanName = effectivePlanName;
@@ -528,13 +514,44 @@ public sealed class OnboardingService(
             return ApiResponse<OnboardingStatusDto>.Fail("A valid property is required before knowledge setup.");
         }
 
+        var property = await dbContext.Properties
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.CompanyId == companyId && item.Id == propertyId.Value && !item.IsDeleted, cancellationToken);
+        if (property is null)
+        {
+            return ApiResponse<OnboardingStatusDto>.Fail("The selected property does not belong to this tenant.");
+        }
+
         if (string.IsNullOrWhiteSpace(request.Title) || string.IsNullOrWhiteSpace(request.Content))
         {
             return ApiResponse<OnboardingStatusDto>.Fail("Knowledge title and content are required.");
         }
 
         Guid? createdArticleId = null;
+        var transactionCompleted = false;
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+        async Task RollbackIfPendingAsync()
+        {
+            if (transactionCompleted)
+            {
+                return;
+            }
+
+            try
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+            catch
+            {
+                // Preserve the original failure; rollback best-effort should not hide it.
+            }
+            finally
+            {
+                transactionCompleted = true;
+            }
+        }
+
         try
         {
             var existing = await dbContext.PropertyKnowledgeArticles
@@ -560,7 +577,7 @@ public sealed class OnboardingService(
 
                 if (!created.Success || created.Data is null)
                 {
-                    await transaction.RollbackAsync(cancellationToken);
+                    await RollbackIfPendingAsync();
                     return ApiResponse<OnboardingStatusDto>.Fail(created.Message, created.Errors);
                 }
 
@@ -571,7 +588,7 @@ public sealed class OnboardingService(
                     if (!approved.Success || approved.Data is null)
                     {
                         await CleanupCreatedKnowledgeArticleAsync(createdArticleId.Value, cancellationToken);
-                        await transaction.RollbackAsync(cancellationToken);
+                        await RollbackIfPendingAsync();
                         return ApiResponse<OnboardingStatusDto>.Fail(approved.Message, approved.Errors);
                     }
                 }
@@ -590,16 +607,24 @@ public sealed class OnboardingService(
             progress.Version++;
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
+            transactionCompleted = true;
             return ApiResponse<OnboardingStatusDto>.Ok(await BuildStatusAsync(progress, cancellationToken));
         }
         catch (Exception ex)
         {
             if (createdArticleId.HasValue)
             {
-                await CleanupCreatedKnowledgeArticleAsync(createdArticleId.Value, cancellationToken);
+                try
+                {
+                    await CleanupCreatedKnowledgeArticleAsync(createdArticleId.Value, cancellationToken);
+                }
+                catch
+                {
+                    // Cleanup is best-effort; preserve the original exception for diagnostics.
+                }
             }
 
-            await transaction.RollbackAsync(cancellationToken);
+            await RollbackIfPendingAsync();
             return ApiResponse<OnboardingStatusDto>.Fail($"Knowledge setup failed: {ex.Message}", [ex.Message]);
         }
     }
@@ -961,6 +986,7 @@ public sealed class OnboardingService(
 
         var blockers = await CalculateBlockersAsync(progress, completedOrSkipped, cancellationToken);
         var reviewSummary = await BuildReviewSummaryAsync(progress, completed, skipped, blockers, cancellationToken);
+        var trustedPlanName = await ResolveTrustedPlanNameAsync(progress.CompanyId, cancellationToken);
 
         var currentStep = ResolveCurrentStep(progress, completedOrSkipped, blockers);
         var remainingSteps = WorkflowSteps
@@ -992,7 +1018,7 @@ public sealed class OnboardingService(
                 ?? (currentStep == OnboardingStep.Completed ? "Open /get-started to continue." : $"Complete {currentStep.ToStorageValue()}"),
             SafeLinks = BuildSafeLinks(currentStep),
             StartedAtUtc = progress.StartedAtUtc,
-            SelectedPlanName = progress.SelectedPlanName,
+            SelectedPlanName = progress.SelectedPlanName ?? trustedPlanName,
             FirstPropertyId = progress.FirstPropertyId,
             IsCompleted = progress.IsCompleted,
             CompletedAtUtc = progress.CompletedAtUtc,
@@ -1020,6 +1046,7 @@ public sealed class OnboardingService(
         var blockers = await CalculateBlockersAsync(emptyProgress, completed, cancellationToken);
         var reviewSummary = await BuildReviewSummaryAsync(emptyProgress, completed, skipped, blockers, cancellationToken);
         var checklist = await BuildChecklistAsync(emptyProgress, completed, skipped, blockers, cancellationToken);
+        var trustedPlanName = await ResolveTrustedPlanNameAsync(companyId, cancellationToken);
 
         return new OnboardingStatusDto
         {
@@ -1037,7 +1064,7 @@ public sealed class OnboardingService(
             NextRecommendedAction = "Start onboarding.",
             SafeLinks = BuildSafeLinks(OnboardingStep.Welcome),
             StartedAtUtc = emptyProgress.StartedAtUtc,
-            SelectedPlanName = null,
+            SelectedPlanName = trustedPlanName,
             FirstPropertyId = null,
             IsCompleted = false,
             CompletedAtUtc = null,
@@ -1248,7 +1275,7 @@ public sealed class OnboardingService(
                     && item.PropertyId == progress.FirstPropertyId.Value
                     && !item.IsDeleted
                     && item.IsActive)
-                .OrderByDescending(item => item.UpdatedAt)
+                .OrderByDescending(item => item.UpdatedAt.UtcDateTime)
                 .Select(item => item.Title)
                 .FirstOrDefaultAsync(cancellationToken);
         }
@@ -1294,14 +1321,14 @@ public sealed class OnboardingService(
         }
 
         var hasPlan = !string.IsNullOrWhiteSpace(progress.SelectedPlanName)
-            || await dbContext.TenantSubscriptions.AsNoTracking().AnyAsync(item => item.CompanyId == progress.CompanyId, cancellationToken);
+            || !string.IsNullOrWhiteSpace(await ResolveTrustedPlanNameAsync(progress.CompanyId, cancellationToken));
         if (!hasPlan)
         {
             blockers.Add(new OnboardingBlockerDto
             {
                 Step = OnboardingStep.PlanConfirmation.ToStorageValue(),
                 Code = "plan_missing",
-                Message = "No active plan was found. Complete billing checkout to continue."
+                Message = "No trusted plan was found. Ensure default Free plan provisioning is configured."
             });
         }
 
@@ -1578,6 +1605,12 @@ public sealed class OnboardingService(
 
         error = string.Empty;
         return true;
+    }
+
+    private async Task<string?> ResolveTrustedPlanNameAsync(Guid companyId, CancellationToken cancellationToken)
+    {
+        var snapshot = await subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
+        return NormalizeOptional(snapshot.PlanDisplayName) ?? NormalizeOptional(snapshot.PlanName);
     }
 
     private static string? NormalizeOptional(string? value)

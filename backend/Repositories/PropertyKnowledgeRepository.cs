@@ -54,7 +54,7 @@ public sealed class PropertyKnowledgeRepository(ApplicationDbContext dbContext) 
         var totalCount = await itemsQuery.CountAsync(cancellationToken);
         var items = await itemsQuery
             .OrderByDescending(item => item.Priority)
-            .ThenByDescending(item => item.UpdatedAt)
+            .ThenByDescending(item => item.UpdatedAt.UtcDateTime)
             .ThenBy(item => item.Title)
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
@@ -84,7 +84,7 @@ public sealed class PropertyKnowledgeRepository(ApplicationDbContext dbContext) 
         return await BaseQuery(companyId, propertyId)
             .Where(item => item.IsApproved && item.IsActive)
             .OrderByDescending(item => item.Priority)
-            .ThenByDescending(item => item.UpdatedAt)
+            .ThenByDescending(item => item.UpdatedAt.UtcDateTime)
             .ThenBy(item => item.Title)
             .ToListAsync(cancellationToken);
     }

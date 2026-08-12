@@ -1,6 +1,7 @@
 using System.Text.Json;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Properties;
+using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
@@ -324,6 +325,20 @@ public sealed class PropertyServiceTests
         Assert.Equal("test-correlation", details.RootElement.GetProperty("CorrelationId").GetString());
     }
 
+    [Fact]
+    public async Task CreateAsync_WhenFreePlanPropertyLimitIsReached_ReturnsUpgradeMessage()
+    {
+        var repository = new FakePropertyRepository();
+        var entitlementService = new FreePlanPropertyLimitEntitlementService();
+        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId), entitlementService);
+
+        var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Equal("You've reached the 1-property limit on the Free plan. Upgrade to Starter to add more properties.", response.Message);
+        Assert.Empty(repository.Properties);
+    }
+
     private static CreatePropertyRequest ValidCreateRequest()
     {
         return new CreatePropertyRequest
@@ -424,5 +439,34 @@ public sealed class PropertyServiceTests
         {
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class FreePlanPropertyLimitEntitlementService : ISubscriptionEntitlementService
+    {
+        public Task<SubscriptionSnapshot> GetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken)
+            => Task.FromResult(new SubscriptionSnapshot(
+                companyId,
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                "Free",
+                "Free",
+                "Active",
+                false,
+                DateTimeOffset.UtcNow.AddDays(-1),
+                DateTimeOffset.UtcNow.AddDays(29),
+                [],
+                []));
+
+        public Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken)
+            => Task.FromResult<SubscriptionSnapshot?>(null);
+
+        public Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task<UsageConsumptionResult> ConsumeQuotaAsync(Guid companyId, UsageMetric metric, long quantity, string idempotencyKey, CancellationToken cancellationToken)
+            => throw new QuotaExceededException(metric.ToStorageValue(), 1, quantity, 1);
+
+        public Task<SubscriptionSnapshot> UpdatePlanAsync(Guid companyId, Guid? planId, string? planName, string? notes, CancellationToken cancellationToken)
+            => GetCurrentSnapshotAsync(companyId, cancellationToken);
     }
 }

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Billing;
 using StayFlow.Api.Models;
@@ -15,7 +16,22 @@ public sealed class BillingServiceTests
     [Fact]
     public async Task ProcessStripeWebhookAsync_SecondDelivery_IsIdempotent()
     {
-        var fixture = await CreateFixtureAsync();
+        var fixture = await CreateFixtureAsync(
+            configuredOptions: new BillingOptions
+            {
+                Provider = "Development",
+                StripeWebhookSigningSecret = "whsec_test",
+                CheckoutSuccessUrl = "https://example.test/success",
+                CheckoutCancelUrl = "https://example.test/cancel",
+                BillingPortalReturnUrl = "https://example.test/portal",
+                PlanPriceIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Starter"] = "price_starter",
+                    ["Growth"] = "price_growth",
+                    ["Scale"] = "price_scale"
+                }
+            },
+            provider: null);
 
         var first = await fixture.Service.ProcessStripeWebhookAsync(fixture.RawWebhookPayload, fixture.ValidSignatureHeader, CancellationToken.None);
         var second = await fixture.Service.ProcessStripeWebhookAsync(fixture.RawWebhookPayload, fixture.ValidSignatureHeader, CancellationToken.None);
@@ -27,7 +43,21 @@ public sealed class BillingServiceTests
     [Fact]
     public async Task CreateCheckoutSessionAsync_ReturnsActionableError_WhenPriceMappingMissing()
     {
-        var fixture = await CreateFixtureAsync();
+        var fixture = await CreateFixtureAsync(
+            configuredOptions: new BillingOptions
+            {
+                Provider = "Stripe",
+                StripeSecretKey = "sk_test_123",
+                StripeWebhookSigningSecret = "whsec_test",
+                CheckoutSuccessUrl = "https://example.test/success",
+                CheckoutCancelUrl = "https://example.test/cancel",
+                BillingPortalReturnUrl = "https://example.test/portal",
+                PlanPriceIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Starter"] = "price_starter",
+                    ["Growth"] = "price_growth"
+                }
+            });
 
         var response = await fixture.Service.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest
         {
@@ -37,6 +67,32 @@ public sealed class BillingServiceTests
         Assert.False(response.Success);
         Assert.Contains("Scale", response.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Billing:PlanPriceIds", response.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CreateCheckoutSessionAsync_ReturnsCapabilityMessage_WhenStripeConfigurationMissing()
+    {
+        var fixture = await CreateFixtureAsync(
+            configuredOptions: new BillingOptions
+            {
+                Provider = "Development",
+                StripeSecretKey = string.Empty,
+                StripeWebhookSigningSecret = string.Empty,
+                CheckoutSuccessUrl = "https://example.test/success",
+                CheckoutCancelUrl = "https://example.test/cancel",
+                BillingPortalReturnUrl = "https://example.test/portal",
+                PlanPriceIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            });
+
+        var response = await fixture.Service.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest
+        {
+            PlanName = "Starter"
+        }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Contains("unavailable", response.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Billing:Provider", response.Errors);
+        Assert.Contains("Billing:StripeSecretKey", response.Errors);
     }
 
     [Fact]
@@ -57,6 +113,44 @@ public sealed class BillingServiceTests
         Assert.False(response.Data.CanCancel);
         Assert.False(response.Data.CanResume);
         Assert.True(response.Data.CanStartCheckout);
+    }
+
+    [Fact]
+    public async Task GetSubscriptionAsync_NewCleanTenant_ResolvesToFreeWithoutStripeCustomer()
+    {
+        var fixture = await CreateFixtureAsync(includeActiveSubscription: false);
+        var company = await fixture.DbContext.Companies.FindAsync(fixture.CompanyId);
+        company!.StripeCustomerId = null;
+        await fixture.DbContext.SaveChangesAsync();
+
+        var response = await fixture.Service.GetSubscriptionAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        Assert.Equal("Free", response.Data!.PlanName);
+        Assert.False(response.Data.HasStripeCustomer);
+        Assert.False(response.Data.HasStripeSubscription);
+    }
+
+    [Theory]
+    [InlineData("Starter", "price_starter")]
+    [InlineData("Growth", "price_growth")]
+    [InlineData("Scale", "price_scale")]
+    public async Task CreateCheckoutSessionAsync_UsesConfiguredPriceId(string planName, string expectedPriceId)
+    {
+        var provider = new TestBillingProvider();
+        var fixture = await CreateFixtureAsync(provider: provider);
+
+        var response = await fixture.Service.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest
+        {
+            PlanName = planName,
+            TrialDays = 14
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        Assert.Equal("https://checkout.stripe.test/session", response.Data!.CheckoutUrl);
+        Assert.Equal(expectedPriceId, provider.LastCheckoutPriceId);
     }
 
     [Fact]
@@ -97,7 +191,11 @@ public sealed class BillingServiceTests
         Assert.Contains("owners or administrators", response.Message);
     }
 
-    private static async Task<Fixture> CreateFixtureAsync(OrganizationRole actorRole = OrganizationRole.Owner)
+    private static async Task<Fixture> CreateFixtureAsync(
+        OrganizationRole actorRole = OrganizationRole.Owner,
+        bool includeActiveSubscription = true,
+        BillingOptions? configuredOptions = null,
+        IBillingProvider? provider = null)
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"billing-service-{Guid.NewGuid():N}")
@@ -106,7 +204,10 @@ public sealed class BillingServiceTests
 
         var companyId = Guid.NewGuid();
         var userId = Guid.NewGuid();
-        var planId = Guid.NewGuid();
+        var freePlanId = Guid.NewGuid();
+        var starterPlanId = Guid.NewGuid();
+        var growthPlanId = Guid.NewGuid();
+        var scalePlanId = Guid.NewGuid();
 
         var tenantContext = new FakeTenantContext(companyId, userId, true);
         var dbContext = new ApplicationDbContext(options, tenantContext);
@@ -123,7 +224,7 @@ public sealed class BillingServiceTests
             PhoneNumber = "+254700111111",
             CountryCode = "KE",
             TimeZone = "Africa/Nairobi",
-            StripeCustomerId = "cus_test_123",
+            StripeCustomerId = includeActiveSubscription ? "cus_test_123" : null,
             IsActive = true
         });
 
@@ -149,32 +250,63 @@ public sealed class BillingServiceTests
             JoinedAt = DateTimeOffset.UtcNow.AddDays(-10)
         });
 
-        dbContext.SubscriptionPlans.Add(new SubscriptionPlan
+        dbContext.SubscriptionPlans.AddRange(
+        new SubscriptionPlan
         {
-            Id = planId,
+            Id = freePlanId,
+            Name = "Free",
+            DisplayName = "Free",
+            Description = "Free plan",
+            IsActive = true,
+            SortOrder = 1
+        },
+        new SubscriptionPlan
+        {
+            Id = starterPlanId,
+            Name = "Starter",
+            DisplayName = "Starter",
+            Description = "Starter plan",
+            IsActive = true,
+            SortOrder = 2
+        },
+        new SubscriptionPlan
+        {
+            Id = growthPlanId,
             Name = "Growth",
             DisplayName = "Growth",
             Description = "Growth plan",
             IsActive = true,
-            SortOrder = 1
+            SortOrder = 3
+        },
+        new SubscriptionPlan
+        {
+            Id = scalePlanId,
+            Name = "Scale",
+            DisplayName = "Scale",
+            Description = "Scale plan",
+            IsActive = true,
+            SortOrder = 4
         });
 
-        dbContext.TenantSubscriptions.Add(new TenantSubscription
+        if (includeActiveSubscription)
         {
-            Id = Guid.NewGuid(),
-            CompanyId = companyId,
-            SubscriptionPlanId = planId,
-            Status = SubscriptionStatus.Active.ToStorageValue(),
-            CurrentPeriodStartUtc = DateTimeOffset.UtcNow.AddDays(-10),
-            CurrentPeriodEndUtc = DateTimeOffset.UtcNow.AddDays(20),
-            ExternalSubscriptionId = "sub_test_123",
-            ExternalPriceId = "price_growth"
-        });
+            dbContext.TenantSubscriptions.Add(new TenantSubscription
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                SubscriptionPlanId = growthPlanId,
+                Status = SubscriptionStatus.Active.ToStorageValue(),
+                CurrentPeriodStartUtc = DateTimeOffset.UtcNow.AddDays(-10),
+                CurrentPeriodEndUtc = DateTimeOffset.UtcNow.AddDays(20),
+                ExternalSubscriptionId = "sub_test_123",
+                ExternalPriceId = "price_growth"
+            });
+        }
 
         dbContext.PlanEntitlements.Add(new PlanEntitlement
         {
             Id = Guid.NewGuid(),
-            SubscriptionPlanId = planId,
+            SubscriptionPlanId = growthPlanId,
             Key = UsageMetric.AiRequests.ToQuotaEntitlementKey(),
             IsEnabled = true,
             QuotaLimit = 1000,
@@ -194,25 +326,34 @@ public sealed class BillingServiceTests
 
         await dbContext.SaveChangesAsync();
 
-        var billingOptions = Options.Create(new BillingOptions
+        var billingOptionsValue = configuredOptions ?? new BillingOptions
         {
-            Provider = "Development",
+            Provider = "Stripe",
+            StripeSecretKey = "sk_test_123",
             StripeWebhookSigningSecret = "whsec_test",
+            CheckoutSuccessUrl = "https://example.test/success",
+            CheckoutCancelUrl = "https://example.test/cancel",
+            BillingPortalReturnUrl = "https://example.test/portal",
             PlanPriceIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["Growth"] = "price_growth",
-                ["Starter"] = "price_starter"
+                ["Starter"] = "price_starter",
+                ["Scale"] = "price_scale"
             }
-        });
+        };
 
-        var provider = new DevelopmentBillingProvider(billingOptions);
+        var billingOptions = Options.Create(billingOptionsValue);
+
+        var billingProvider = provider ?? (billingOptionsValue.Provider.Equals("Stripe", StringComparison.OrdinalIgnoreCase)
+            ? new TestBillingProvider()
+            : new DevelopmentBillingProvider(billingOptions));
         var entitlementService = new SubscriptionEntitlementService(dbContext, NullLogger<SubscriptionEntitlementService>.Instance);
 
         var service = new BillingService(
             dbContext,
             tenantContext,
             entitlementService,
-            provider,
+            billingProvider,
             billingOptions,
             NullLogger<BillingService>.Instance);
 
@@ -246,5 +387,87 @@ public sealed class BillingServiceTests
         public Guid? UserId { get; } = userId;
         public string? CorrelationId => "corr-billing-tests";
         public bool IsAuthenticated { get; } = isAuthenticated;
+    }
+
+    private sealed class TestBillingProvider : IBillingProvider
+    {
+        public string ProviderName => "Stripe";
+
+        public string? LastCheckoutPriceId { get; private set; }
+
+        public Task<string> EnsureCustomerAsync(BillingCustomerRequest request, CancellationToken cancellationToken)
+            => Task.FromResult("cus_test_checkout");
+
+        public Task<string> CreateCheckoutSessionAsync(CheckoutSessionRequest request, CancellationToken cancellationToken)
+        {
+            LastCheckoutPriceId = request.PriceId;
+            return Task.FromResult("https://checkout.stripe.test/session");
+        }
+
+        public Task<string> CreateBillingPortalSessionAsync(BillingPortalRequest request, CancellationToken cancellationToken)
+            => Task.FromResult("https://billing.stripe.test/portal");
+
+        public Task<string> CreatePaymentMethodPortalSessionAsync(BillingPortalRequest request, CancellationToken cancellationToken)
+            => Task.FromResult("https://billing.stripe.test/payment-method");
+
+        public Task<BillingProviderSubscriptionSnapshot> ChangeSubscriptionPlanAsync(ChangeSubscriptionPlanProviderRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(new BillingProviderSubscriptionSnapshot(
+                request.SubscriptionId,
+                "active",
+                request.NewPriceId,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow.AddMonths(1),
+                null,
+                false,
+                DateTimeOffset.UtcNow));
+
+        public Task<BillingProviderSubscriptionSnapshot> CancelSubscriptionAsync(CancelSubscriptionProviderRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(new BillingProviderSubscriptionSnapshot(
+                request.SubscriptionId,
+                request.AtPeriodEnd ? "active" : "canceled",
+                "price_growth",
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow.AddMonths(1),
+                null,
+                request.AtPeriodEnd,
+                DateTimeOffset.UtcNow));
+
+        public Task<BillingProviderSubscriptionSnapshot> ResumeSubscriptionAsync(ResumeSubscriptionProviderRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(new BillingProviderSubscriptionSnapshot(
+                request.SubscriptionId,
+                "active",
+                "price_growth",
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow.AddMonths(1),
+                null,
+                false,
+                DateTimeOffset.UtcNow));
+
+        public Task<BillingProviderSubscriptionSnapshot> GetSubscriptionSnapshotAsync(string subscriptionId, CancellationToken cancellationToken)
+            => Task.FromResult(new BillingProviderSubscriptionSnapshot(
+                subscriptionId,
+                "active",
+                "price_growth",
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow.AddMonths(1),
+                null,
+                false,
+                DateTimeOffset.UtcNow));
+
+        public BillingWebhookEnvelope ValidateAndParseWebhook(string rawBody, string signatureHeader)
+        {
+            _ = signatureHeader;
+            using var document = JsonDocument.Parse(rawBody);
+            var root = document.RootElement;
+            var dataObject = root.GetProperty("data").GetProperty("object").Clone();
+            return new BillingWebhookEnvelope(
+                root.GetProperty("id").GetString() ?? string.Empty,
+                root.GetProperty("type").GetString() ?? string.Empty,
+                DateTimeOffset.FromUnixTimeSeconds(root.GetProperty("created").GetInt64()),
+                dataObject.TryGetProperty("customer", out var customer) ? customer.GetString() : null,
+                dataObject.TryGetProperty("subscription", out var subscription) ? subscription.GetString() : null,
+                "hash",
+                dataObject);
+        }
     }
 }

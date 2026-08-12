@@ -18,3 +18,4 @@ export { HostConversationActions } from "./HostConversationActions";
 export { HostConversationDetailSkeleton } from "./HostConversationDetailSkeleton";
 export { HostConversationDetailError } from "./HostConversationDetailError";
 export { HostConsoleNav } from "./HostConsoleNav";
+export { HostOrganizationSelector } from "./HostOrganizationSelector";

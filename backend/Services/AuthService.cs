@@ -1,8 +1,12 @@
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using StayFlow.Api.Common;
+using StayFlow.Api.Data;
+using StayFlow.Api.DTOs.Companies;
 using StayFlow.Api.DTOs.Auth;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
@@ -16,7 +20,10 @@ public sealed class AuthService(
     IPasswordHasher passwordHasher,
     IConfiguration configuration,
     IHttpContextAccessor httpContextAccessor,
-    IIdentityEmailService identityEmailService) : IAuthService
+    IIdentityEmailService identityEmailService,
+    ApplicationDbContext dbContext,
+    ISubscriptionEntitlementService subscriptionEntitlementService,
+    ITenantExecutionContextAccessor tenantExecutionContextAccessor) : IAuthService
 {
     private const int MaxFailedAttempts = 5;
     private static readonly TimeSpan EmailVerificationLifetime = TimeSpan.FromHours(24);
@@ -81,6 +88,278 @@ public sealed class AuthService(
         await authRepository.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<AuthTokenResponse>.Ok(response, "Token refreshed successfully.");
+    }
+
+    public async Task<ApiResponse<IReadOnlyCollection<AuthOrganizationSummaryDto>>> GetAuthorizedOrganizationsAsync(ClaimsPrincipal principal, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(principal, out var userId))
+        {
+            return ApiResponse<IReadOnlyCollection<AuthOrganizationSummaryDto>>.Fail("Current user is not available.");
+        }
+
+        var user = await authRepository.GetUserByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return ApiResponse<IReadOnlyCollection<AuthOrganizationSummaryDto>>.Fail("Current user is not available.");
+        }
+
+        if (user.CompanyId != Guid.Empty)
+        {
+            var currentCompany = await dbContext.Companies
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == user.CompanyId && item.IsActive, cancellationToken);
+
+            if (currentCompany is not null && !user.OrganizationMemberships.Any(item => item.CompanyId == user.CompanyId && item.Status == OrganizationMemberStatus.Active.ToStorageValue()))
+            {
+                await BootstrapLegacyCurrentCompanyMembershipAsync(user, currentCompany, cancellationToken);
+            }
+        }
+
+        var memberships = await dbContext.OrganizationMembers
+            .AsNoTracking()
+            .Include(item => item.Company)
+            .Where(item => item.UserId == userId && item.Status == OrganizationMemberStatus.Active.ToStorageValue())
+            .OrderByDescending(item => item.CompanyId == user.CompanyId)
+            .ThenBy(item => item.Company.Name)
+            .ToListAsync(cancellationToken);
+
+        var companyIds = memberships.Select(item => item.CompanyId).Distinct().ToArray();
+        var propertyCounts = await dbContext.Properties
+            .AsNoTracking()
+            .Where(item => companyIds.Contains(item.CompanyId) && !item.IsDeleted)
+            .GroupBy(item => item.CompanyId)
+            .Select(group => new { group.Key, Count = group.Count() })
+            .ToDictionaryAsync(item => item.Key, item => item.Count, cancellationToken);
+
+        var results = new List<AuthOrganizationSummaryDto>(memberships.Count);
+        foreach (var membership in memberships)
+        {
+            var snapshot = await subscriptionEntitlementService.TryGetCurrentSnapshotAsync(membership.CompanyId, cancellationToken);
+
+            results.Add(new AuthOrganizationSummaryDto
+            {
+                CompanyId = membership.CompanyId,
+                Name = membership.Company.Name,
+                Slug = membership.Company.Slug,
+                Role = membership.Role,
+                MembershipStatus = membership.Status,
+                IsActiveOrganization = membership.CompanyId == user.CompanyId,
+                OrganizationStatus = membership.Company.Status,
+                OnboardingState = membership.Company.OnboardingState,
+                PropertyCount = propertyCounts.GetValueOrDefault(membership.CompanyId),
+                PlanName = snapshot is null
+                    ? null
+                    : string.IsNullOrWhiteSpace(snapshot.PlanDisplayName) ? snapshot.PlanName : snapshot.PlanDisplayName,
+                SubscriptionStatus = snapshot?.SubscriptionStatus
+            });
+        }
+
+        return ApiResponse<IReadOnlyCollection<AuthOrganizationSummaryDto>>.Ok(results);
+    }
+
+    public async Task<ApiResponse<AuthTokenResponse>> SwitchOrganizationAsync(ClaimsPrincipal principal, Guid companyId, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(principal, out var userId))
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Current user is not available.");
+        }
+
+        if (companyId == Guid.Empty)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Organization identifier is required.");
+        }
+
+        var user = await authRepository.GetUserByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Current user is not available.");
+        }
+
+        var membership = user.OrganizationMemberships
+            .FirstOrDefault(item => item.CompanyId == companyId && item.Status == OrganizationMemberStatus.Active.ToStorageValue());
+        if (membership is null)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Active organization membership is required.");
+        }
+
+        user.CompanyId = companyId;
+        user.OrganizationMemberships = user.OrganizationMemberships
+            .Where(item => item.CompanyId != companyId || item.Status == OrganizationMemberStatus.Active.ToStorageValue())
+            .ToList();
+
+        var sessionId = Guid.NewGuid();
+        var response = jwtTokenService.CreateTokenResponse(user, GetRoles(user), GetPermissions(user), sessionId);
+        await authRepository.AddRefreshTokenAsync(CreateRefreshToken(user.Id, response.RefreshToken, sessionId), cancellationToken);
+        await AddAuditLogAsync(user, "OrganizationSwitched", new { companyId }, cancellationToken);
+        await authRepository.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<AuthTokenResponse>.Ok(response, "Organization switched successfully.");
+    }
+
+    public async Task<ApiResponse<AuthTokenResponse>> CreateOrganizationAsync(ClaimsPrincipal principal, CreateOrganizationRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(principal, out var userId))
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Current user is not available.");
+        }
+
+        var user = await authRepository.GetUserByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Current user is not available.");
+        }
+
+        var companyRequest = new CreateCompanyRequest
+        {
+            Name = request.Name,
+            Slug = request.Slug,
+            Email = request.SupportContactEmail,
+            PhoneNumber = user.PhoneNumber,
+            CountryCode = request.CountryCode,
+            TimeZone = request.TimeZone
+        };
+
+        var validation = CompanyRequestValidator.Validate(companyRequest);
+        if (!validation.IsValid)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Company validation failed.", validation.Errors);
+        }
+
+        var slug = BuildSlug(request.Slug, request.Name);
+        var normalizedSlug = slug.ToUpperInvariant();
+        var slugExists = await dbContext.Companies
+            .AsNoTracking()
+            .AnyAsync(item => item.NormalizedSlug == normalizedSlug, cancellationToken);
+        if (slugExists)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Organization slug already exists.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var companyId = Guid.NewGuid();
+        IDbContextTransaction? transaction = null;
+
+        try
+        {
+            if (dbContext.Database.IsRelational())
+            {
+                transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            var company = new Company
+            {
+                Id = companyId,
+                Name = request.Name.Trim(),
+                Slug = slug,
+                NormalizedSlug = normalizedSlug,
+                Status = "Active",
+                OwnerUserId = userId,
+                Email = request.SupportContactEmail.Trim(),
+                PhoneNumber = user.PhoneNumber.Trim(),
+                CountryCode = request.CountryCode.Trim().ToUpperInvariant(),
+                TimeZone = request.TimeZone.Trim(),
+                OnboardingState = OnboardingStep.Welcome.ToStorageValue(),
+                IsActive = true
+            };
+
+            var membership = new OrganizationMember
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                UserId = userId,
+                Role = OrganizationRole.Owner.ToStorageValue(),
+                Status = OrganizationMemberStatus.Active.ToStorageValue(),
+                JoinedAt = now
+            };
+
+            var onboardingProgress = new OnboardingProgress
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                UserId = userId,
+                CurrentStep = OnboardingStep.Welcome.ToStorageValue(),
+                StartedAtUtc = now,
+                LastUpdatedAtUtc = now,
+                IsCompleted = false,
+                Version = 1
+            };
+
+            user.CompanyId = companyId;
+            user.OrganizationMemberships.Add(membership);
+
+            await dbContext.Companies.AddAsync(company, cancellationToken);
+            await dbContext.OrganizationMembers.AddAsync(membership, cancellationToken);
+            await dbContext.OnboardingProgressRecords.AddAsync(onboardingProgress, cancellationToken);
+            await dbContext.AuditLogs.AddAsync(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                EntityName = nameof(Company),
+                EntityId = companyId,
+                Action = "Created",
+                Details = JsonSerializer.Serialize(new
+                {
+                    company.Name,
+                    company.Email,
+                    company.PhoneNumber,
+                    company.CountryCode,
+                    company.TimeZone,
+                    ownerUserId = userId
+                }),
+                CreatedAt = now
+            }, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            var previousCompanyId = tenantExecutionContextAccessor.CompanyId;
+            var previousUserId = tenantExecutionContextAccessor.UserId;
+            var previousCorrelationId = tenantExecutionContextAccessor.CorrelationId;
+            var hadTenantExecutionContext = tenantExecutionContextAccessor.IsAuthenticated;
+
+            try
+            {
+                tenantExecutionContextAccessor.Set(companyId, userId, previousCorrelationId);
+                await subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
+            }
+            finally
+            {
+                if (hadTenantExecutionContext && previousCompanyId is { } restoredCompanyId && restoredCompanyId != Guid.Empty)
+                {
+                    tenantExecutionContextAccessor.Set(restoredCompanyId, previousUserId, previousCorrelationId);
+                }
+                else
+                {
+                    tenantExecutionContextAccessor.Clear();
+                }
+            }
+
+            var sessionId = Guid.NewGuid();
+            var response = jwtTokenService.CreateTokenResponse(user, GetRoles(user), GetPermissions(user), sessionId);
+            await authRepository.AddRefreshTokenAsync(CreateRefreshToken(user.Id, response.RefreshToken, sessionId), cancellationToken);
+            await AddAuditLogAsync(user, "OrganizationCreated", new { companyId }, cancellationToken);
+            await authRepository.SaveChangesAsync(cancellationToken);
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return ApiResponse<AuthTokenResponse>.Ok(response, "Organization created successfully.");
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
     }
 
     public async Task<ApiResponse<object>> RequestPasswordResetAsync(PasswordResetRequest request, CancellationToken cancellationToken)
@@ -389,9 +668,80 @@ public sealed class AuthService(
         return int.TryParse(configuration["Jwt:RefreshTokenDays"], out var days) ? days : 30;
     }
 
+    private async Task BootstrapLegacyCurrentCompanyMembershipAsync(User user, Company company, CancellationToken cancellationToken)
+    {
+        var existingMembership = await dbContext.OrganizationMembers
+            .FirstOrDefaultAsync(item => item.CompanyId == user.CompanyId && item.UserId == user.Id, cancellationToken);
+
+        if (existingMembership is not null)
+        {
+            existingMembership.Role = DetermineLegacyMembershipRole(user, company, existingMembership.Role);
+            existingMembership.Status = OrganizationMemberStatus.Active.ToStorageValue();
+            if (existingMembership.JoinedAt == default)
+            {
+                existingMembership.JoinedAt = DateTimeOffset.UtcNow;
+            }
+            return;
+        }
+
+        var role = DetermineLegacyMembershipRole(user, company, null);
+        var membership = new OrganizationMember
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = user.CompanyId,
+            UserId = user.Id,
+            Role = role,
+            Status = OrganizationMemberStatus.Active.ToStorageValue(),
+            JoinedAt = DateTimeOffset.UtcNow
+        };
+
+        if (company.OwnerUserId is null && string.Equals(role, OrganizationRole.Owner.ToStorageValue(), StringComparison.OrdinalIgnoreCase))
+        {
+            company.OwnerUserId = user.Id;
+        }
+
+        user.OrganizationMemberships.Add(membership);
+        await dbContext.OrganizationMembers.AddAsync(membership, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private static string DetermineLegacyMembershipRole(User user, Company company, string? currentValue)
+    {
+        if (!string.IsNullOrWhiteSpace(currentValue)
+            && Enum.TryParse<OrganizationRole>(currentValue, true, out var parsedCurrentRole))
+        {
+            return parsedCurrentRole.ToStorageValue();
+        }
+
+        if (!string.IsNullOrWhiteSpace(user.Role)
+            && Enum.TryParse<OrganizationRole>(user.Role, true, out var parsedUserRole))
+        {
+            return parsedUserRole.ToStorageValue();
+        }
+
+        return company.OwnerUserId == user.Id || company.OwnerUserId is null
+            ? OrganizationRole.Owner.ToStorageValue()
+            : OrganizationRole.Host.ToStorageValue();
+    }
+
     private static IReadOnlyCollection<string> GetRoles(User user)
     {
         return user.UserRoles.Select(userRole => userRole.Role.Name).Distinct().ToList();
+    }
+
+    private static string BuildSlug(string? slug, string name)
+    {
+        var source = string.IsNullOrWhiteSpace(slug) ? name : slug;
+        var normalized = new string(source.Trim().ToLowerInvariant()
+            .Select(character => char.IsLetterOrDigit(character) ? character : '-')
+            .ToArray());
+        while (normalized.Contains("--", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        normalized = normalized.Trim('-');
+        return string.IsNullOrWhiteSpace(normalized) ? "organization" : normalized;
     }
 
     private static IReadOnlyCollection<string> GetPermissions(User user)

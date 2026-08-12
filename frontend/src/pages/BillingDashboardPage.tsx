@@ -109,12 +109,14 @@ export function BillingDashboardPage() {
         </header>
 
         <HostConsoleNav
+          auth={auth}
           conversationsHref="/host/conversations"
           copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={null}
           billingHref="/host/settings/billing"
           whatsappSettingsHref="/host/settings/whatsapp"
           organizationSettingsHref="/host/settings/organization"
+          organizationsHref="/host/organizations"
           accountSettingsHref="/host/settings/account"
           current="billing"
         />
@@ -186,6 +188,9 @@ export function BillingDashboardPage() {
             <h2>Plan Comparison</h2>
             <p className="sf-host-muted-note">Open dedicated page: <a href="/host/settings/billing/plans">Plan comparison page</a></p>
             <p className="sf-host-muted-note">Upgrade or downgrade with proration handled by Stripe.</p>
+            {!subscription?.capability.checkoutAvailable ? (
+              <p className="sf-host-muted-note">{subscription?.capability.message}</p>
+            ) : null}
             <div className="sf-plan-grid">
               {billingPlanCards.map((plan) => (
                 <div key={plan.name} className="sf-plan-card">
@@ -196,7 +201,7 @@ export function BillingDashboardPage() {
                     {plan.highlights.map((item) => <li key={item}>{item}</li>)}
                   </ul>
                   <div className="sf-plan-actions">
-                    <button type="button" onClick={() => setPendingPlan(plan.name)} disabled={isBusy || !subscription?.hasStripeSubscription}>{planChangeLabel(subscription?.planName, plan.name)} Plan</button>
+                    <button type="button" onClick={() => setPendingPlan(plan.name)} disabled={isBusy || !subscription?.hasStripeSubscription || !subscription?.capability?.stripeConfigured}>{planChangeLabel(subscription?.planName, plan.name)} Plan</button>
                     <button type="button" onClick={() => void billing.openCheckout(plan.name, plan.trialDays)} disabled={isBusy || !subscription?.canStartCheckout}>Start Trial / Checkout</button>
                   </div>
                 </div>

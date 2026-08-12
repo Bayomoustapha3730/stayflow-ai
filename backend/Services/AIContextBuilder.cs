@@ -299,7 +299,7 @@ public sealed class AIContextBuilder(
             .Where(article => !IsSensitiveAccessContent(article.Title, article.Content))
             .Where(article => !requiresAccessAuthorization || !IsRelevant(article.Title, article.Content, [QuestionContextCategory.PropertyAccess]))
             .OrderByDescending(article => article.Priority)
-            .ThenByDescending(article => article.UpdatedAt)
+            .ThenByDescending(article => article.UpdatedAt.UtcDateTime)
             .ThenBy(article => article.Title)
             .Take(options.Value.MaxKnowledgeArticles)
             .Select(article => new AIKnowledgeArticleContext { Title = article.Title, Content = article.Content })

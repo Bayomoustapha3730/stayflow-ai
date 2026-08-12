@@ -45,6 +45,67 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     }
 
     /// <summary>
+    /// Lists organizations the authenticated user can currently access.
+    /// </summary>
+    [Authorize]
+    [HttpGet("organizations")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyCollection<AuthOrganizationSummaryDto>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyCollection<AuthOrganizationSummaryDto>>), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyCollection<AuthOrganizationSummaryDto>>>> Organizations(CancellationToken cancellationToken)
+    {
+        var response = await authService.GetAuthorizedOrganizationsAsync(User, cancellationToken);
+        return AuthenticatedResult(response);
+    }
+
+    /// <summary>
+    /// Creates a new organization for the authenticated user and switches the active tenant context.
+    /// </summary>
+    [Authorize]
+    [HttpPost("organizations")]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenResponse>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenResponse>), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<ApiResponse<AuthTokenResponse>>> CreateOrganization(
+        [FromBody] CreateOrganizationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await authService.CreateOrganizationAsync(User, request, cancellationToken);
+        return AuthenticatedResult(response);
+    }
+
+    /// <summary>
+    /// Switches the authenticated user to another organization and returns a renewed token pair.
+    /// </summary>
+    [Authorize]
+    [HttpPost("organizations/switch")]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenResponse>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenResponse>), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenResponse>), StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<ApiResponse<AuthTokenResponse>>> SwitchOrganization(
+        [FromBody] SwitchOrganizationRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await authService.SwitchOrganizationAsync(User, request.CompanyId, cancellationToken);
+        if (response.Success)
+        {
+            return Ok(response);
+        }
+
+        if (string.Equals(response.Message, "Current user is not available.", StringComparison.Ordinal))
+        {
+            return Unauthorized(response);
+        }
+
+        if (string.Equals(response.Message, "Active organization membership is required.", StringComparison.Ordinal))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, response);
+        }
+
+        return BadRequest(response);
+    }
+
+    /// <summary>
     /// Generates a password reset token.
     /// </summary>
     [HttpPost("password-reset")]

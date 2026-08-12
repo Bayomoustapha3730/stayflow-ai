@@ -37,6 +37,18 @@ public sealed class BillingSubscriptionResponse
     public bool CanCancel { get; init; }
     public bool CanResume { get; init; }
     public bool CanStartCheckout { get; init; }
+    public BillingCapabilityResponse Capability { get; init; } = new();
+}
+
+public sealed class BillingCapabilityResponse
+{
+    public string Provider { get; init; } = string.Empty;
+    public bool StripeConfigured { get; init; }
+    public bool CheckoutAvailable { get; init; }
+    public bool PortalAvailable { get; init; }
+    public bool PaymentMethodManagementAvailable { get; init; }
+    public string Message { get; init; } = string.Empty;
+    public IReadOnlyCollection<string> MissingConfiguration { get; init; } = [];
 }
 
 public sealed class BillingPlanResponse

@@ -60,12 +60,14 @@ export function PlanComparisonPage() {
         </header>
 
         <HostConsoleNav
+          auth={auth}
           conversationsHref="/host/conversations"
           copilotWorkspaceHref="/host/copilot"
           propertyKnowledgeHref={null}
           billingHref="/host/settings/billing"
           whatsappSettingsHref="/host/settings/whatsapp"
           organizationSettingsHref="/host/settings/organization"
+          organizationsHref="/host/organizations"
           accountSettingsHref="/host/settings/account"
           current="billing"
         />
@@ -77,6 +79,9 @@ export function PlanComparisonPage() {
           <article className="sf-organization-card">
             <h2>Available Plans</h2>
             <p className="sf-host-muted-note">Current plan: <strong>{currentPlan ?? "None"}</strong></p>
+            {!subscription?.capability?.checkoutAvailable ? (
+              <p className="sf-host-muted-note">{subscription?.capability?.message}</p>
+            ) : null}
             <div className="sf-plan-grid">
               {billingPlanCards.map((plan) => (
                 <div key={plan.name} className="sf-plan-card">
@@ -90,7 +95,7 @@ export function PlanComparisonPage() {
                     <button
                       type="button"
                       onClick={() => setPendingPlan(plan.name)}
-                      disabled={isBusy || !subscription?.hasStripeSubscription || plan.name.toLowerCase() === (currentPlan ?? "").toLowerCase()}>
+                      disabled={isBusy || !subscription?.hasStripeSubscription || !subscription?.capability?.stripeConfigured || plan.name.toLowerCase() === (currentPlan ?? "").toLowerCase()}>
                       {actionLabel(currentPlan, plan.name)} Plan
                     </button>
                     <button type="button" onClick={() => void billing.openCheckout(plan.name, plan.trialDays)} disabled={isBusy || !subscription?.canStartCheckout}>Start Trial / Checkout</button>

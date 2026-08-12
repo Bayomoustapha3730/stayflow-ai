@@ -122,6 +122,11 @@ public sealed class ApplicationDbContext(
             .Where(entry => entry.State is EntityState.Added or EntityState.Modified)
             .ToList();
 
+        var createdCompanyIds = changedEntries
+            .Where(entry => entry.State == EntityState.Added && entry.Entity is Company)
+            .Select(entry => ((Company)entry.Entity).Id)
+            .ToHashSet();
+
         foreach (var entry in changedEntries)
         {
             if (entry.Entity is SubscriptionPlan or PlanEntitlement)
@@ -140,14 +145,18 @@ public sealed class ApplicationDbContext(
                 throw new DomainValidationException("Tenant-owned records must include a valid CompanyId.", "tenant_company_required");
             }
 
+            var isUserEntry = entry.Metadata.ClrType == typeof(User);
+
             if (_tenantContext?.IsAuthenticated == true && _tenantContext.CompanyId is { } tenantCompanyId && tenantCompanyId != Guid.Empty)
             {
-                if (companyId != tenantCompanyId)
+                var isRecordForNewlyCreatedCompany = entry.State == EntityState.Added && createdCompanyIds.Contains(companyId);
+                if (!isUserEntry && companyId != tenantCompanyId && !isRecordForNewlyCreatedCompany)
                 {
                     throw new DomainValidationException("Cross-tenant write was blocked.", "tenant_write_mismatch");
                 }
 
-                if (entry.State == EntityState.Modified
+                if (!isUserEntry
+                    && entry.State == EntityState.Modified
                     && entry.Properties.Any(property => string.Equals(property.Metadata.Name, nameof(User.CompanyId), StringComparison.Ordinal) && property.IsModified))
                 {
                     throw new DomainValidationException("CompanyId updates are not allowed on tenant-owned records.", "tenant_company_immutable");
@@ -163,6 +172,12 @@ public sealed class ApplicationDbContext(
         foreach (var foreignKey in entry.Metadata.GetForeignKeys())
         {
             if (foreignKey.PrincipalEntityType.ClrType == typeof(Company))
+            {
+                continue;
+            }
+
+            if (entry.Metadata.ClrType == typeof(OrganizationMember)
+                && foreignKey.PrincipalEntityType.ClrType == typeof(User))
             {
                 continue;
             }

@@ -1,11 +1,14 @@
 import type { LoginResponse } from "../models/chat";
 import type {
+  AuthTokenSession,
   AuthSession,
   EmailVerificationRequest,
   PasswordResetConfirmRequest
 } from "../models/auth";
 import type {
+  AuthorizedOrganizationSummary,
   ChangePasswordRequest,
+  CreateOrganizationWorkspaceRequest,
   CurrentUserProfile,
   EmailVerificationChallenge,
   UpdateCurrentUserProfileRequest
@@ -16,6 +19,9 @@ export function createAuthApi(http: HttpClient) {
   return {
     loginForDevelopment(email: string, password: string) {
       return http.post<LoginResponse>("/auth/login", { email, password });
+    },
+    refreshSession(refreshToken: string) {
+      return http.post<AuthTokenSession>("/auth/refresh", { refreshToken });
     },
     requestPasswordReset(email: string) {
       return http.post<Record<string, never>>("/auth/password-reset", { email });
@@ -43,6 +49,15 @@ export function createAuthApi(http: HttpClient) {
     },
     listSessions() {
       return http.get<AuthSession[]>("/auth/sessions");
+    },
+    listOrganizations() {
+      return http.get<AuthorizedOrganizationSummary[]>("/auth/organizations");
+    },
+    switchOrganization(companyId: string) {
+      return http.post<AuthTokenSession>("/auth/organizations/switch", { companyId });
+    },
+    createOrganization(request: CreateOrganizationWorkspaceRequest) {
+      return http.post<AuthTokenSession>("/auth/organizations", request);
     },
     revokeSession(sessionId: string) {
       return http.post<Record<string, never>>(`/auth/sessions/${sessionId}/revoke`);

@@ -58,6 +58,28 @@ export interface OrganizationMember {
   invitedByUserId?: string | null;
 }
 
+export interface AuthorizedOrganizationSummary {
+  companyId: string;
+  name: string;
+  slug: string;
+  role: string;
+  membershipStatus: string;
+  isActiveOrganization: boolean;
+  organizationStatus: string;
+  onboardingState?: string | null;
+  propertyCount: number;
+  planName?: string | null;
+  subscriptionStatus?: string | null;
+}
+
+export interface CreateOrganizationWorkspaceRequest {
+  name: string;
+  slug?: string;
+  supportContactEmail: string;
+  countryCode: string;
+  timeZone: string;
+}
+
 export interface UpdateOrganizationRequest {
   name: string;
   slug?: string;

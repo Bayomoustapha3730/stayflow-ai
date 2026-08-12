@@ -1,6 +1,7 @@
 using System.Text.Json;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Properties;
+using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 
@@ -63,12 +64,25 @@ public sealed class PropertyService(
         }
 
         await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.MultiProperty, cancellationToken);
-        await _subscriptionEntitlementService.ConsumeQuotaAsync(
-            companyId,
-            UsageMetric.Properties,
-            1,
-            $"property:create:{companyId:D}:{currentTenantContext.CorrelationId ?? "none"}:{request.Name.Trim().ToUpperInvariant()}",
-            cancellationToken);
+
+        try
+        {
+            await _subscriptionEntitlementService.ConsumeQuotaAsync(
+                companyId,
+                UsageMetric.Properties,
+                1,
+                $"property:create:{companyId:D}:{currentTenantContext.CorrelationId ?? "none"}:{request.Name.Trim().ToUpperInvariant()}",
+                cancellationToken);
+        }
+        catch (QuotaExceededException)
+        {
+            if (await IsFreePlanPropertyLimitAsync(companyId, cancellationToken))
+            {
+                return ApiResponse<PropertyDto>.Fail("You've reached the 1-property limit on the Free plan. Upgrade to Starter to add more properties.");
+            }
+
+            throw;
+        }
 
         var property = new Property
         {
@@ -274,6 +288,13 @@ public sealed class PropertyService(
                 IsActive = true
             });
         }
+    }
+
+    private async Task<bool> IsFreePlanPropertyLimitAsync(Guid companyId, CancellationToken cancellationToken)
+    {
+        var snapshot = await _subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
+        return string.Equals(snapshot.PlanName, "Free", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(snapshot.PlanDisplayName, "Free", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task AddAuditLogAsync(string action, Property property, CancellationToken cancellationToken)

@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
+using Microsoft.EntityFrameworkCore;
+using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Auth;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
@@ -64,6 +66,32 @@ public sealed class AuthServiceTests
         Assert.Equal(5, repository.User.FailedLoginAttempts);
         Assert.True(repository.User.LockoutEndAt > DateTimeOffset.UtcNow);
         Assert.Equal(5, repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task SwitchOrganizationAsync_WithActiveMembership_UpdatesActiveOrganizationAndReturnsNewTokens()
+    {
+        var hasher = new Pbkdf2PasswordHasher();
+        var repository = new FakeAuthRepository();
+        repository.User = NewUser(hasher.HashPassword("a very strong password"));
+        var otherCompanyId = Guid.NewGuid();
+        repository.User.OrganizationMemberships.Add(new OrganizationMember
+        {
+            CompanyId = otherCompanyId,
+            UserId = repository.User.Id,
+            Role = "Host",
+            Status = OrganizationMemberStatus.Active.ToStorageValue()
+        });
+        var service = CreateService(repository, hasher);
+
+        var response = await service.SwitchOrganizationAsync(CreatePrincipal(repository.User.Id), otherCompanyId, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotNull(response.Data);
+        Assert.NotEmpty(response.Data.AccessToken);
+        Assert.NotEmpty(response.Data.RefreshToken);
+        Assert.Equal(otherCompanyId, repository.User.CompanyId);
+        Assert.Equal(1, repository.SaveChangesCallCount);
     }
 
     [Fact]
@@ -304,13 +332,21 @@ public sealed class AuthServiceTests
         };
         httpContextAccessor.HttpContext.Request.Headers.UserAgent = "StayFlow.Api.Tests";
 
+        var dbContext = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"auth-service-tests-{Guid.NewGuid():N}")
+                .Options);
+
         return new AuthService(
             repository,
             new JwtTokenService(configuration, hasher),
             hasher,
             configuration,
             httpContextAccessor,
-            new FakeIdentityEmailService(repository));
+            new FakeIdentityEmailService(repository),
+            dbContext,
+            new NoOpSubscriptionEntitlementService(),
+            new TenantExecutionContextAccessor());
     }
 
     private static User NewUser(string passwordHash)
@@ -510,5 +546,34 @@ public sealed class AuthServiceTests
             repository.EmailMessages.Add(new EmailMessage { ToAddress = email, Subject = "Invitation", PlainTextBody = token });
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class NoOpSubscriptionEntitlementService : ISubscriptionEntitlementService
+    {
+        public Task<SubscriptionSnapshot> GetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken)
+            => Task.FromResult(new SubscriptionSnapshot(
+                companyId,
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                "Free",
+                "Free",
+                "Active",
+                false,
+                DateTimeOffset.UtcNow.AddDays(-1),
+                DateTimeOffset.UtcNow.AddDays(29),
+                [],
+                []));
+
+        public Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken)
+            => Task.FromResult<SubscriptionSnapshot?>(null);
+
+        public Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task<UsageConsumptionResult> ConsumeQuotaAsync(Guid companyId, UsageMetric metric, long quantity, string idempotencyKey, CancellationToken cancellationToken)
+            => Task.FromResult(new UsageConsumptionResult(metric, null, 0, quantity, true, false));
+
+        public Task<SubscriptionSnapshot> UpdatePlanAsync(Guid companyId, Guid? planId, string? planName, string? notes, CancellationToken cancellationToken)
+            => GetCurrentSnapshotAsync(companyId, cancellationToken);
     }
 }

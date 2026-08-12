@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { DemoPage } from "./pages/DemoPage";
 import { AccountSettingsPage } from "./pages/AccountSettingsPage";
 import { BillingDashboardPage } from "./pages/BillingDashboardPage";
@@ -6,6 +7,7 @@ import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { HostCopilotWorkspacePage } from "./pages/HostCopilotWorkspacePage";
 import { HostInboxPage } from "./pages/HostInboxPage";
 import { InvitationDecisionPage } from "./pages/InvitationDecisionPage";
+import { MyOrganizationsPage } from "./pages/MyOrganizationsPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { OrganizationSettingsPage } from "./pages/OrganizationSettingsPage";
 import { PlanComparisonPage } from "./pages/PlanComparisonPage";
@@ -17,9 +19,15 @@ import { WhatsAppSettingsPage } from "./pages/WhatsAppSettingsPage";
 import { normalizePropertyId, resolvePropertyKnowledgePropertyId } from "./utils/propertyRouting";
 
 export default function App() {
-  const path = window.location.pathname.toLowerCase();
+  const [path, setPath] = useState(() => window.location.pathname.toLowerCase());
   const configuredDemoPropertyId = normalizePropertyId(import.meta.env.VITE_DEMO_PROPERTY_ID);
   const indexPropertyId = resolvePropertyKnowledgePropertyId(null, configuredDemoPropertyId, import.meta.env.DEV);
+
+  useEffect(() => {
+    const updatePath = () => setPath(window.location.pathname.toLowerCase());
+    window.addEventListener("popstate", updatePath);
+    return () => window.removeEventListener("popstate", updatePath);
+  }, []);
 
   if (/^\/auth\/forgot-password\/?$/.test(path)) {
     return <ForgotPasswordPage />;
@@ -59,6 +67,10 @@ export default function App() {
 
   if (/^\/host\/settings\/organization\/?$/.test(path)) {
     return <OrganizationSettingsPage />;
+  }
+
+  if (/^\/host\/organizations\/?$/.test(path)) {
+    return <MyOrganizationsPage />;
   }
 
   if (path === "/onboarding" || path === "/onboarding/") {

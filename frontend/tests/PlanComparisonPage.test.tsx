@@ -44,7 +44,23 @@ vi.mock("../src/hooks/useBillingDashboard", () => ({
       currentPeriodStartUtc: "2026-08-01T00:00:00Z",
       currentPeriodEndUtc: "2026-09-01T00:00:00Z",
       trialEndsAtUtc: null,
-      planName: "Starter"
+      planName: "Starter",
+      canStartCheckout: true,
+      canOpenBillingPortal: true,
+      canManagePaymentMethod: true,
+      canCancel: true,
+      canResume: false,
+      hasStripeCustomer: true,
+      hasStripeSubscription: true,
+      capability: {
+        provider: "Stripe",
+        stripeConfigured: true,
+        checkoutAvailable: true,
+        portalAvailable: true,
+        paymentMethodManagementAvailable: true,
+        message: "Stripe billing is configured.",
+        missingConfiguration: []
+      }
     },
     invoices: [],
     usage: null,

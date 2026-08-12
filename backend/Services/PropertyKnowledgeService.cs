@@ -98,8 +98,9 @@ public sealed class PropertyKnowledgeService(
         await AddAuditLogAsync("Created", article, cancellationToken);
         await propertyKnowledgeRepository.SaveChangesAsync(cancellationToken);
 
-        article.Property = property;
-        return ApiResponse<PropertyKnowledgeDetailResponse>.Ok(MapDetail(article), "Knowledge item created successfully.");
+        return ApiResponse<PropertyKnowledgeDetailResponse>.Ok(
+            MapDetail(article, property.Name),
+            "Knowledge item created successfully.");
     }
 
     public async Task<ApiResponse<PropertyKnowledgeDetailResponse>> UpdateAsync(Guid propertyId, Guid knowledgeId, UpdatePropertyKnowledgeRequest request, CancellationToken cancellationToken)
@@ -376,13 +377,13 @@ public sealed class PropertyKnowledgeService(
         };
     }
 
-    private static PropertyKnowledgeDetailResponse MapDetail(PropertyKnowledgeArticle article)
+    private static PropertyKnowledgeDetailResponse MapDetail(PropertyKnowledgeArticle article, string? propertyName = null)
     {
         return new PropertyKnowledgeDetailResponse
         {
             Id = article.Id,
             PropertyId = article.PropertyId,
-            PropertyName = article.Property?.Name ?? string.Empty,
+            PropertyName = propertyName ?? article.Property?.Name ?? string.Empty,
             Category = article.Category,
             CategoryLabel = CategoryLabel(article.Category),
             Title = article.Title,

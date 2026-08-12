@@ -31,6 +31,17 @@ export interface BillingSubscriptionResponse {
   canCancel: boolean;
   canResume: boolean;
   canStartCheckout: boolean;
+  capability: BillingCapabilityResponse;
+}
+
+export interface BillingCapabilityResponse {
+  provider: string;
+  stripeConfigured: boolean;
+  checkoutAvailable: boolean;
+  portalAvailable: boolean;
+  paymentMethodManagementAvailable: boolean;
+  message: string;
+  missingConfiguration: string[];
 }
 
 export interface BillingPlanResponse {

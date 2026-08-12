@@ -163,4 +163,15 @@ describe("OnboardingPage", () => {
     expect(screen.getByText(/Nairobi Loft/)).toBeInTheDocument();
     expect(screen.getByText(/Demo data choice/i)).toBeInTheDocument();
   });
+
+  it("shows Free in plan confirmation when no paid plan is selected", () => {
+    onboardingState.status.currentStep = "PlanConfirmation";
+    onboardingState.status.selectedPlanName = null;
+
+    render(<OnboardingPage routeStep="plan" />);
+
+    expect(screen.getByText(/Current plan:/i)).toBeInTheDocument();
+    expect(screen.getByText("Free")).toBeInTheDocument();
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
+  });
 });

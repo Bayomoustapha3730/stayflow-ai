@@ -55,6 +55,10 @@ vi.mock("../src/pages/OrganizationSettingsPage", () => ({
   OrganizationSettingsPage: () => <div data-testid="organization-settings-page">organization-settings</div>
 }));
 
+vi.mock("../src/pages/MyOrganizationsPage", () => ({
+  MyOrganizationsPage: () => <div data-testid="my-organizations-page">my-organizations</div>
+}));
+
 vi.mock("../src/pages/OnboardingPage", () => ({
   OnboardingPage: ({ routeStep }: { routeStep?: string }) => <div data-testid="onboarding-page">{routeStep ?? "root"}</div>
 }));
@@ -109,6 +113,14 @@ describe("App routing", () => {
     render(<App />);
 
     expect(screen.getByTestId("billing-dashboard-page")).toBeInTheDocument();
+  });
+
+  it("renders the my organizations page for host organizations route", () => {
+    window.history.pushState({}, "", "/host/organizations");
+
+    render(<App />);
+
+    expect(screen.getByTestId("my-organizations-page")).toBeInTheDocument();
   });
 
   it("renders the forgot password page for auth route", () => {

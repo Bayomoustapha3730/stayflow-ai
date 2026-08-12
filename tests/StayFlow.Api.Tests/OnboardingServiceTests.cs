@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Hosting;
@@ -11,6 +12,7 @@ using StayFlow.Api.DTOs.PropertyKnowledge;
 using StayFlow.Api.DTOs.Properties;
 using StayFlow.Api.DTOs.WhatsApp;
 using StayFlow.Api.Models;
+using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Tests;
@@ -208,7 +210,48 @@ public sealed class OnboardingServiceTests
     }
 
     [Fact]
-    public async Task CompletePlanStepAsync_AllowsDevelopmentFallbackWithoutSubscription()
+    public async Task CompletePlanStepAsync_ResolvesTrustedFreePlanWithoutPaidSubscription()
+    {
+        var fixture = await CreateFixtureAsync(includeActiveSubscription: false);
+        await fixture.Service.StartAsync(CancellationToken.None);
+        await fixture.Service.CompleteOrganizationStepAsync(new OnboardingOrganizationRequest
+        {
+            Name = "StayFlow",
+            Slug = "stayflow"
+        }, CancellationToken.None);
+
+        var response = await fixture.Service.CompletePlanStepAsync(new OnboardingPlanRequest
+        {
+            PlanName = "Free"
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal("Free", response.Data!.SelectedPlanName);
+        Assert.Contains("PlanConfirmation", response.Data.CompletedSteps);
+    }
+
+    [Fact]
+    public async Task CompletePlanStepAsync_WithoutPaidSubscription_RemainsFreeInProduction()
+    {
+        var fixture = await CreateFixtureAsync(environmentName: "Production", includeActiveSubscription: false);
+        await fixture.Service.StartAsync(CancellationToken.None);
+        await fixture.Service.CompleteOrganizationStepAsync(new OnboardingOrganizationRequest
+        {
+            Name = "StayFlow",
+            Slug = "stayflow"
+        }, CancellationToken.None);
+
+        var response = await fixture.Service.CompletePlanStepAsync(new OnboardingPlanRequest
+        {
+            PlanName = "Free"
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal("Free", response.Data!.SelectedPlanName);
+    }
+
+    [Fact]
+    public async Task CompletePlanStepAsync_RejectsDirectPaidPlanAssignmentOutsideTrustedState()
     {
         var fixture = await CreateFixtureAsync(includeActiveSubscription: false);
         await fixture.Service.StartAsync(CancellationToken.None);
@@ -223,29 +266,8 @@ public sealed class OnboardingServiceTests
             PlanName = "Starter"
         }, CancellationToken.None);
 
-        Assert.True(response.Success);
-        Assert.Equal("Starter", response.Data!.SelectedPlanName);
-        Assert.Contains("PlanConfirmation", response.Data.CompletedSteps);
-    }
-
-    [Fact]
-    public async Task CompletePlanStepAsync_WithoutSubscription_IsBlockedInProduction()
-    {
-        var fixture = await CreateFixtureAsync(environmentName: "Production", includeActiveSubscription: false);
-        await fixture.Service.StartAsync(CancellationToken.None);
-        await fixture.Service.CompleteOrganizationStepAsync(new OnboardingOrganizationRequest
-        {
-            Name = "StayFlow",
-            Slug = "stayflow"
-        }, CancellationToken.None);
-
-        var response = await fixture.Service.CompletePlanStepAsync(new OnboardingPlanRequest
-        {
-            PlanName = "Starter"
-        }, CancellationToken.None);
-
         Assert.False(response.Success);
-        Assert.Contains("No active plan", response.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("billing flow", response.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -312,6 +334,63 @@ public sealed class OnboardingServiceTests
     }
 
     [Fact]
+    public async Task CompleteKnowledgeStepAsync_RejectsPropertyBelongingToAnotherTenant()
+    {
+        var fixture = await CreateFixtureAsync();
+        await PromoteToKnowledgeStepAsync(fixture.Service);
+
+        var otherCompanyDbContext = new ApplicationDbContext(
+            new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"onboarding-service-knowledge-{Guid.NewGuid():N}")
+                .Options,
+            tenantContext: null);
+
+        var otherCompanyId = Guid.NewGuid();
+        otherCompanyDbContext.Companies.Add(new Company
+        {
+            Id = otherCompanyId,
+            Name = "Other Tenant",
+            Slug = "other-tenant",
+            NormalizedSlug = "OTHER-TENANT",
+            Status = "Active",
+            OwnerUserId = Guid.NewGuid(),
+            Email = "other@stayflow.test",
+            PhoneNumber = "+254700000003",
+            CountryCode = "KE",
+            TimeZone = "Africa/Nairobi",
+            IsActive = true
+        });
+        otherCompanyDbContext.Properties.Add(new Property
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = otherCompanyId,
+            Name = "Other Tenant Property",
+            AddressLine1 = "Other Street",
+            City = "Nairobi",
+            CountryCode = "KE",
+            TimeZone = "Africa/Nairobi",
+            IsActive = true
+        });
+        await otherCompanyDbContext.SaveChangesAsync();
+
+        var progress = await fixture.DbContext.OnboardingProgressRecords.SingleAsync(item => item.CompanyId == fixture.CompanyId, CancellationToken.None);
+        progress.FirstPropertyId = otherCompanyDbContext.Properties.Single().Id;
+        await fixture.DbContext.SaveChangesAsync();
+
+        var response = await fixture.Service.CompleteKnowledgeStepAsync(new OnboardingKnowledgeRequest
+        {
+            PropertyId = otherCompanyDbContext.Properties.Single().Id,
+            Title = "House Rules",
+            Content = "Quiet hours after 10 PM.",
+            Tags = ["house-rules"]
+        }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Contains("does not belong to this tenant", response.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await fixture.DbContext.PropertyKnowledgeArticles.AnyAsync(item => item.CompanyId == fixture.CompanyId && !item.IsDeleted, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task CompleteKnowledgeStepAsync_RollsBackKnowledgeCreationWhenApprovalFails()
     {
         var fixture = await CreateFixtureAsync();
@@ -339,6 +418,243 @@ public sealed class OnboardingServiceTests
         Assert.False(response.Success);
         Assert.Contains("approval failed", response.Message, StringComparison.OrdinalIgnoreCase);
         Assert.False(await fixture.DbContext.PropertyKnowledgeArticles.AnyAsync(item => item.CompanyId == fixture.CompanyId && !item.IsDeleted, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CompleteKnowledgeStepAsync_WithActiveSecondOrganization_CreatesKnowledgeOnlyForActiveTenant()
+    {
+        await using var connection = new SqliteConnection("DataSource=:memory:");
+        await connection.OpenAsync();
+
+        var companyAId = Guid.NewGuid();
+        var companyBId = Guid.NewGuid();
+        var companyAUserId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var propertyAId = Guid.NewGuid();
+        var propertyBId = Guid.NewGuid();
+
+        var seedOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using (var seedContext = new ApplicationDbContext(seedOptions))
+        {
+            await seedContext.Database.EnsureCreatedAsync();
+
+            seedContext.Companies.AddRange(
+                new Company
+                {
+                    Id = companyAId,
+                    Name = "Org A",
+                    Slug = "org-a",
+                    NormalizedSlug = "ORG-A",
+                    Status = "Active",
+                    Email = "orga@stayflow.test",
+                    PhoneNumber = "+254700000001",
+                    CountryCode = "KE",
+                    TimeZone = "Africa/Nairobi",
+                    IsActive = true,
+                    OnboardingState = OnboardingStep.Completed.ToStorageValue()
+                },
+                new Company
+                {
+                    Id = companyBId,
+                    Name = "Org B",
+                    Slug = "org-b",
+                    NormalizedSlug = "ORG-B",
+                    Status = "Active",
+                    Email = "orgb@stayflow.test",
+                    PhoneNumber = "+254700000002",
+                    CountryCode = "KE",
+                    TimeZone = "Africa/Nairobi",
+                    IsActive = true,
+                    OnboardingState = OnboardingStep.KnowledgeBaseSetup.ToStorageValue()
+                });
+
+            await seedContext.SaveChangesAsync();
+
+            seedContext.Users.AddRange(new User
+            {
+                Id = companyAUserId,
+                CompanyId = companyAId,
+                FullName = "Org A Owner",
+                Email = "orga-owner@stayflow.test",
+                PhoneNumber = "+254700000003",
+                Role = "Owner",
+                PasswordHash = "hash",
+                IsActive = true,
+                PreferredLanguage = "en",
+                TimeZone = "Africa/Nairobi"
+            },
+            new User
+            {
+                Id = userId,
+                CompanyId = companyBId,
+                FullName = "Owner",
+                Email = "owner@stayflow.test",
+                PhoneNumber = "+254700000004",
+                Role = "Owner",
+                PasswordHash = "hash",
+                IsActive = true,
+                PreferredLanguage = "en",
+                TimeZone = "Africa/Nairobi"
+            });
+
+            seedContext.OrganizationMembers.AddRange(
+                new OrganizationMember
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyAId,
+                    UserId = companyAUserId,
+                    Role = OrganizationRole.Owner.ToStorageValue(),
+                    Status = OrganizationMemberStatus.Active.ToStorageValue(),
+                    JoinedAt = DateTimeOffset.UtcNow.AddDays(-10)
+                },
+                new OrganizationMember
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyBId,
+                    UserId = userId,
+                    Role = OrganizationRole.Owner.ToStorageValue(),
+                    Status = OrganizationMemberStatus.Active.ToStorageValue(),
+                    JoinedAt = DateTimeOffset.UtcNow.AddDays(-1)
+                });
+
+            seedContext.Properties.AddRange(
+                new Property
+                {
+                    Id = propertyAId,
+                    CompanyId = companyAId,
+                    Name = "Property A",
+                    AddressLine1 = "A Street",
+                    City = "Nairobi",
+                    CountryCode = "KE",
+                    TimeZone = "Africa/Nairobi",
+                    IsActive = true
+                },
+                new Property
+                {
+                    Id = propertyBId,
+                    CompanyId = companyBId,
+                    Name = "Property B",
+                    AddressLine1 = "B Street",
+                    City = "Nairobi",
+                    CountryCode = "KE",
+                    TimeZone = "Africa/Nairobi",
+                    IsActive = true
+                });
+
+            seedContext.OnboardingProgressRecords.AddRange(
+                new OnboardingProgress
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyAId,
+                    UserId = companyAUserId,
+                    CurrentStep = OnboardingStep.Completed.ToStorageValue(),
+                    FirstPropertyId = propertyAId,
+                    CompletedStepsCsv = "Welcome,OrganizationProfile,PlanConfirmation,FirstProperty,TeamInvitations,WhatsAppSetup,AiProviderSetup,KnowledgeBaseSetup,Review,Completed",
+                    SkippedStepsCsv = "DemoData",
+                    StartedAtUtc = DateTimeOffset.UtcNow.AddDays(-10),
+                    LastUpdatedAtUtc = DateTimeOffset.UtcNow.AddDays(-9),
+                    IsCompleted = true,
+                    CompletedAtUtc = DateTimeOffset.UtcNow.AddDays(-9),
+                    CompletedByUserId = companyAUserId,
+                    Version = 5
+                },
+                new OnboardingProgress
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = companyBId,
+                    UserId = userId,
+                    CurrentStep = OnboardingStep.KnowledgeBaseSetup.ToStorageValue(),
+                    FirstPropertyId = propertyBId,
+                    CompletedStepsCsv = "Welcome,OrganizationProfile,PlanConfirmation,FirstProperty,TeamInvitations,AiProviderSetup",
+                    SkippedStepsCsv = "WhatsAppSetup",
+                    SelectedPlanName = "Free",
+                    StartedAtUtc = DateTimeOffset.UtcNow.AddDays(-1),
+                    LastUpdatedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5),
+                    IsCompleted = false,
+                    Version = 3
+                });
+
+            seedContext.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyAId,
+                PropertyId = propertyAId,
+                Category = PropertyKnowledgeCategory.Other,
+                Title = "Existing Org A Article",
+                Content = "Org A content",
+                Tags = "org-a",
+                IsApproved = true,
+                IsActive = true,
+                CreatedByUserId = companyAUserId,
+                UpdatedByUserId = companyAUserId,
+                ApprovedAt = DateTimeOffset.UtcNow.AddDays(-2)
+            });
+
+            await seedContext.SaveChangesAsync();
+
+            var companyA = await seedContext.Companies.SingleAsync(item => item.Id == companyAId);
+            var companyB = await seedContext.Companies.SingleAsync(item => item.Id == companyBId);
+            companyA.OwnerUserId = companyAUserId;
+            companyB.OwnerUserId = userId;
+
+            await seedContext.SaveChangesAsync();
+        }
+
+        var tenantContext = new FakeTenantContext(companyBId, userId, true);
+        var runtimeOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using var dbContext = new ApplicationDbContext(runtimeOptions, tenantContext);
+        var propertyKnowledgeService = new PropertyKnowledgeService(
+            new PropertyKnowledgeRepository(dbContext),
+            tenantContext);
+        var onboardingService = new OnboardingService(
+            dbContext,
+            tenantContext,
+            new FakePropertyService(dbContext, companyBId),
+            new FakeInvitationService(),
+            propertyKnowledgeService,
+            new FakeWhatsAppTemplateService(),
+            new FakeSubscriptionEntitlementService("Free"),
+            Options.Create(new AIProviderOptions { Provider = "Development" }),
+            Options.Create(new OpenAIOptions { Model = "gpt-5.1-mini" }),
+            new FakeHostEnvironment("Development"));
+
+        var response = await onboardingService.CompleteKnowledgeStepAsync(new OnboardingKnowledgeRequest
+        {
+            Title = "House Rules",
+            Content = "Quiet hours after 10 PM. Please avoid loud music. No smoking in the apartment.",
+            Tags = ["house-rules"]
+        }, CancellationToken.None);
+
+        Assert.True(
+            response.Success,
+            $"Expected knowledge completion to succeed but failed. Message='{response.Message}', Errors='[{string.Join(", ", response.Errors)}]', CorrelationId='{response.CorrelationId}'.");
+        Assert.NotNull(response.Data);
+        Assert.Contains("KnowledgeBaseSetup", response.Data!.CompletedSteps);
+
+        var orgBKnowledge = await dbContext.PropertyKnowledgeArticles
+            .Where(item => item.CompanyId == companyBId && !item.IsDeleted)
+            .OrderBy(item => item.Title)
+            .ToListAsync();
+        var created = Assert.Single(orgBKnowledge);
+        Assert.Equal(propertyBId, created.PropertyId);
+        Assert.Equal("House Rules", created.Title);
+        Assert.True(created.IsApproved);
+
+        Assert.Equal(1, await dbContext.PropertyKnowledgeArticles.CountAsync(item => item.CompanyId == companyAId && !item.IsDeleted));
+
+        var orgBProgress = await dbContext.OnboardingProgressRecords.SingleAsync(item => item.CompanyId == companyBId && item.UserId == userId);
+        Assert.Contains("KnowledgeBaseSetup", orgBProgress.CompletedStepsCsv);
+        Assert.Equal(OnboardingStep.DemoData.ToStorageValue(), orgBProgress.CurrentStep);
+
+        var orgAProgress = await dbContext.OnboardingProgressRecords.SingleAsync(item => item.CompanyId == companyAId && item.UserId == userId);
+        Assert.Equal(OnboardingStep.Completed.ToStorageValue(), orgAProgress.CurrentStep);
+        Assert.True(orgAProgress.IsCompleted);
     }
 
     [Fact]
@@ -975,17 +1291,14 @@ public sealed class OnboardingServiceTests
     {
         public Task<SubscriptionSnapshot> GetCurrentSnapshotAsync(Guid companyIdArg, CancellationToken cancellationToken)
         {
-            if (string.IsNullOrWhiteSpace(planName))
-            {
-                throw new InvalidOperationException("No active subscription snapshot is available.");
-            }
+            var resolvedPlan = string.IsNullOrWhiteSpace(planName) ? "Free" : planName;
 
             return Task.FromResult(new SubscriptionSnapshot(
                 companyIdArg,
                 Guid.NewGuid(),
                 Guid.NewGuid(),
-                planName,
-                planName,
+                resolvedPlan,
+                resolvedPlan,
                 "Active",
                 false,
                 DateTimeOffset.UtcNow.AddDays(-1),

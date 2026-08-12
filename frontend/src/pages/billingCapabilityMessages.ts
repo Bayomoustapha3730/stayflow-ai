@@ -9,11 +9,15 @@ export function getBillingCapabilityMessage(
       return `Your selected plan is ${selectedPlanName}. Checkout is still required to activate it.`;
     }
 
-    return "You’re on the Free plan. Start checkout when you’re ready to activate a paid subscription.";
+    return "You’re on the Free plan. No checkout is required to keep using it.";
+  }
+
+  if (!subscription.capability.checkoutAvailable) {
+    return subscription.capability.message;
   }
 
   if (!subscription.hasStripeCustomer && !subscription.hasStripeSubscription) {
-    return "You’re on the Free plan. Start checkout when you’re ready to activate a paid subscription.";
+    return "You’re on the Free plan. No checkout is required to keep using it.";
   }
 
   if (subscription.canResume) {

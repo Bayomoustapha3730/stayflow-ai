@@ -125,6 +125,7 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
 
     if (currentPath === "/onboarding" || currentPath === "/onboarding/" || currentPath.startsWith("/onboarding/") || currentPath === "/get-started" || currentPath === "/get-started/") {
       window.history.replaceState({}, "", canonicalPath);
+      window.dispatchEvent(new PopStateEvent("popstate"));
     }
   }, [status?.currentStep]);
 

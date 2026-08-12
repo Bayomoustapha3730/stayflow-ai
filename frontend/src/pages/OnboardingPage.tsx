@@ -130,7 +130,8 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
   const [knowledgeTitle, setKnowledgeTitle] = useState("House Rules");
   const [knowledgeContent, setKnowledgeContent] = useState("Quiet hours after 10 PM. Please avoid loud music.");
 
-  const currentStep = routeStep && !onboarding.status ? routeStep : parseStep(onboarding.status?.currentStep);
+  // Route-driven steps must take precedence so URL navigation and browser history stay authoritative.
+  const currentStep = routeStep ?? parseStep(onboarding.status?.currentStep);
   const step = steps.find((item) => item.key === currentStep) ?? steps[0];
   const isAdmin = isAdminLike(auth.currentUser?.organizationRole ?? null);
   const hasTenant = Boolean(auth.currentUser?.companyId);
@@ -298,9 +299,9 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
       {!readOnly && currentStep === "plan" ? (
         <section className="sf-onboarding-card">
           <h2>Plan Confirmation</h2>
-          <p>Current plan from trusted billing state: <strong>{onboarding.status?.selectedPlanName ?? "Unknown"}</strong></p>
+          <p>Current plan: <strong>{onboarding.status?.selectedPlanName ?? "Free"}</strong></p>
           <p>{getBillingCapabilityMessage(undefined, onboarding.status?.selectedPlanName)}</p>
-          <button type="button" disabled={onboarding.isSaving} onClick={() => void onboarding.confirmPlan({ planName: onboarding.status?.selectedPlanName ?? "Starter" })}>Confirm Plan</button>
+          <button type="button" disabled={onboarding.isSaving} onClick={() => void onboarding.confirmPlan({ planName: onboarding.status?.selectedPlanName ?? "Free" })}>Confirm Plan</button>
           <a href="/host/settings/billing">Open Billing</a>
         </section>
       ) : null}

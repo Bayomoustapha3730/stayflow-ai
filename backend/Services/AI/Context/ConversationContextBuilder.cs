@@ -237,7 +237,7 @@ public sealed class ConversationContextBuilder(
 
         var ordered = knowledgeArticles
             .OrderByDescending(article => article.Priority)
-            .ThenByDescending(article => article.UpdatedAt)
+            .ThenByDescending(article => article.UpdatedAt.UtcDateTime)
             .ThenBy(article => article.Title)
             .ToList();
 
@@ -303,7 +303,7 @@ public sealed class ConversationContextBuilder(
                 && item.IsActive
                 && !item.IsDeleted)
             .OrderByDescending(item => item.Priority)
-            .ThenByDescending(item => item.UpdatedAt)
+            .ThenByDescending(item => item.UpdatedAt.UtcDateTime)
             .ThenBy(item => item.Title)
             .ToList();
     }

@@ -21,6 +21,13 @@ export interface AuthSession {
   userAgent?: string | null;
 }
 
+export interface AuthTokenSession {
+  accessToken: string;
+  refreshToken: string;
+  sessionId?: string;
+  expiresAt: string;
+}
+
 export interface InvitationDecisionRequest {
   token: string;
 }
