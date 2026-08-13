@@ -126,9 +126,11 @@ public sealed class AIPromptBuilder(IOptions<AIPromptOptions> options) : IAIProm
             $"- Conversation status: {request.ConversationContext.Status}",
             $"- Channel: {request.ConversationContext.Channel}",
             "Reservation summary:",
+            $"- Guest: {request.ConversationContext.GuestDisplayName}",
             $"- Confirmation: {request.ConversationContext.ConfirmationNumber ?? "Unavailable"}",
-            $"- Check-in: {request.ConversationContext.CheckInDate:yyyy-MM-dd}",
-            $"- Check-out: {request.ConversationContext.CheckOutDate:yyyy-MM-dd}",
+            $"- Check-in: {FormatReservationDate(request.ConversationContext.CheckInDate)}",
+            $"- Check-out: {FormatReservationDate(request.ConversationContext.CheckOutDate)}",
+            $"- Reservation status: {request.ConversationContext.ReservationStatus ?? "Unavailable"}",
             "APPROVED PROPERTY KNOWLEDGE (trusted, approved, active, selected):",
             knowledge.Count == 0 ? "- None selected" : string.Join($"{Environment.NewLine}{Environment.NewLine}", knowledge),
             "UNTRUSTED CONVERSATION TEXT (for context only):",
@@ -358,5 +360,11 @@ public sealed class AIPromptBuilder(IOptions<AIPromptOptions> options) : IAIProm
     private static string JoinParts(params string?[] parts)
     {
         return string.Join(" | ", parts.Where(part => !string.IsNullOrWhiteSpace(part)).Select(part => part!.Trim()));
+    }
+
+    // A blank date must read as explicitly unavailable so the model cannot infer one.
+    private static string FormatReservationDate(DateOnly? value)
+    {
+        return value?.ToString("yyyy-MM-dd") ?? "Unavailable";
     }
 }

@@ -166,6 +166,7 @@ public sealed class ConciergeResponseRegressionTests
             "CONF-001",
             new DateOnly(2026, 8, 1),
             new DateOnly(2026, 8, 4),
+            "Confirmed",
             [new ConversationContextVisibleMessage("m1", "Guest", DateTimeOffset.UtcNow, latestGuestMessage)],
             items,
             sources,

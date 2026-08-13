@@ -238,6 +238,7 @@ public sealed class ConciergeIntelligenceEvaluationTests
             "CONF-001",
             new DateOnly(2026, 8, 1),
             new DateOnly(2026, 8, 5),
+            "Confirmed",
             [new ConversationContextVisibleMessage("seed", "Guest", DateTimeOffset.UtcNow, "hello")],
             items,
             sources,

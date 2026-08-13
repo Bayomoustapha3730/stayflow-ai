@@ -141,6 +141,7 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
     || onboarding.status?.skippedSteps.some((entry) => parseStep(entry) === "demo");
   const isCompleted = onboarding.status?.isCompleted === true;
   const visibleError = isCompleted ? null : onboarding.error;
+  const transitionMessage = onboarding.message ?? onboarding.status?.nextRecommendedAction ?? null;
 
   function goToStep(target: StepDefinition) {
     window.history.pushState({}, "", target.route);
@@ -229,7 +230,7 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
       </div>
 
       {visibleError ? <div className="sf-host-inline-error" role="alert"><p>{visibleError}</p></div> : null}
-      {onboarding.message ? <div className="sf-whatsapp-status" role="status"><p>{onboarding.message}</p></div> : null}
+      {transitionMessage ? <div className="sf-whatsapp-status" role="status"><p>{transitionMessage}</p></div> : null}
       {blockers.length > 0 ? (
         <div className="sf-onboarding-blockers" role="alert">
           {blockers.map((item) => <p key={`${item.step}-${item.code}`}>{item.message}</p>)}

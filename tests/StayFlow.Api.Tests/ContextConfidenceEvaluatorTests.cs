@@ -102,6 +102,7 @@ public sealed class ContextConfidenceEvaluatorTests
             "DEMO-CONF-001",
             DateOnly.FromDateTime(DateTime.UtcNow.Date),
             DateOnly.FromDateTime(DateTime.UtcNow.Date.AddDays(2)),
+            "Confirmed",
             [
                 new ConversationContextVisibleMessage(
                 "m1",

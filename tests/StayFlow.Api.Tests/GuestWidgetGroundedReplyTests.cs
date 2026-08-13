@@ -760,6 +760,9 @@ public sealed class GuestWidgetGroundedReplyTests
         public Task PublishTypingStoppedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
+        public Task PublishConversationStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
         public Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
             => Task.CompletedTask;
 

@@ -242,6 +242,7 @@ public sealed class AIReplyOrchestratorGroundingTests
             "CONF-123",
             new DateOnly(2026, 8, 1),
             new DateOnly(2026, 8, 4),
+            "Confirmed",
             [
                 new ConversationContextVisibleMessage(
                     "m1",

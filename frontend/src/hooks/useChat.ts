@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAuthApi, createChatApi, HttpClient, ApiError } from "../api";
 import { useConversationRealtime } from "./useConversationRealtime";
 import type {
@@ -13,8 +13,36 @@ import { ConversationSenderType, ConversationStatus, GuestChannel, requiresHostA
 import { buildLocalMessage, mergeMessages } from "../utils/messages";
 
 const tokenStorageKey = "stayflow.demo.accessToken";
-const conversationStorageKey = "stayflow.chat.conversationId";
+const conversationStorageKeyPrefix = "stayflow.chat.conversationId";
+const legacyConversationStorageKey = "stayflow.chat.conversationId";
 const openStorageKey = "stayflow.chat.isOpen";
+
+export interface ChatConversationScope {
+  apiBaseUrl: string;
+  guestId?: string;
+  reservationId?: string;
+  propertyId?: string;
+}
+
+function normalizeScopePart(value: string | undefined): string {
+  const normalized = (value ?? "").trim().toLowerCase();
+  return normalized.length === 0 ? "-" : normalized;
+}
+
+/**
+ * A stored conversation belongs to one tenant's widget context, so the key is namespaced by
+ * every stable identifier the widget has. It is a client-side continuity hint only; the server
+ * still authorizes the conversation against the caller's tenant.
+ */
+export function buildConversationStorageKey(scope: ChatConversationScope): string {
+  const parts = [scope.apiBaseUrl, scope.propertyId, scope.reservationId, scope.guestId].map(normalizeScopePart);
+  return `${conversationStorageKeyPrefix}::${parts.join("|")}`;
+}
+
+function discardLegacyConversationId(): void {
+  // Pre-namespacing values cannot be attributed to a tenant context, so they are dropped.
+  sessionStorage.removeItem(legacyConversationStorageKey);
+}
 
 export interface UseChatOptions {
   apiBaseUrl: string;
@@ -38,6 +66,7 @@ export interface UseChatResult {
   conversationStatus: ConversationStatus | null;
   humanTakeoverEnabled: boolean;
   requiresHostAttention: boolean;
+  statusMessage: string | null;
   pendingAction: PendingActionCard | null;
   messages: ChatMessage[];
   login: (email: string, password: string) => Promise<void>;
@@ -61,11 +90,24 @@ export interface UseChatResult {
 }
 
 export function useChat(options: UseChatOptions): UseChatResult {
+  const conversationStorageKey = useMemo(
+    () => buildConversationStorageKey({
+      apiBaseUrl: options.apiBaseUrl,
+      guestId: options.guestId,
+      reservationId: options.reservationId,
+      propertyId: options.propertyId
+    }),
+    [options.apiBaseUrl, options.guestId, options.propertyId, options.reservationId]
+  );
   const [accessToken, setAccessToken] = useState<string | null>(() => sessionStorage.getItem(tokenStorageKey));
-  const [conversationId, setConversationId] = useState<string | null>(() => sessionStorage.getItem(conversationStorageKey));
+  const [conversationId, setConversationId] = useState<string | null>(() => {
+    discardLegacyConversationId();
+    return sessionStorage.getItem(conversationStorageKey);
+  });
   const [conversationStatus, setConversationStatus] = useState<ConversationStatus | null>(null);
   const [humanTakeoverEnabled, setHumanTakeoverEnabled] = useState(false);
   const [requiresAttention, setRequiresAttention] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingActionCard | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isOpen, setIsOpen] = useState(() => sessionStorage.getItem(openStorageKey) === "true");
@@ -77,6 +119,24 @@ export function useChat(options: UseChatOptions): UseChatResult {
   const [error, setError] = useState<string | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isHostTyping, setIsHostTyping] = useState(false);
+  const conversationScopeRef = useRef(conversationStorageKey);
+
+  useEffect(() => {
+    if (conversationScopeRef.current === conversationStorageKey) {
+      return;
+    }
+
+    // A new widget context must never inherit the previous context's conversation or transcript.
+    conversationScopeRef.current = conversationStorageKey;
+    setConversationId(sessionStorage.getItem(conversationStorageKey));
+    setConversationStatus(null);
+    setHumanTakeoverEnabled(false);
+    setRequiresAttention(false);
+    setPendingAction(null);
+    setMessages([]);
+    setUnreadCount(0);
+    setError(null);
+  }, [conversationStorageKey]);
 
   const http = useMemo(
     () =>
@@ -134,9 +194,10 @@ export function useChat(options: UseChatOptions): UseChatResult {
     setConversationStatus(null);
     setHumanTakeoverEnabled(false);
     setRequiresAttention(false);
+    setStatusMessage(null);
     setPendingAction(null);
     setMessages([]);
-  }, []);
+  }, [conversationStorageKey]);
 
   const handleError = useCallback(
     (failure: unknown) => {
@@ -158,7 +219,12 @@ export function useChat(options: UseChatOptions): UseChatResult {
     setRequiresAttention(
       conversation.requiresHostAttention || requiresHostAttention(conversation.status, conversation.humanTakeoverEnabled)
     );
-  }, []);
+
+    const nextStatusMessage = "guestSafeMessage" in conversation ? conversation.guestSafeMessage : null;
+    if (nextStatusMessage) {
+      setStatusMessage(nextStatusMessage);
+    }
+  }, [conversationStorageKey]);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -261,6 +327,12 @@ export function useChat(options: UseChatOptions): UseChatResult {
           response.requiresHostAttention ||
             requiresHostAttention(response.conversationStatus, response.humanTakeoverEnabled)
         );
+        const nextStatusMessage = response.assistantMessage?.content ?? null;
+        if (response.requiresHostAttention || response.humanTakeoverEnabled || requiresHostAttention(response.conversationStatus, response.humanTakeoverEnabled)) {
+          setStatusMessage(nextStatusMessage ?? "A host has been notified and will respond as soon as possible.");
+        } else {
+          setStatusMessage(null);
+        }
         setPendingAction(response.pendingAction ?? null);
 
         const returnedMessages = [response.guestMessage, response.assistantMessage].filter(Boolean) as ChatMessage[];
@@ -292,6 +364,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
       chatApi,
       conversationId,
       conversationStatus,
+      conversationStorageKey,
       handleError,
       isOpen,
       isSending,
@@ -365,6 +438,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
       try {
         const status = await chatApi.escalateChatConversation(conversationId, options.guestId, reason);
         updateConversationState(status);
+        setStatusMessage(status.guestSafeMessage || "A host has been notified and will respond as soon as possible.");
       } catch (failure) {
         handleError(failure);
       } finally {
@@ -430,10 +504,11 @@ export function useChat(options: UseChatOptions): UseChatResult {
     setConversationStatus(null);
     setHumanTakeoverEnabled(false);
     setRequiresAttention(false);
+    setStatusMessage(null);
     setPendingAction(null);
     setMessages([]);
     setError(null);
-  }, []);
+  }, [conversationStorageKey]);
 
   const confirmPendingAction = useCallback(async () => {
     if (!conversationId || !options.guestId || !pendingAction) {
@@ -503,6 +578,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
     conversationStatus,
     humanTakeoverEnabled,
     requiresHostAttention: requiresAttention,
+    statusMessage,
     pendingAction,
     messages,
     login,

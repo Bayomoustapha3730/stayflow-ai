@@ -58,6 +58,14 @@ public sealed class ConversationRealtimePublisher(IHubContext<ConversationHub> h
             .SendCoreAsync("ConversationAssigned", [payload], cancellationToken);
     }
 
+    public async Task PublishConversationStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
+    {
+        await hubContext.Clients.Group(ConversationHubChannels.HostCompanyGroup(companyId))
+            .SendCoreAsync("ConversationStateChanged", [payload], cancellationToken);
+        await hubContext.Clients.Group(ConversationHubChannels.ConversationGroup(conversationId))
+            .SendCoreAsync("ConversationStateChanged", [payload], cancellationToken);
+    }
+
     public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
     {
         return hubContext.Clients.Group(ConversationHubChannels.HostCompanyGroup(companyId))

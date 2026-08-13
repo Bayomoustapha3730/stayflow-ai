@@ -296,6 +296,7 @@ public sealed class KnowledgeRetrievalDeterministicTests
             "CONF-001",
             new DateOnly(2026, 8, 1),
             new DateOnly(2026, 8, 4),
+            "Confirmed",
             messages,
             items,
             sources,

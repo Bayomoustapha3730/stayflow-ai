@@ -423,6 +423,7 @@ internal static class ConversationMemoryExtensions
             conversation.Reservation?.ConfirmationNumber,
             conversation.Reservation?.CheckInDate,
             conversation.Reservation?.CheckOutDate,
+            conversation.Reservation?.Status.ToString(),
             [],
             [],
             [],

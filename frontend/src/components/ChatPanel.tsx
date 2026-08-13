@@ -69,6 +69,7 @@ export function ChatPanel({ chat, theme, demoEmail }: ChatPanelProps) {
             status={chat.conversationStatus}
             requiresHostAttention={chat.requiresHostAttention}
             humanTakeoverEnabled={chat.humanTakeoverEnabled}
+            message={chat.statusMessage}
           />
           <ChatMessageList
             messages={chat.messages}

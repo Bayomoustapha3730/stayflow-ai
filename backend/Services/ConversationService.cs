@@ -744,6 +744,11 @@ public sealed class ConversationService(
             await conversationChannelDispatcher.DispatchOutboundMessageAsync(conversation, message, cancellationToken);
         }
 
+        if (auditAction == "ConversationEscalated")
+        {
+            await PublishConversationStateAsync(conversation, cancellationToken);
+        }
+
         return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message, conversation), "Conversation message stored successfully.");
     }
 
@@ -783,7 +788,29 @@ public sealed class ConversationService(
             }, cancellationToken);
         }
 
+        await PublishConversationStateAsync(conversation, cancellationToken);
+
         return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(conversation), "Conversation updated successfully.");
+    }
+
+    // The host inbox tracks escalation state from this event, so every status change must publish it.
+    private async Task PublishConversationStateAsync(Conversation conversation, CancellationToken cancellationToken)
+    {
+        var assignedUser = conversation.AssignedUserId.HasValue
+            ? await conversationRepository.GetUserAsync(conversation.CompanyId, conversation.AssignedUserId.Value, cancellationToken)
+            : null;
+
+        await realtimePublisher.PublishConversationStateChangedAsync(conversation.CompanyId, conversation.Id, new
+        {
+            conversationId = conversation.Id,
+            status = conversation.Status.ToString(),
+            humanTakeoverEnabled = conversation.HumanTakeoverEnabled,
+            escalationReason = conversation.EscalationReason,
+            assignedUser = assignedUser is null
+                ? null
+                : new { id = assignedUser.Id, fullName = assignedUser.FullName },
+            timestamp = DateTimeOffset.UtcNow
+        }, cancellationToken);
     }
 
     private async Task<ApiResponse<ConversationDetailResponse>> ReturnToAIModeInternalAsync(Guid conversationId, CancellationToken cancellationToken)
@@ -836,6 +863,8 @@ public sealed class ConversationService(
             status = conversation.Status.ToString(),
             timestamp = DateTimeOffset.UtcNow
         }, cancellationToken);
+
+        await PublishConversationStateAsync(conversation, cancellationToken);
 
         return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(conversation), "Conversation updated successfully.");
     }

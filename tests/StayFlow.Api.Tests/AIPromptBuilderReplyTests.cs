@@ -68,6 +68,54 @@ public sealed class AIPromptBuilderReplyTests
         Assert.Contains("Do not invent missing values", developerContent);
     }
 
+    [Fact]
+    public void BuildReply_IncludesTenantDerivedReservationContext()
+    {
+        var builder = new AIPromptBuilder(Options.Create(new AIPromptOptions()));
+        var prompt = builder.BuildReply(new AIReplyPromptBuildRequest
+        {
+            ConversationContext = Context(),
+            Intent = new GuestIntentResult(GuestIntent.CheckIn, 0.95, ["check-in"], false, "deterministic"),
+            SelectedKnowledgeItems = [],
+            Operation = AIReplyOperation.GeneratedHostReply
+        });
+
+        var userContent = prompt.RenderedMessages.Single(message => message.Role == "user").Content;
+
+        Assert.Contains("Reservation summary:", userContent);
+        Assert.Contains("- Guest: Guest", userContent);
+        Assert.Contains("- Confirmation: DEMO-123", userContent);
+        Assert.Contains("- Check-in: 2026-08-01", userContent);
+        Assert.Contains("- Check-out: 2026-08-04", userContent);
+        Assert.Contains("- Reservation status: Confirmed", userContent);
+    }
+
+    [Fact]
+    public void BuildReply_MarksMissingReservationFieldsUnavailableInsteadOfBlank()
+    {
+        var builder = new AIPromptBuilder(Options.Create(new AIPromptOptions()));
+        var prompt = builder.BuildReply(new AIReplyPromptBuildRequest
+        {
+            ConversationContext = Context() with
+            {
+                ConfirmationNumber = null,
+                CheckInDate = null,
+                CheckOutDate = null,
+                ReservationStatus = null
+            },
+            Intent = new GuestIntentResult(GuestIntent.CheckIn, 0.95, ["check-in"], false, "deterministic"),
+            SelectedKnowledgeItems = [],
+            Operation = AIReplyOperation.GeneratedHostReply
+        });
+
+        var userContent = prompt.RenderedMessages.Single(message => message.Role == "user").Content;
+
+        Assert.Contains("- Confirmation: Unavailable", userContent);
+        Assert.Contains("- Check-in: Unavailable", userContent);
+        Assert.Contains("- Check-out: Unavailable", userContent);
+        Assert.Contains("- Reservation status: Unavailable", userContent);
+    }
+
     private static ConversationContext Context()
     {
         return new ConversationContext(
@@ -87,6 +135,7 @@ public sealed class AIPromptBuilderReplyTests
             "DEMO-123",
             new DateOnly(2026, 8, 1),
             new DateOnly(2026, 8, 4),
+            "Confirmed",
             [
                 new ConversationContextVisibleMessage(
                     "m1",

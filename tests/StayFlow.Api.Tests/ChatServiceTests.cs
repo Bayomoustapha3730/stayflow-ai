@@ -184,6 +184,69 @@ public sealed class ChatServiceTests
     }
 
     [Fact]
+    public async Task SendGuestMessageAsync_GroundedCheckInAnswer_IsDeliveredWithoutHostEscalation()
+    {
+        var fixture = new Fixture();
+        fixture.ReplyOrchestrator.Result = new AIReplyOrchestrationResult
+        {
+            ConversationId = Guid.NewGuid(),
+            Operation = AIReplyOperation.FutureGuestReply,
+            Output = "Check-in begins at 3:00 PM.",
+            RequiresHumanReview = false,
+            Provider = "Development",
+            IsMock = true,
+            GeneratedAt = DateTimeOffset.UtcNow,
+            CompletedStages = [AIReplyOrchestrationStage.ResultAssembled],
+            DurationMilliseconds = 4,
+            DetectedIntent = new GuestIntentResult(GuestIntent.CheckIn, 0.96, ["check-in"], false, "test")
+        };
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("What time is check-in?"), CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.True(fixture.ReplyOrchestrator.WasCalled);
+        Assert.Equal(ConversationSenderType.AI, response.Data!.AssistantMessage!.SenderType);
+        Assert.Equal("Check-in begins at 3:00 PM.", response.Data.AssistantMessage.Content);
+        Assert.Equal(ConversationStatus.Open, response.Data.ConversationStatus);
+        Assert.False(response.Data.RequiresHostAttention);
+        Assert.False(response.Data.HumanTakeoverEnabled);
+
+        var persisted = fixture.Repository.Messages.Where(message => message.SenderType == ConversationSenderType.AI).ToList();
+        Assert.Single(persisted);
+        Assert.Equal("Check-in begins at 3:00 PM.", persisted[0].Content);
+    }
+
+    [Fact]
+    public async Task SendGuestMessageAsync_UnsupportedEmergencyRequest_EscalatesWithoutInventingAnAnswer()
+    {
+        var fixture = new Fixture();
+        fixture.ReplyOrchestrator.Result = new AIReplyOrchestrationResult
+        {
+            ConversationId = Guid.NewGuid(),
+            Operation = AIReplyOperation.FutureGuestReply,
+            Output = "Visit the embassy at 12 Invented Road and call +1-555-0000.",
+            RequiresHumanReview = true,
+            Provider = "Development",
+            IsMock = true,
+            GeneratedAt = DateTimeOffset.UtcNow,
+            CompletedStages = [AIReplyOrchestrationStage.ResultAssembled],
+            DurationMilliseconds = 4,
+            DetectedIntent = new GuestIntentResult(GuestIntent.Emergency, 0.88, ["passport"], false, "test")
+        };
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(
+            fixture.Request("I lost my passport and need emergency assistance."),
+            CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(ConversationStatus.AwaitingHost, response.Data!.ConversationStatus);
+        Assert.True(response.Data.RequiresHostAttention);
+        Assert.Equal("I need a host or support team member to help with this request.", response.Data.AssistantMessage!.Content);
+        Assert.DoesNotContain("Invented Road", response.Data.AssistantMessage.Content);
+        Assert.DoesNotContain(fixture.Repository.Messages, message => message.Content.Contains("Invented Road", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task SendGuestMessageAsync_RequiresHumanReview_UsesSafeFallbackAndHostAttention()
     {
         var fixture = new Fixture();
@@ -641,6 +704,7 @@ public sealed class ChatServiceTests
         public Task PublishTypingStartedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishTypingStoppedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task PublishConversationStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishMessageDeliveryUpdatedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;

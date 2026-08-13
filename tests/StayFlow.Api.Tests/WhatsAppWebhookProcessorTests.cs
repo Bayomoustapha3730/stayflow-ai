@@ -92,6 +92,106 @@ public sealed class WhatsAppWebhookProcessorTests
         Assert.Equal(messageId, service.RetriedMessageId);
     }
 
+    [Fact]
+    public async Task ProcessAsync_DuplicateProviderMessageId_DoesNotReprocessTheGuestMessage()
+    {
+        var fixture = new Fixture();
+        fixture.Repository.Reservations.Add(CreateReservation(
+            fixture.CompanyId,
+            fixture.PropertyId,
+            fixture.Guest.Id,
+            new DateOnly(2026, 7, 20),
+            new DateOnly(2026, 7, 28),
+            ReservationStatus.CheckedIn));
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.dedupe", "+14155551234"), "cid-dupe", CancellationToken.None);
+        Assert.Equal(1, fixture.ChatService.SendCallCount);
+
+        // The provider redelivers the same message id; the persisted message must suppress reprocessing.
+        fixture.Repository.Messages.Add(new ConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            ConversationId = fixture.ConversationId,
+            Provider = ConversationMessageProvider.WhatsAppCloud,
+            ExternalMessageId = "wamid.dedupe",
+            SenderType = ConversationSenderType.Guest,
+            MessageType = ConversationMessageType.Text,
+            Content = "What time is check-in?",
+            SentAt = DateTimeOffset.UtcNow
+        });
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.dedupe", "+14155551234"), "cid-dupe", CancellationToken.None);
+
+        Assert.Equal(1, fixture.ChatService.SendCallCount);
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_DerivesTenantFromIntegrationDuringBackgroundProcessing()
+    {
+        var fixture = new Fixture();
+        fixture.Repository.Reservations.Add(CreateReservation(
+            fixture.CompanyId,
+            fixture.PropertyId,
+            fixture.Guest.Id,
+            new DateOnly(2026, 7, 20),
+            new DateOnly(2026, 7, 28),
+            ReservationStatus.CheckedIn));
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.tenant", "+14155551234"), "cid-tenant", CancellationToken.None);
+
+        Assert.Equal([fixture.CompanyId], fixture.ChatService.ObservedTenantCompanyIds);
+        Assert.Null(fixture.TenantAccessor.CompanyId);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_UnknownPhoneNumberId_IsIgnoredWithoutTouchingAnyTenant()
+    {
+        var fixture = new Fixture();
+        fixture.Repository.Integration = null;
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.unknown", "+14155551234"), "cid-unknown", CancellationToken.None);
+
+        Assert.Equal(0, fixture.ChatService.SendCallCount);
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest);
+        Assert.Null(fixture.TenantAccessor.CompanyId);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_StatusEventForUnknownProviderMessage_DoesNotMarkAnyMessageDelivered()
+    {
+        var fixture = new Fixture();
+
+        await fixture.Processor.ProcessAsync(BuildStatusPayload("wamid.missing", "delivered"), "cid-missing", CancellationToken.None);
+
+        Assert.Null(fixture.ConversationService.LastDeliveryStatus);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_FailedStatusEvent_RecordsFailureInsteadOfDelivery()
+    {
+        var fixture = new Fixture();
+        fixture.Repository.Messages.Add(new ConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            ConversationId = fixture.ConversationId,
+            Provider = ConversationMessageProvider.WhatsAppCloud,
+            ExternalMessageId = "wamid.failed",
+            SenderType = ConversationSenderType.AI,
+            MessageType = ConversationMessageType.Text,
+            Content = "Check-in is at 3:00 PM.",
+            SentAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        await fixture.Processor.ProcessAsync(BuildStatusPayload("wamid.failed", "failed"), "cid-failed", CancellationToken.None);
+
+        Assert.Equal(ConversationMessageDeliveryStatus.Failed, fixture.ConversationService.LastDeliveryStatus);
+    }
+
     private static Reservation CreateReservation(Guid companyId, Guid propertyId, Guid guestId, DateOnly checkIn, DateOnly checkOut, ReservationStatus status)
     {
         return new Reservation
@@ -167,8 +267,7 @@ public sealed class WhatsAppWebhookProcessorTests
         {
             Repository = new FakeWhatsAppRepository();
             ChatService = new FakeChatService();
-            ConversationService = new FakeConversationService(ConversationId);
-            Guest = new Guest
+            ConversationService = new FakeConversationService(ConversationId);            Guest = new Guest
             {
                 Id = Guid.NewGuid(),
                 CompanyId = CompanyId,
@@ -196,9 +295,12 @@ public sealed class WhatsAppWebhookProcessorTests
                 ChatService,
                 ConversationService,
                 new PhoneNumberNormalizer(),
-                new TenantExecutionContextAccessor(),
+                TenantAccessor,
                 NullLogger<WhatsAppWebhookProcessor>.Instance);
+            ChatService.TenantAccessor = TenantAccessor;
         }
+
+        public TenantExecutionContextAccessor TenantAccessor { get; } = new();
 
         public Guid CompanyId { get; } = Guid.NewGuid();
         public Guid PropertyId { get; } = Guid.NewGuid();
@@ -411,10 +513,15 @@ public sealed class WhatsAppWebhookProcessorTests
     private sealed class FakeChatService : IChatService
     {
         public SendChatMessageRequest? Request { get; private set; }
+        public int SendCallCount { get; private set; }
+        public List<Guid?> ObservedTenantCompanyIds { get; } = [];
+        public ITenantExecutionContextAccessor? TenantAccessor { get; set; }
 
         public Task<ApiResponse<ChatMessageResponse>> SendGuestMessageAsync(SendChatMessageRequest request, CancellationToken cancellationToken)
         {
             Request = request;
+            SendCallCount++;
+            ObservedTenantCompanyIds.Add(TenantAccessor?.CompanyId);
             return Task.FromResult(ApiResponse<ChatMessageResponse>.Ok(new ChatMessageResponse
             {
                 ConversationId = Guid.NewGuid(),

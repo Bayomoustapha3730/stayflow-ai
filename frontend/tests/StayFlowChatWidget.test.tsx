@@ -248,7 +248,8 @@ describe("StayFlowChatWidget", () => {
   });
 
   it("shows host attention state after escalation", async () => {
-    const escalated = messageResponse("A host will help.");
+    const guestSafeMessage = "A host will help with your request shortly.";
+    const escalated = messageResponse("I am connecting you with a host.");
     const originalJson = escalated.json;
 
     escalated.json = async () => {
@@ -268,6 +269,7 @@ describe("StayFlowChatWidget", () => {
       subject: null,
       humanTakeoverEnabled: false,
       requiresHostAttention: true,
+      guestSafeMessage,
       startedAt: "2026-01-01T10:00:00Z",
       lastActivityAt: "2026-01-01T10:00:01Z",
       closedAt: null,
@@ -293,16 +295,14 @@ describe("StayFlowChatWidget", () => {
       screen.getByRole("button", { name: /send message/i })
     );
 
-    await screen.findByText(/host has been notified/i);
+    expect(await screen.findByText(guestSafeMessage)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /host already notified/i })
     ).toBeDisabled();
 
     expect(input).toBeEnabled();
 
-    expect(
-      screen.getByText(/host has been notified/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(guestSafeMessage)).toHaveClass("sf-chat-status");
   });
 
   it("submits assistant message feedback", async () => {

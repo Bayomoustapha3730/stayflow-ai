@@ -96,6 +96,20 @@ vi.mock("../src/hooks/useBillingDashboard", () => ({
 }));
 
 import { BillingDashboardPage } from "../src/pages/BillingDashboardPage";
+import { getBillingCapabilityMessage } from "../src/pages/billingCapabilityMessages";
+
+describe("getBillingCapabilityMessage", () => {
+  it.each([
+    ["PastDue", { status: "PastDue", capability: { checkoutAvailable: true, message: "Stripe billing is configured." } }, "Your payment is past due. Update your payment method to restore service."],
+    ["CancelAtPeriodEnd", { status: "CancelAtPeriodEnd", capability: { checkoutAvailable: true, message: "Stripe billing is configured." } }, "Your subscription is scheduled to end at the close of the current billing period."],
+    ["CancelAtPeriodEndFlag", { status: "Active", cancelAtPeriodEnd: true, capability: { checkoutAvailable: true, message: "Stripe billing is configured." } }, "Your subscription is scheduled to end at the close of the current billing period."],
+    ["Cancelled", { status: "Cancelled", capability: { checkoutAvailable: true, message: "Stripe billing is configured." } }, "Your subscription has been cancelled. You can review billing history or start a new plan when you’re ready."],
+    ["Trialing", { status: "Trialing", capability: { checkoutAvailable: true, message: "Stripe billing is configured." } }, "Your trial is active. Add a payment method before it ends to keep access."],
+    ["Suspended", { status: "Suspended", capability: { checkoutAvailable: true, message: "Stripe billing is configured." } }, "Your subscription is suspended. Update billing details or contact support to restore access."]
+  ])("returns the expected message for %s", (_label, subscription, expectedMessage) => {
+    expect(getBillingCapabilityMessage(subscription as never)).toBe(expectedMessage);
+  });
+});
 
 describe("BillingDashboardPage", () => {
   it("renders billing overview and usage", () => {

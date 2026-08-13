@@ -36,6 +36,7 @@ public sealed record ConversationContext(
     string? ConfirmationNumber,
     DateOnly? CheckInDate,
     DateOnly? CheckOutDate,
+    string? ReservationStatus,
     IReadOnlyCollection<ConversationContextVisibleMessage> VisibleMessages,
     IReadOnlyCollection<ConversationContextKnowledgeItem> ApprovedKnowledgeItems,
     IReadOnlyCollection<ConversationContextSource> Sources,

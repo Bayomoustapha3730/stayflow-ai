@@ -1127,6 +1127,7 @@ public sealed class ConversationServiceTests
     private sealed class RecordingConversationRealtimePublisher : IConversationRealtimePublisher
     {
         public List<(Guid CompanyId, Guid ConversationId, object Payload)> DeliveryUpdates { get; } = [];
+        public List<(Guid CompanyId, Guid ConversationId, object Payload)> StateChanges { get; } = [];
         public List<(Guid CompanyId, object Payload)> HostCopilotWorkspaceUpdates { get; } = [];
 
         public Task PublishMessageCreatedAsync(Guid companyId, Guid conversationId, object payload, bool internalOnly, CancellationToken cancellationToken) => Task.CompletedTask;
@@ -1134,6 +1135,12 @@ public sealed class ConversationServiceTests
         public Task PublishTypingStartedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishTypingStoppedAsync(Guid companyId, Guid conversationId, object payload, bool hostOnly, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationAssignedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task PublishConversationStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken)
+        {
+            StateChanges.Add((companyId, conversationId, payload));
+            return Task.CompletedTask;
+        }
         public Task PublishConversationReadStateChangedAsync(Guid companyId, Guid conversationId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task PublishConversationUnreadCountChangedAsync(Guid companyId, object payload, CancellationToken cancellationToken) => Task.CompletedTask;
 

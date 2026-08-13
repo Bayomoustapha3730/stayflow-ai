@@ -3,6 +3,7 @@ import { HostConsoleNav, HostLoginPanel } from "../components/host";
 import { useHostAuth } from "../hooks/useHostAuth";
 import { useBillingDashboard } from "../hooks/useBillingDashboard";
 import { billingPlanCards, getPlanRank } from "./billingPlans";
+import { getBillingCapabilityMessage } from "./billingCapabilityMessages";
 import "../styles/host-inbox.css";
 import "../styles/organization-settings.css";
 import "../styles/billing-dashboard.css";
@@ -79,6 +80,7 @@ export function PlanComparisonPage() {
           <article className="sf-organization-card">
             <h2>Available Plans</h2>
             <p className="sf-host-muted-note">Current plan: <strong>{currentPlan ?? "None"}</strong></p>
+            <p className="sf-host-muted-note">{getBillingCapabilityMessage(subscription)}</p>
             {!subscription?.capability?.checkoutAvailable ? (
               <p className="sf-host-muted-note">{subscription?.capability?.message}</p>
             ) : null}

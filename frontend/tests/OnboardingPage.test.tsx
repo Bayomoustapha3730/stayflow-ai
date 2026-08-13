@@ -192,6 +192,15 @@ describe("OnboardingPage", () => {
     expect(screen.getByText(/Demo data choice/i)).toBeInTheDocument();
   });
 
+  it("shows the next recommended onboarding action for the active transition", () => {
+    onboardingState.status.currentStep = "OrganizationProfile";
+    onboardingState.status.nextRecommendedAction = "Complete OrganizationProfile";
+
+    render(<OnboardingPage routeStep="organization" />);
+
+    expect(screen.getByText("Complete OrganizationProfile")).toBeInTheDocument();
+  });
+
   it("shows Free in plan confirmation when no paid plan is selected", () => {
     onboardingState.status.currentStep = "PlanConfirmation";
     onboardingState.status.selectedPlanName = null;
