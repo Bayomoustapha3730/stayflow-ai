@@ -65,7 +65,7 @@ public sealed class WhatsAppCredentialResolverTests
     [Fact]
     public async Task ResolveAsync_DevelopmentMode_ReturnsDeterministicFallbackCredentials()
     {
-        var resolver = CreateResolver(isDevelopment: true);
+        var resolver = CreateResolver(isDevelopment: true, developmentMode: true);
 
         var result = await resolver.ResolveAsync(new WhatsAppIntegration
         {
@@ -78,7 +78,21 @@ public sealed class WhatsAppCredentialResolverTests
         Assert.Equal("dev-verify-token", result.WebhookVerifyToken);
     }
 
-    private static WhatsAppCredentialResolver CreateResolver(bool isDevelopment)
+    [Fact]
+    public async Task ResolveAsync_DevelopmentEnvironmentWithoutSimulator_ReturnsMissingCredentials()
+    {
+        var resolver = CreateResolver(isDevelopment: true, developmentMode: false);
+
+        var result = await resolver.ResolveAsync(new WhatsAppIntegration
+        {
+            CredentialReference = "dev-reference"
+        }, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("MissingAccessToken", result.FailureCode);
+    }
+
+    private static WhatsAppCredentialResolver CreateResolver(bool isDevelopment, bool developmentMode = false)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
@@ -86,7 +100,8 @@ public sealed class WhatsAppCredentialResolverTests
 
         var options = Options.Create(new WhatsAppCloudOptions
         {
-            DefaultCredentialReference = "default"
+            DefaultCredentialReference = "default",
+            DevelopmentMode = developmentMode
         });
 
         return new WhatsAppCredentialResolver(

@@ -17,8 +17,7 @@ public sealed class WhatsAppCloudOptions
     public int RetryMaxDelaySeconds { get; set; } = 8;
     public int MaxTemplateSyncPages { get; set; } = 10;
     public int MaxTemplateSyncItems { get; set; } = 500;
-    public int WebhookSignatureSecretCandidateLimit { get; set; } = 25;
-    public bool ProductionSendingEnabled { get; set; } = true;
+    public bool ProductionSendingEnabled { get; set; }
     public bool DevelopmentMode { get; set; }
     public int CustomerServiceWindowHours { get; set; } = 24;
 }
@@ -81,16 +80,6 @@ public sealed class WhatsAppCloudOptionsValidator : IValidateOptions<WhatsAppClo
         if (options.MaxTemplateSyncItems is < 1 or > 5000)
         {
             errors.Add("WhatsAppCloud:MaxTemplateSyncItems must be between 1 and 5000.");
-        }
-
-        if (options.WebhookSignatureSecretCandidateLimit is < 1 or > 200)
-        {
-            errors.Add("WhatsAppCloud:WebhookSignatureSecretCandidateLimit must be between 1 and 200.");
-        }
-
-        if (!options.DevelopmentMode && !options.ProductionSendingEnabled)
-        {
-            errors.Add("WhatsAppCloud:ProductionSendingEnabled must be true when DevelopmentMode is false.");
         }
 
         if (options.CustomerServiceWindowHours is < 1 or > 72)

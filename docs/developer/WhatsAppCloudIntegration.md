@@ -15,7 +15,9 @@ This sprint does not create a separate WhatsApp inbox, duplicate delivery pipeli
 - Development mode uses `DevelopmentWhatsAppCloudClient`.
 - Production mode uses `WhatsAppCloudClient`.
 - Development mode is explicitly blocked outside Development environment.
-- No silent fallback from production mode to development mode.
+- Simulated credentials are available only when both ASP.NET `Development` and `WhatsAppCloud:DevelopmentMode=true` are set.
+- Production defaults keep `WhatsAppCloud:DevelopmentMode=false` and `WhatsAppCloud:ProductionSendingEnabled=false`; enable sending only after the Meta phone number is verified.
+- No silent fallback from production mode to development mode exists.
 
 ## Meta Prerequisites
 
@@ -46,6 +48,8 @@ export STAYFLOW_WHATSAPP_DEFAULT_APP_SECRET="replace-me"
 export STAYFLOW_WHATSAPP_DEFAULT_WEBHOOK_VERIFY_TOKEN="replace-me"
 ```
 
+Use a deployment secret store or workload-injected environment variables for these values. Do not put them in `appsettings*.json`, frontend variables, `.env.local`, database records, logs, support tickets, or screenshots. The repository ignores `.env` files except the intentionally non-secret `.env.production.example` template.
+
 ## Backend Configuration
 
 Global settings live under `WhatsAppCloud`:
@@ -61,9 +65,9 @@ Global settings live under `WhatsAppCloud`:
 - `RetryMaxDelaySeconds`
 - `MaxTemplateSyncPages`
 - `MaxTemplateSyncItems`
-- `WebhookSignatureSecretCandidateLimit`
 - `ProductionSendingEnabled`
 - `DevelopmentMode`
+- `CustomerServiceWindowHours`
 
 Per-company routing values remain on `WhatsAppIntegration`:
 
@@ -71,6 +75,8 @@ Per-company routing values remain on `WhatsAppIntegration`:
 - `WhatsAppBusinessAccountId`
 - `GraphApiVersion`
 - `CredentialReference`
+
+`BusinessPhoneNumberMasked`, connection status, health timestamps, and sanitized failure summaries are organization-scoped display data. WABA IDs, Phone Number IDs, and credential references are server-only integration-routing data; access tokens, app secrets, and webhook verify tokens remain outside the database.
 
 ## Live Outbound Sending
 
@@ -152,15 +158,16 @@ Provider headers/bodies are not exposed to frontend DTOs.
 Health checks validate:
 
 - active integration
-- production enabled
 - required routing fields
-- credential resolution
+- access token, app secret, and webhook verify token resolution
 - provider validation via non-message call (template retrieval)
+
+An integration can be connection-validated while production sending remains disabled. This is the intended state while Meta phone-number verification is pending.
 
 Health statuses:
 
 - `Healthy`
-- `DevelopmentOnly`
+- `ProductionPending`
 - `ConfigurationIncomplete`
 - `AuthenticationFailed`
 - `AuthorizationFailed`
@@ -184,8 +191,7 @@ Routes:
 Security behavior:
 
 - raw body signature validation remains mandatory
-- candidate app secrets and verify tokens are resolved from active integration references and default reference
-- candidate set is bounded (`WebhookSignatureSecretCandidateLimit`)
+- candidate app secrets and verify tokens are resolved from every active integration reference and the default reference, so no tenant is excluded as the integration count grows
 - constant-time comparisons are used
 - no logging of matched secret identity
 - tenant selection is not trusted from payload IDs; routing occurs after signature validation using `phone_number_id`
@@ -214,24 +220,24 @@ Never logged:
 - guest message text
 - template variable values
 
-## Codespaces Webhook URL
+## Webhook Callback URL
 
-Typical URL shape:
+Configure Meta with the stable, public production URL:
 
-`https://<codespace-name>-5243.app.github.dev/webhooks/whatsapp`
+`https://<production-api-host>/webhooks/whatsapp`
+
+Codespaces and local tunnel URLs are development-only and must not be registered as production callbacks.
 
 ## Manual Production Readiness Checklist
 
-1. Confirm `WhatsAppCloud:Enabled=true` only in target environment.
-2. Confirm `GraphApiBaseUrl` is HTTPS.
-3. Configure credential reference environment variables securely.
-4. Verify integration health from WhatsApp Settings.
-5. Sync templates and confirm counts.
-6. Validate approved template send in tenant scope.
-7. Confirm webhook signature validation and delivery status correlation.
-8. Confirm logs and API responses do not expose secrets or provider payload.
-9. Confirm retry and rate-limit behavior in staging.
-10. Confirm development mode remains deterministic and isolated.
+1. Set `WhatsAppCloud:Enabled=true`, `DevelopmentMode=false`, and retain `ProductionSendingEnabled=false` until Meta verification completes.
+2. Confirm `GraphApiBaseUrl` is HTTPS and configure the stable public webhook callback URL in Meta.
+3. Inject each credential-reference variable from the production secret store.
+4. Verify each organization integration reports `ProductionPending` or `Healthy` from WhatsApp Settings without exposing credentials.
+5. Sync templates and confirm tenant-scoped counts.
+6. After phone-number verification, enable the organization integration and `ProductionSendingEnabled`, then validate one approved template send in its tenant scope.
+7. Confirm webhook signature validation, inbound deduplication, delivery-status correlation, host escalation, and safe logs in staging.
+8. Confirm retry and rate-limit behavior in staging.
 
 ## Customer Service Window
 

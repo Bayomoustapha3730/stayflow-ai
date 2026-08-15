@@ -1,3 +1,7 @@
+.env
+.env.*
+!frontend/.env.example
+!.env.production.example
 bin/
 obj/
 
@@ -17,4 +21,5 @@ work/
 node_modules/
 dist/
 coverage/
+*.tsbuildinfo
 frontend/.tmp-*

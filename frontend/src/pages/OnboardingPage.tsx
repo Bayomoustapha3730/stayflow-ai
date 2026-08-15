@@ -130,18 +130,14 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
   const [knowledgeTitle, setKnowledgeTitle] = useState("House Rules");
   const [knowledgeContent, setKnowledgeContent] = useState("Quiet hours after 10 PM. Please avoid loud music.");
 
-  // Route-driven steps must take precedence so URL navigation and browser history stay authoritative.
-  const currentStep = routeStep ?? parseStep(onboarding.status?.currentStep);
+  // A completed backend status is canonical and must override stale route or step-level UI state.
+  const isCompleted = onboarding.status?.isCompleted === true;
+  const currentStep = isCompleted ? "completed" : routeStep ?? parseStep(onboarding.status?.currentStep);
   const step = steps.find((item) => item.key === currentStep) ?? steps[0];
   const isAdmin = isAdminLike(auth.currentUser?.organizationRole ?? null);
   const hasTenant = Boolean(auth.currentUser?.companyId);
 
   const blockers = useMemo(() => (onboarding.status?.blockers ?? []).filter((item) => parseStep(item.step) === currentStep), [currentStep, onboarding.status?.blockers]);
-  const demoDataResolved = onboarding.status?.completedSteps.some((entry) => parseStep(entry) === "demo")
-    || onboarding.status?.skippedSteps.some((entry) => parseStep(entry) === "demo");
-  const isCompleted = onboarding.status?.isCompleted === true;
-  const visibleError = isCompleted ? null : onboarding.error;
-  const transitionMessage = onboarding.message ?? onboarding.status?.nextRecommendedAction ?? null;
 
   function goToStep(target: StepDefinition) {
     window.history.pushState({}, "", target.route);
@@ -229,8 +225,11 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
         })}
       </div>
 
-      {visibleError ? <div className="sf-host-inline-error" role="alert"><p>{visibleError}</p></div> : null}
-      {transitionMessage ? <div className="sf-whatsapp-status" role="status"><p>{transitionMessage}</p></div> : null}
+      {!isCompleted && onboarding.error ? <div className="sf-host-inline-error" role="alert"><p>{onboarding.error}</p></div> : null}
+      {onboarding.message ? <div className="sf-whatsapp-status" role="status"><p>{onboarding.message}</p></div> : null}
+      {!isCompleted && onboarding.status?.nextRecommendedAction ? (
+        <p className="sf-host-muted-note">{onboarding.status.nextRecommendedAction}</p>
+      ) : null}
       {blockers.length > 0 ? (
         <div className="sf-onboarding-blockers" role="alert">
           {blockers.map((item) => <p key={`${item.step}-${item.code}`}>{item.message}</p>)}
@@ -397,7 +396,7 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
         </section>
       ) : null}
 
-      {!readOnly && currentStep === "demo" && !isCompleted && !demoDataResolved ? (
+      {!readOnly && currentStep === "demo" ? (
         <section className="sf-onboarding-card">
           <h2>Demo Data</h2>
           <p>Create sample records for first-run exploration in non-production environments.</p>
@@ -471,7 +470,7 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
         </section>
       ) : null}
 
-      {currentStep === "completed" || onboarding.status?.isCompleted ? (
+      {currentStep === "completed" ? (
         <section className="sf-onboarding-card">
           <h2>You're Ready</h2>
           <p>Organization setup is complete. Continue with your first run.</p>

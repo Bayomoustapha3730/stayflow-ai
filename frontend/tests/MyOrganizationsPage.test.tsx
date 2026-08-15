@@ -122,4 +122,15 @@ describe("MyOrganizationsPage", () => {
     });
     expect(refreshOrganizations).toHaveBeenCalledTimes(1);
   });
+
+  it("refreshes organization-scoped data after switching workspaces", async () => {
+    render(<MyOrganizationsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch" }));
+
+    await waitFor(() => {
+      expect(switchOrganization).toHaveBeenCalledWith("company-2");
+      expect(refreshOrganizations).toHaveBeenCalledTimes(1);
+    });
+  });
 });

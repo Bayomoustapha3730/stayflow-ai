@@ -44,7 +44,7 @@ public sealed class WhatsAppCredentialResolver(
             Environment.GetEnvironmentVariable($"{Prefix}{normalizedReference}_WEBHOOK_VERIFY_TOKEN"),
             section["WebhookVerifyToken"]);
 
-        if (environment.IsDevelopment())
+        if (environment.IsDevelopment() && options.Value.DevelopmentMode)
         {
             accessToken ??= "dev-access-token";
             appSecret ??= "dev-app-secret";

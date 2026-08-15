@@ -298,10 +298,11 @@ public partial class Program
         }
 
         var connectionString = configuration.GetConnectionString("DefaultConnection") ?? string.Empty;
-        if (connectionString.Contains("localhost", StringComparison.OrdinalIgnoreCase)
+        if (string.IsNullOrWhiteSpace(connectionString)
+            || connectionString.Contains("localhost", StringComparison.OrdinalIgnoreCase)
             || connectionString.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("ConnectionStrings:DefaultConnection must not point to localhost in production.");
+            throw new InvalidOperationException("ConnectionStrings:DefaultConnection must be configured and must not point to localhost in production.");
         }
 
         var origins = CorsPolicyConfiguration.ResolveAllowedOrigins(configuration, environment);

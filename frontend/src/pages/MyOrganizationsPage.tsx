@@ -36,9 +36,19 @@ export function MyOrganizationsPage() {
   }, [auth.currentUser?.email]);
 
   const activeOrganization = useMemo(
-    () => organizations.organizations.find((item) => item.isActiveOrganization) ?? null,
-    [organizations.organizations]
+    () => organizations.organizations.find((item) => item.companyId === auth.currentUser?.companyId)
+      ?? organizations.organizations.find((item) => item.isActiveOrganization)
+      ?? null,
+    [auth.currentUser?.companyId, organizations.organizations]
   );
+
+  async function switchOrganization(companyId: string) {
+    if (!await auth.switchOrganization(companyId)) {
+      return;
+    }
+
+    await organizations.refresh();
+  }
 
   if (!auth.isAuthenticated) {
     return (
@@ -86,14 +96,14 @@ export function MyOrganizationsPage() {
         </div>
 
         {auth.error ? <div className="sf-host-inline-error" role="alert"><p>{auth.error}</p></div> : null}
-        {organizations.loadStatus === "error" && organizations.error ? <div className="sf-host-inline-error" role="alert"><p>{organizations.error}</p></div> : null}
+        {organizations.error ? <div className="sf-host-inline-error" role="alert"><p>{organizations.error}</p></div> : null}
         {message ? <div className="sf-whatsapp-status" role="status">{message}</div> : null}
 
         <section className="sf-organization-grid" aria-label="Organization workspace management">
           <article className="sf-organization-card">
             <h2>Organizations</h2>
-            {organizations.loadStatus === "loading" ? <p>Loading organizations...</p> : null}
-            {organizations.loadStatus === "empty" ? <p>No accessible organizations found.</p> : null}
+            {organizations.isLoading ? <p>Loading organizations...</p> : null}
+            {!organizations.isLoading && organizations.organizations.length === 0 ? <p>No accessible organizations found.</p> : null}
 
             <div className="sf-organization-table" role="table" aria-label="Authorized organizations">
               <div className="sf-organization-table-row sf-organization-table-header" role="row">
@@ -122,7 +132,7 @@ export function MyOrganizationsPage() {
                           return;
                         }
 
-                        void auth.switchOrganization(item.companyId);
+                        void switchOrganization(item.companyId);
                       }}
                     >
                       {item.isActiveOrganization ? "Open" : "Switch"}

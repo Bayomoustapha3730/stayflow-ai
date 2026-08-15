@@ -57,9 +57,8 @@ export function HostOrganizationSelector({ auth, organizationsHref }: HostOrgani
 
       {isOpen ? (
         <div className="sf-host-organization-menu" role="menu">
-          {organizations.loadStatus === "loading" ? <p className="sf-host-muted-note">Loading organizations...</p> : null}
-          {organizations.loadStatus === "error" && organizations.error ? <p className="sf-host-inline-error">{organizations.error}</p> : null}
-          {organizations.loadStatus === "empty" ? <p className="sf-host-muted-note">No accessible organizations found.</p> : null}
+          {organizations.isLoading ? <p className="sf-host-muted-note">Loading organizations...</p> : null}
+          {organizations.error ? <p className="sf-host-inline-error">{organizations.error}</p> : null}
 
           {organizations.organizations.map((item) => (
             <button

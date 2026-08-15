@@ -8,8 +8,7 @@ public sealed class WhatsAppIntegrationHealthService(
     IWhatsAppCredentialResolver credentialResolver,
     IWhatsAppCloudClient whatsAppCloudClient,
     IWhatsAppProviderTelemetry telemetry,
-    IOptions<WhatsAppCloudOptions> options,
-    IHostEnvironment environment) : IWhatsAppIntegrationHealthService
+    IOptions<WhatsAppCloudOptions> options) : IWhatsAppIntegrationHealthService
 {
     public async Task<WhatsAppIntegrationHealthResponse> CheckAsync(WhatsAppIntegration integration, CancellationToken cancellationToken)
     {
@@ -21,11 +20,6 @@ public sealed class WhatsAppIntegrationHealthService(
             return Complete("Disabled", "Integration is inactive.", false);
         }
 
-        if (!integration.IsProductionEnabled || !options.Value.ProductionSendingEnabled)
-        {
-            return Complete("DevelopmentOnly", "Production sending is not enabled.", environment.IsDevelopment());
-        }
-
         if (string.IsNullOrWhiteSpace(integration.PhoneNumberId)
             || string.IsNullOrWhiteSpace(integration.WhatsAppBusinessAccountId)
             || string.IsNullOrWhiteSpace(integration.GraphApiVersion))
@@ -34,7 +28,10 @@ public sealed class WhatsAppIntegrationHealthService(
         }
 
         var credentials = await credentialResolver.ResolveAsync(integration, cancellationToken);
-        if (!credentials.Success || string.IsNullOrWhiteSpace(credentials.AccessToken))
+        if (!credentials.Success
+            || string.IsNullOrWhiteSpace(credentials.AccessToken)
+            || string.IsNullOrWhiteSpace(credentials.AppSecret)
+            || string.IsNullOrWhiteSpace(credentials.WebhookVerifyToken))
         {
             return Complete("ConfigurationIncomplete", credentials.FailureSummary ?? "Integration credentials are missing.", false);
         }
@@ -50,6 +47,11 @@ public sealed class WhatsAppIntegrationHealthService(
 
         if (verification.Success)
         {
+            if (!integration.IsProductionEnabled || !options.Value.ProductionSendingEnabled)
+            {
+                return Complete("ProductionPending", "Connection and webhook credentials are configured. Production sending is disabled pending activation.", false);
+            }
+
             return Complete("Healthy", "Integration is healthy.", true);
         }
 

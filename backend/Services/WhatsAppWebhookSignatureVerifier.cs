@@ -101,7 +101,6 @@ public sealed class WhatsAppWebhookSignatureVerifier(
     private async Task<IReadOnlyCollection<string>> ResolveCandidateAppSecretsAsync(CancellationToken cancellationToken)
     {
         var integrations = await whatsAppRepository.ListActiveIntegrationsAsync(cancellationToken);
-        var limit = Math.Max(1, options.Value.WebhookSignatureSecretCandidateLimit);
         var candidates = new HashSet<string>(StringComparer.Ordinal);
 
         var defaultResolution = await credentialResolver.ResolveAsync(new Models.WhatsAppIntegration
@@ -113,7 +112,7 @@ public sealed class WhatsAppWebhookSignatureVerifier(
             candidates.Add(defaultResolution.AppSecret.Trim());
         }
 
-        foreach (var integration in integrations.Take(limit))
+        foreach (var integration in integrations)
         {
             var resolution = await credentialResolver.ResolveAsync(integration, cancellationToken);
             if (resolution.Success && !string.IsNullOrWhiteSpace(resolution.AppSecret))
@@ -128,7 +127,6 @@ public sealed class WhatsAppWebhookSignatureVerifier(
     private async Task<IReadOnlyCollection<string>> ResolveCandidateWebhookTokensAsync(CancellationToken cancellationToken)
     {
         var integrations = await whatsAppRepository.ListActiveIntegrationsAsync(cancellationToken);
-        var limit = Math.Max(1, options.Value.WebhookSignatureSecretCandidateLimit);
         var candidates = new HashSet<string>(StringComparer.Ordinal);
 
         var defaultResolution = await credentialResolver.ResolveAsync(new Models.WhatsAppIntegration
@@ -140,7 +138,7 @@ public sealed class WhatsAppWebhookSignatureVerifier(
             candidates.Add(defaultResolution.WebhookVerifyToken.Trim());
         }
 
-        foreach (var integration in integrations.Take(limit))
+        foreach (var integration in integrations)
         {
             var resolution = await credentialResolver.ResolveAsync(integration, cancellationToken);
             if (resolution.Success && !string.IsNullOrWhiteSpace(resolution.WebhookVerifyToken))

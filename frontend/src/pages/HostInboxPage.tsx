@@ -41,11 +41,6 @@ export function HostInboxPage() {
   const [notificationPreferenceEnabled, setNotificationPreferenceEnabled] = useState(
     () => localStorage.getItem(notificationsPreferenceKey) === "true"
   );
-  const activeCompanyId = auth.currentUser?.companyId ?? null;
-  const onboarding = useOrganizationOnboardingStatus({
-    accessToken: auth.accessToken,
-    activeCompanyId
-  });
   const [copilotDraft, setCopilotDraft] = useState<string | null>(null);
   const [copilotDraftVersion, setCopilotDraftVersion] = useState(0);
   const previousMessageTimestampsRef = useRef<Record<string, string | null>>({});
@@ -62,6 +57,10 @@ export function HostInboxPage() {
     conversationId: selectedConversationId,
     accessToken: auth.accessToken,
     onUnauthorized: auth.logout
+  });
+  const onboarding = useOrganizationOnboardingStatus({
+    accessToken: auth.accessToken,
+    activeCompanyId: auth.currentUser?.companyId ?? null
   });
 
   const notificationsSupported = useMemo(() => typeof Notification !== "undefined", []);

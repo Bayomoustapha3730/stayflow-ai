@@ -24,7 +24,7 @@ public sealed class WhatsAppIntegrationsController(IWhatsAppTemplateService what
     }
 
     [HttpGet("{integrationId:guid}/health")]
-    [RequiresPermission("conversations.read")]
+    [RequiresPermission("conversations.manage")]
     public async Task<ActionResult<ApiResponse<WhatsAppIntegrationHealthResponse>>> CheckHealth(Guid integrationId, CancellationToken cancellationToken)
     {
         var response = await whatsAppTemplateService.CheckHealthAsync(integrationId, cancellationToken);
