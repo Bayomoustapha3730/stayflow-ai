@@ -45,6 +45,56 @@ public sealed class MpesaApiClient(
         return payload ?? throw new MpesaProviderException("Safaricom returned an empty payment response.");
     }
 
+    public async Task<MpesaStkQueryResponse> QueryStkPushAsync(
+        MpesaStkQueryRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (hostEnvironment.IsDevelopment() && options.Value.DevelopmentMode)
+        {
+            return new MpesaStkQueryResponse(
+                0,
+                "The service request has been accepted successfully",
+                "development-merchant",
+                request.CheckoutRequestId,
+                0,
+                "The service request is processed successfully.");
+        }
+
+        var token = await GetAccessTokenAsync(cancellationToken);
+        var client = httpClientFactory.CreateClient(nameof(MpesaApiClient));
+
+        using var message = new HttpRequestMessage(
+            HttpMethod.Post,
+            "mpesa/stkpushquery/v1/query")
+        {
+            Content = JsonContent.Create(request)
+        };
+
+        message.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", token);
+
+        using var response =
+            await SendWithRetryAsync(client, message, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning(
+                "Daraja STK Query returned HTTP status {StatusCode}.",
+                (int)response.StatusCode);
+
+            throw new MpesaProviderException(
+                "Safaricom did not accept the STK status query.");
+        }
+
+        var payload =
+            await response.Content.ReadFromJsonAsync<MpesaStkQueryResponse>(
+                cancellationToken);
+
+        return payload
+            ?? throw new MpesaProviderException(
+                "Safaricom returned an empty STK status response.");
+    }
+
     private async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken)
     {
         if (cachedToken is not null && tokenExpiresAt > DateTimeOffset.UtcNow.AddSeconds(options.Value.TokenExpirySkewSeconds))

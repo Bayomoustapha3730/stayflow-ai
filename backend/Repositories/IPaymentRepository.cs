@@ -20,6 +20,16 @@ public interface IPaymentRepository
     /// </summary>
     Task<Payment?> GetByCheckoutRequestIdAsync(string checkoutRequestId, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Gets stale non-terminal M-PESA payments that have a provider checkout ID
+    /// and are eligible for provider reconciliation.
+    /// This system-level lookup intentionally spans tenants.
+    /// </summary>
+    Task<IReadOnlyCollection<Payment>> GetStaleMpesaPaymentsAsync(
+        DateTimeOffset requestedBeforeUtc,
+        int take,
+        CancellationToken cancellationToken);
+
     Task<bool> ReservationBelongsToCompanyAsync(Guid reservationId, Guid companyId, CancellationToken cancellationToken);
 
     Task AddAsync(Payment payment, CancellationToken cancellationToken);

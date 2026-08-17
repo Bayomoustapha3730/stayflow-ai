@@ -173,6 +173,222 @@ public sealed class MpesaPaymentFoundationTests
     }
 
     [Fact]
+    public async Task Reconciliation_Result4999_ExpiresPaymentPastMaximumAge()
+    {
+        var payment = CreatePayment(
+            Guid.NewGuid(),
+            PaymentStatus.Processing.ToStorageValue());
+
+        payment.Provider = "M-PESA";
+        payment.ProviderCheckoutRequestId = "checkout-expired";
+        payment.RequestedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-15);
+
+        var repository = new FakePaymentRepository(
+            payment,
+            stalePayments: [payment]);
+
+        var service = new MpesaPaymentReconciliationService(
+            repository,
+            new FakeMpesaApiClient(
+                new MpesaStkQueryResponse(
+                    0,
+                    "The service request has been accepted successfully",
+                    "merchant-expired",
+                    "checkout-expired",
+                    4999,
+                    "The transaction is still under processing")),
+            new FakeCredentialResolver(),
+            Options.Create(new MpesaOptions
+            {
+                Enabled = true,
+                ShortCode = "174379",
+                CallbackBaseUrl = "https://example.test",
+                ReconciliationEnabled = true,
+                ReconciliationPendingAgeSeconds = 60,
+                ReconciliationScanIntervalSeconds = 30,
+                ReconciliationBatchSize = 50,
+                ReconciliationMaxAgeSeconds = 600
+            }),
+            NullLogger<MpesaPaymentReconciliationService>.Instance);
+
+        var count = await service.ReconcileStalePaymentsAsync(
+            CancellationToken.None);
+
+        Assert.Equal(1, count);
+        Assert.Equal(
+            PaymentStatus.Expired.ToStorageValue(),
+            payment.Status);
+        Assert.Equal(
+            "STK_RECONCILIATION_TIMEOUT",
+            payment.FailureCode);
+        Assert.Equal(
+            "M-PESA payment status could not be finalized within the reconciliation window.",
+            payment.FailureMessage);
+        Assert.Null(payment.FailedAtUtc);
+        Assert.Null(payment.CancelledAtUtc);
+    }
+
+    [Fact]
+    public async Task Reconciliation_Result4999_KeepsPaymentNonTerminal()
+    {
+        var payment = CreatePayment(
+            Guid.NewGuid(),
+            PaymentStatus.Pending.ToStorageValue());
+
+        payment.Provider = "M-PESA";
+        payment.ProviderCheckoutRequestId = "checkout-4999";
+        payment.RequestedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5);
+
+        var repository = new FakePaymentRepository(
+            payment,
+            stalePayments: [payment]);
+
+        var service = CreateReconciliationService(
+            repository,
+            new MpesaStkQueryResponse(
+                0,
+                "The service request has been accepted successfully",
+                "merchant-4999",
+                "checkout-4999",
+                4999,
+                "The transaction is still under processing"));
+
+        var count = await service.ReconcileStalePaymentsAsync(
+            CancellationToken.None);
+
+        Assert.Equal(1, count);
+        Assert.Equal(
+            PaymentStatus.Processing.ToStorageValue(),
+            payment.Status);
+        Assert.Null(payment.FailureCode);
+        Assert.Null(payment.FailureMessage);
+        Assert.Null(payment.FailedAtUtc);
+        Assert.Null(payment.CancelledAtUtc);
+    }
+
+    [Fact]
+    public async Task Reconciliation_Result1037_MarksPendingPaymentFailed()
+    {
+        var payment = CreatePayment(
+            Guid.NewGuid(),
+            PaymentStatus.Pending.ToStorageValue());
+
+        payment.Provider = "M-PESA";
+        payment.ProviderCheckoutRequestId = "checkout-1037";
+        payment.RequestedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5);
+
+        var repository = new FakePaymentRepository(
+            payment,
+            stalePayments: [payment]);
+
+        var service = CreateReconciliationService(
+            repository,
+            new MpesaStkQueryResponse(
+                0,
+                "The service request has been accepted successfully",
+                "merchant-1037",
+                "checkout-1037",
+                1037,
+                "DS timeout user cannot be reached."));
+
+        var count = await service.ReconcileStalePaymentsAsync(
+            CancellationToken.None);
+
+        Assert.Equal(1, count);
+        Assert.Equal(
+            PaymentStatus.Failed.ToStorageValue(),
+            payment.Status);
+        Assert.Equal("1037", payment.FailureCode);
+        Assert.Equal(
+            "DS timeout user cannot be reached.",
+            payment.FailureMessage);
+        Assert.NotNull(payment.FailedAtUtc);
+    }
+
+    [Fact]
+    public async Task Reconciliation_Result1032_MarksPendingPaymentCancelled()
+    {
+        var payment = CreatePayment(
+            Guid.NewGuid(),
+            PaymentStatus.Pending.ToStorageValue());
+
+        payment.Provider = "M-PESA";
+        payment.ProviderCheckoutRequestId = "checkout-1032";
+        payment.RequestedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5);
+
+        var repository = new FakePaymentRepository(
+            payment,
+            stalePayments: [payment]);
+
+        var service = CreateReconciliationService(
+            repository,
+            new MpesaStkQueryResponse(
+                0,
+                "The service request has been accepted successfully",
+                "merchant-1032",
+                "checkout-1032",
+                1032,
+                "Request cancelled by user."));
+
+        var count = await service.ReconcileStalePaymentsAsync(
+            CancellationToken.None);
+
+        Assert.Equal(1, count);
+        Assert.Equal(
+            PaymentStatus.Cancelled.ToStorageValue(),
+            payment.Status);
+        Assert.Equal("1032", payment.FailureCode);
+        Assert.Equal(
+            "Request cancelled by user.",
+            payment.FailureMessage);
+        Assert.NotNull(payment.CancelledAtUtc);
+    }
+
+    [Fact]
+    public async Task Reconciliation_DoesNotRegressPaidPayment()
+    {
+        var payment = CreatePayment(
+            Guid.NewGuid(),
+            PaymentStatus.Paid.ToStorageValue());
+
+        payment.Provider = "M-PESA";
+        payment.ProviderCheckoutRequestId = "checkout-paid";
+        payment.ProviderTransactionId = "receipt-existing";
+        payment.CompletedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-5);
+        payment.RequestedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-10);
+
+        var originalCompletedAt = payment.CompletedAtUtc;
+
+        // Deliberately return a terminal payment from the fake repository
+        // to verify the service itself protects terminal state.
+        var repository = new FakePaymentRepository(
+            payment,
+            stalePayments: [payment]);
+
+        var service = CreateReconciliationService(
+            repository,
+            new MpesaStkQueryResponse(
+                0,
+                "accepted",
+                "merchant-paid",
+                "checkout-paid",
+                1037,
+                "DS timeout user cannot be reached."));
+
+        var count = await service.ReconcileStalePaymentsAsync(
+            CancellationToken.None);
+
+        Assert.Equal(0, count);
+        Assert.Equal(
+            PaymentStatus.Paid.ToStorageValue(),
+            payment.Status);
+        Assert.Equal("receipt-existing", payment.ProviderTransactionId);
+        Assert.Equal(originalCompletedAt, payment.CompletedAtUtc);
+        Assert.Null(payment.FailureCode);
+        Assert.Null(payment.FailureMessage);
+    }
+
+    [Fact]
     public async Task GetPayment_DoesNotReturnAnotherCompanysPayment()
     {
         var payment = CreatePayment(Guid.NewGuid(), PaymentStatus.Pending.ToStorageValue());
@@ -193,6 +409,27 @@ public sealed class MpesaPaymentFoundationTests
             new FakeCredentialResolver(),
             Options.Create(new MpesaOptions { Enabled = true, ShortCode = "123456", CallbackBaseUrl = "https://example.test", DevelopmentMode = true }),
             NullLogger<PaymentService>.Instance);
+    }
+
+    private static MpesaPaymentReconciliationService CreateReconciliationService(
+        FakePaymentRepository repository,
+        MpesaStkQueryResponse queryResponse)
+    {
+        return new MpesaPaymentReconciliationService(
+            repository,
+            new FakeMpesaApiClient(queryResponse),
+            new FakeCredentialResolver(),
+            Options.Create(new MpesaOptions
+            {
+                Enabled = true,
+                ShortCode = "174379",
+                CallbackBaseUrl = "https://example.test",
+                ReconciliationEnabled = true,
+                ReconciliationPendingAgeSeconds = 60,
+                ReconciliationScanIntervalSeconds = 30,
+                ReconciliationBatchSize = 50
+            }),
+            NullLogger<MpesaPaymentReconciliationService>.Instance);
     }
 
     private static Payment CreatePayment(Guid companyId, string status) => new()
@@ -242,19 +479,53 @@ public sealed class MpesaPaymentFoundationTests
             Task.FromResult(new MpesaCredentialResolution { Success = true, ConsumerKey = "key", ConsumerSecret = "secret", PassKey = "pass" });
     }
 
-    private sealed class FakeMpesaApiClient : IMpesaApiClient
+    private sealed class FakeMpesaApiClient(
+        MpesaStkQueryResponse? queryResponse = null) : IMpesaApiClient
     {
-        public Task<MpesaStkPushResponse> InitiateStkPushAsync(MpesaStkPushRequest request, CancellationToken cancellationToken) =>
-            Task.FromResult(new MpesaStkPushResponse("merchant", "checkout", 0, "accepted", "accepted"));
+        public Task<MpesaStkPushResponse> InitiateStkPushAsync(
+            MpesaStkPushRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(
+                new MpesaStkPushResponse(
+                    "merchant",
+                    "checkout",
+                    0,
+                    "accepted",
+                    "accepted"));
+
+        public Task<MpesaStkQueryResponse> QueryStkPushAsync(
+            MpesaStkQueryRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(
+                queryResponse ??
+                new MpesaStkQueryResponse(
+                    0,
+                    "accepted",
+                    "merchant",
+                    request.CheckoutRequestId,
+                    null,
+                    null));
     }
 
-    private sealed class FakePaymentRepository(Payment? payment, Reservation? reservation = null) : IPaymentRepository
+    private sealed class FakePaymentRepository(
+        Payment? payment,
+        Reservation? reservation = null,
+        IReadOnlyCollection<Payment>? stalePayments = null) : IPaymentRepository
     {
         private readonly List<PaymentWebhookEvent> events = [];
         public Payment? AddedPayment { get; private set; }
         public Task<Payment?> GetByIdAsync(Guid id, Guid companyId, CancellationToken cancellationToken) => Task.FromResult(payment?.Id == id && payment.CompanyId == companyId ? payment : null);
         public Task<IReadOnlyCollection<Payment>> GetByReservationIdAsync(Guid reservationId, Guid companyId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyCollection<Payment>>(payment is not null && payment.ReservationId == reservationId && payment.CompanyId == companyId ? [payment] : []);
         public Task<Payment?> GetByCheckoutRequestIdAsync(string checkoutRequestId, CancellationToken cancellationToken) => Task.FromResult(payment?.ProviderCheckoutRequestId == checkoutRequestId ? payment : null);
+
+        public Task<IReadOnlyCollection<Payment>> GetStaleMpesaPaymentsAsync(
+            DateTimeOffset requestedBeforeUtc,
+            int take,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(
+                stalePayments ??
+                (IReadOnlyCollection<Payment>)[]);
+
         public Task<Reservation?> GetReservationForPaymentAsync(Guid reservationId, Guid companyId, CancellationToken cancellationToken) => Task.FromResult(reservation?.Id == reservationId && reservation.CompanyId == companyId ? reservation : null);
         public Task<Payment?> GetByExternalReferenceAsync(string externalReference, Guid companyId, CancellationToken cancellationToken) => Task.FromResult<Payment?>(null);
         public Task<bool> ReservationBelongsToCompanyAsync(Guid reservationId, Guid companyId, CancellationToken cancellationToken) => Task.FromResult(false);

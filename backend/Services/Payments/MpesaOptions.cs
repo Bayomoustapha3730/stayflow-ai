@@ -37,6 +37,23 @@ public sealed class MpesaOptions
     /// <summary>Seconds subtracted from the token lifetime so cached tokens are refreshed early.</summary>
     public int TokenExpirySkewSeconds { get; set; } = 60;
 
+    /// <summary>Enables reconciliation of M-PESA payments whose callbacks were not received.</summary>
+    public bool ReconciliationEnabled { get; set; } = true;
+
+    /// <summary>How old a pending payment must be before querying Daraja.</summary>
+    public int ReconciliationPendingAgeSeconds { get; set; } = 60;
+
+    /// <summary>How frequently the background reconciliation worker runs.</summary>
+    public int ReconciliationScanIntervalSeconds { get; set; } = 30;
+
+    /// <summary>Maximum number of stale payments reconciled in one worker cycle.</summary>
+    public int ReconciliationBatchSize { get; set; } = 50;
+
+    /// <summary>
+    /// Maximum age of an unresolved STK transaction before StayFlow marks it expired.
+    /// </summary>
+    public int ReconciliationMaxAgeSeconds { get; set; } = 600;
+
     /// <summary>Uses an in-process fake Daraja client. Only permitted in Development.</summary>
     public bool DevelopmentMode { get; set; }
 
@@ -109,6 +126,26 @@ public sealed class MpesaOptionsValidator : IValidateOptions<MpesaOptions>
         if (options.DevelopmentMode && options.IsProduction)
         {
             errors.Add("Mpesa:DevelopmentMode cannot be enabled when Mpesa:Environment is 'Production'.");
+        }
+
+        if (options.ReconciliationPendingAgeSeconds is < 15 or > 3600)
+        {
+            errors.Add("Mpesa:ReconciliationPendingAgeSeconds must be between 15 and 3600.");
+        }
+
+        if (options.ReconciliationScanIntervalSeconds is < 15 or > 3600)
+        {
+            errors.Add("Mpesa:ReconciliationScanIntervalSeconds must be between 15 and 3600.");
+        }
+
+        if (options.ReconciliationBatchSize is < 1 or > 500)
+        {
+            errors.Add("Mpesa:ReconciliationBatchSize must be between 1 and 500.");
+        }
+
+        if (options.ReconciliationMaxAgeSeconds is < 60 or > 86400)
+        {
+            errors.Add("Mpesa:ReconciliationMaxAgeSeconds must be between 60 and 86400.");
         }
 
         return errors.Count == 0

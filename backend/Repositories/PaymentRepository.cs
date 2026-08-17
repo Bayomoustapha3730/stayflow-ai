@@ -44,6 +44,23 @@ public sealed class PaymentRepository(ApplicationDbContext dbContext) : IPayment
             .FirstOrDefaultAsync(payment => payment.ProviderCheckoutRequestId == checkoutRequestId, cancellationToken);
     }
 
+    public async Task<IReadOnlyCollection<Payment>> GetStaleMpesaPaymentsAsync(
+        DateTimeOffset requestedBeforeUtc,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.Payments
+            .Where(payment =>
+                payment.Provider == "M-PESA"
+                && (payment.Status == "Pending" || payment.Status == "Processing")
+                && payment.ProviderCheckoutRequestId != null
+                && payment.RequestedAtUtc != null
+                && payment.RequestedAtUtc <= requestedBeforeUtc)
+            .OrderBy(payment => payment.RequestedAtUtc)
+            .Take(take)
+            .ToListAsync(cancellationToken);
+    }
+
     public Task<bool> ReservationBelongsToCompanyAsync(Guid reservationId, Guid companyId, CancellationToken cancellationToken)
     {
         return dbContext.Reservations.AnyAsync(

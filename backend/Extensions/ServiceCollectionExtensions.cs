@@ -329,6 +329,14 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
         });
         services.AddScoped<Services.Payments.IMpesaApiClient, Services.Payments.MpesaApiClient>();
+
+        services.AddScoped<
+            Services.Payments.IMpesaPaymentReconciliationService,
+            Services.Payments.MpesaPaymentReconciliationService>();
+
+        services.AddHostedService<
+            Services.Payments.MpesaPaymentReconciliationWorker>();
+
         services.AddHttpClient(nameof(Services.Payments.MpesaHealthService));
         services.AddScoped<Services.Payments.IMpesaHealthService, Services.Payments.MpesaHealthService>();
 
