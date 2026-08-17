@@ -189,6 +189,13 @@ builder.Services.AddRateLimiter(options =>
         limiterOptions.PermitLimit = 120;
         limiterOptions.QueueLimit = 0;
     });
+
+    options.AddFixedWindowLimiter("mpesa-webhook", limiterOptions =>
+    {
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.PermitLimit = 120;
+        limiterOptions.QueueLimit = 0;
+    });
 });
 
 builder.Services.AddCors(options =>

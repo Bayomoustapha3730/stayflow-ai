@@ -120,6 +120,10 @@ public static class ServiceCollectionExtensions
         services.AddOptions<Services.WhatsAppCloudOptions>()
             .Bind(configuration.GetSection(Services.WhatsAppCloudOptions.SectionName))
             .ValidateOnStart();
+        services.AddOptions<Services.Payments.MpesaOptions>()
+            .Bind(configuration.GetSection(Services.Payments.MpesaOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.Payments.MpesaOptions>, Services.Payments.MpesaOptionsValidator>();
         services.AddOptions<Services.Billing.BillingOptions>()
             .Bind(configuration.GetSection(Services.Billing.BillingOptions.SectionName))
             .Validate(options => options.Provider.Equals("Development", StringComparison.OrdinalIgnoreCase)
@@ -314,6 +318,19 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IAuthService, Services.AuthService>();
         services.AddScoped<Services.IRoleService, Services.RoleService>();
         services.AddScoped<Services.IDevelopmentSeedService, Services.DevelopmentSeedService>();
+        services.AddScoped<Repositories.IPaymentRepository, Repositories.PaymentRepository>();
+        services.AddScoped<Services.Payments.IPaymentService, Services.Payments.PaymentService>();
+        services.AddScoped<Services.Payments.IMpesaCredentialResolver, Services.Payments.MpesaCredentialResolver>();
+        services.AddScoped<Services.Payments.IKenyanPhoneNumberNormalizer, Services.Payments.KenyanPhoneNumberNormalizer>();
+        services.AddHttpClient(nameof(Services.Payments.MpesaApiClient), (serviceProvider, client) =>
+        {
+            var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.Payments.MpesaOptions>>().Value;
+            client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/') + "/");
+            client.Timeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
+        });
+        services.AddScoped<Services.Payments.IMpesaApiClient, Services.Payments.MpesaApiClient>();
+        services.AddHttpClient(nameof(Services.Payments.MpesaHealthService));
+        services.AddScoped<Services.Payments.IMpesaHealthService, Services.Payments.MpesaHealthService>();
 
         return services;
     }

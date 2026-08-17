@@ -210,6 +210,22 @@ export function BillingDashboardPage() {
           </article>
         </section>
 
+        {(billing.paymentOptions ?? []).length ? (
+          <section className="sf-billing-grid" aria-label="Accepted payment methods">
+            <article className="sf-organization-card">
+              <h2>Accepted payment methods</h2>
+              <div className="sf-payment-method-list" role="list">
+                {(billing.paymentOptions ?? []).map((option) => (
+                  <div key={option.key} className="sf-payment-method-item" role="listitem">
+                    <strong>{option.label}</strong>
+                    <p>{option.description}</p>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </section>
+        ) : null}
+
         <section className="sf-billing-grid" aria-label="Usage and invoices">
           <article className="sf-organization-card">
             <h2>Usage Summary</h2>

@@ -63,6 +63,7 @@ vi.mock("../src/hooks/useBillingDashboard", () => ({
         missingConfiguration: []
       }
     },
+    paymentOptions: [],
     invoices: [],
     usage: {
       companyId: "c1",
@@ -160,6 +161,7 @@ describe("BillingDashboardPage", () => {
 
     vi.mocked(useBillingDashboard).mockReturnValueOnce({
       subscription: freeTenantSubscription,
+      paymentOptions: [],
       invoices: [],
       usage: null,
       isLoading: false,
@@ -181,6 +183,62 @@ describe("BillingDashboardPage", () => {
     expect(screen.queryByRole("button", { name: /Manage Payment Method/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Cancel at Period End/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Resume/i })).not.toBeInTheDocument();
+  });
+
+  it("shows accepted payment methods when the host billing provider exposes them", () => {
+    const hostPaymentOptions = [{
+      key: "Mpesa",
+      label: "M-Pesa",
+      description: "Pay securely with M-Pesa mobile money."
+    }];
+
+    vi.mocked(useBillingDashboard).mockReturnValueOnce({
+      subscription: {
+        companyId: "c1",
+        status: "Active",
+        cancelAtPeriodEnd: false,
+        currentPeriodStartUtc: "2026-08-01T00:00:00Z",
+        currentPeriodEndUtc: "2026-09-01T00:00:00Z",
+        trialEndsAtUtc: null,
+        planName: "Starter",
+        canStartCheckout: true,
+        canOpenBillingPortal: true,
+        canManagePaymentMethod: true,
+        canCancel: true,
+        canResume: false,
+        hasStripeCustomer: true,
+        hasStripeSubscription: true,
+        capability: {
+          provider: "Development",
+          stripeConfigured: true,
+          checkoutAvailable: true,
+          portalAvailable: true,
+          paymentMethodManagementAvailable: true,
+          message: "M-Pesa is enabled for local Kenya transactions.",
+          missingConfiguration: []
+        }
+      },
+      paymentOptions: hostPaymentOptions,
+      invoices: [],
+      usage: null,
+      isLoading: false,
+      isMutating: false,
+      error: null,
+      message: null,
+      refresh: vi.fn(),
+      openCheckout: vi.fn(),
+      openBillingPortal: vi.fn(),
+      openPaymentMethodPortal: vi.fn(),
+      changePlan,
+      cancelSubscription: vi.fn(),
+      resumeSubscription: vi.fn()
+    });
+
+    render(<BillingDashboardPage />);
+
+    expect(screen.getByText("Accepted payment methods")).toBeInTheDocument();
+    expect(screen.getByText("M-Pesa")).toBeInTheDocument();
+    expect(screen.getByText("Pay securely with M-Pesa mobile money.")).toBeInTheDocument();
   });
 
   it("shows checkout capability message when Stripe billing is not configured", () => {
@@ -212,6 +270,7 @@ describe("BillingDashboardPage", () => {
 
     vi.mocked(useBillingDashboard).mockReturnValueOnce({
       subscription: noStripeSubscription,
+      paymentOptions: [],
       invoices: [],
       usage: null,
       isLoading: false,

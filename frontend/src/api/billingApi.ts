@@ -1,4 +1,5 @@
 import type {
+  BillingPaymentOptionResponse,
   BillingSubscriptionResponse,
   CancelSubscriptionRequest,
   ChangeSubscriptionPlanRequest,
@@ -14,6 +15,9 @@ export function createBillingApi(http: HttpClient) {
   return {
     getSubscription() {
       return http.get<BillingSubscriptionResponse>("/api/billing/subscription");
+    },
+    getPaymentOptions() {
+      return http.get<BillingPaymentOptionResponse[]>("/api/billing/payment-options");
     },
     getInvoices() {
       return http.get<TenantInvoiceDto[]>("/api/billing/invoices");

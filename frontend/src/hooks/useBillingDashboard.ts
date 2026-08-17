@@ -3,6 +3,7 @@ import { createBillingApi } from "../api/billingApi";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { getRuntimeApiUrl } from "../runtimeConfig";
 import type {
+  BillingPaymentOptionResponse,
   BillingSubscriptionResponse,
   TenantInvoiceDto,
   UsageSummaryResponse
@@ -15,6 +16,7 @@ export interface UseBillingDashboardOptions {
 
 export function useBillingDashboard({ accessToken, onUnauthorized }: UseBillingDashboardOptions) {
   const [subscription, setSubscription] = useState<BillingSubscriptionResponse | null>(null);
+  const [paymentOptions, setPaymentOptions] = useState<BillingPaymentOptionResponse[]>([]);
   const [invoices, setInvoices] = useState<TenantInvoiceDto[]>([]);
   const [usage, setUsage] = useState<UsageSummaryResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -49,12 +51,14 @@ export function useBillingDashboard({ accessToken, onUnauthorized }: UseBillingD
     setError(null);
 
     try {
-      const [subscriptionData, invoiceData, usageData] = await Promise.all([
+      const [subscriptionData, paymentOptionsData, invoiceData, usageData] = await Promise.all([
         api.getSubscription(),
+        api.getPaymentOptions(),
         api.getInvoices(),
         api.getUsageSummary()
       ]);
       setSubscription(subscriptionData);
+      setPaymentOptions(paymentOptionsData);
       setInvoices(invoiceData);
       setUsage(usageData);
     } catch (failure) {
@@ -157,6 +161,7 @@ export function useBillingDashboard({ accessToken, onUnauthorized }: UseBillingD
 
   return {
     subscription,
+    paymentOptions,
     invoices,
     usage,
     isLoading,

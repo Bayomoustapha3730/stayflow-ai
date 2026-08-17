@@ -66,6 +66,10 @@ export interface BillingPaymentOptionResponse {
   description: string;
 }
 
+export interface BillingPaymentOptionsState {
+  paymentOptions: BillingPaymentOptionResponse[];
+}
+
 export interface TenantInvoiceDto {
   id: string;
   externalInvoiceId: string;

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StayFlow.Api.Data;
@@ -11,9 +12,11 @@ using StayFlow.Api.Data;
 namespace backend.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260815182436_ScopePaymentReferencesByTenant")]
+    partial class ScopePaymentReferencesByTenant
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1788,6 +1791,9 @@ namespace backend.Data.Migrations
 
                     b.HasIndex("GuestId");
 
+                    b.HasIndex("InternalReference")
+                        .IsUnique();
+
                     b.HasIndex("PropertyId");
 
                     b.HasIndex("Provider");
@@ -1803,9 +1809,6 @@ namespace backend.Data.Migrations
                     b.HasIndex("ServiceRequestId");
 
                     b.HasIndex("CompanyId", "GuestId");
-
-                    b.HasIndex("CompanyId", "ExternalReference")
-                        .IsUnique();
 
                     b.HasIndex("CompanyId", "ReservationId");
 

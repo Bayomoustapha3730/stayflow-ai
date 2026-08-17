@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using StayFlow.Api.Data;
 using StayFlow.Api.Services;
+using StayFlow.Api.Services.Payments;
 
 namespace StayFlow.Api.Extensions;
 
@@ -12,7 +13,8 @@ public static class HealthChecksExtensions
         services.AddHealthChecks()
             .AddCheck("self", () => HealthCheckResult.Healthy(), tags: ["live"])
             .AddCheck<DatabaseReadinessHealthCheck>("database", tags: ["ready", "database"])
-            .AddCheck<WhatsAppDependencyHealthCheck>("whatsapp", tags: ["ready", "external", "optional"]);
+            .AddCheck<WhatsAppDependencyHealthCheck>("whatsapp", tags: ["ready", "external", "optional"])
+            .AddCheck<MpesaDependencyHealthCheck>("mpesa", tags: ["ready", "external", "optional"]);
 
         return services;
     }
@@ -63,6 +65,34 @@ internal sealed class WhatsAppDependencyHealthCheck(
             return result.IsSendCapable
                 ? HealthCheckResult.Healthy()
                 : HealthCheckResult.Degraded();
+        }
+        catch (OperationCanceledException)
+        {
+            return HealthCheckResult.Degraded();
+        }
+        catch
+        {
+            return HealthCheckResult.Degraded();
+        }
+    }
+}
+
+internal sealed class MpesaDependencyHealthCheck(
+    IMpesaHealthService mpesaHealthService) : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await mpesaHealthService.CheckAsync(cancellationToken);
+            return result.Status switch
+            {
+                "Disabled" => HealthCheckResult.Healthy(result.Message),
+                "ProviderReachable" => HealthCheckResult.Healthy(result.Message),
+                _ => HealthCheckResult.Degraded(result.Message)
+            };
         }
         catch (OperationCanceledException)
         {
