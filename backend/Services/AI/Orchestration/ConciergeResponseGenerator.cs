@@ -1,3 +1,4 @@
+using StayFlow.Api.DTOs.Payments;
 using StayFlow.Api.Services.AI.Intent;
 using StayFlow.Api.Services.AI.Retrieval;
 
@@ -30,6 +31,11 @@ public sealed class ConciergeResponseGenerator : IConciergeResponseGenerator
                 request.RetrievalResult.SelectedItems.Select(item => item.ArticleId).ToArray(),
                 request.RetrievalResult.ConfidenceLevel,
                 "Emergency");
+        }
+
+        if (request.IntentResult.PrimaryIntent == GuestIntent.Payment)
+        {
+            return BuildPaymentResponse(request);
         }
 
         if (request.RetrievalResult.RequiresClarification
@@ -161,6 +167,93 @@ public sealed class ConciergeResponseGenerator : IConciergeResponseGenerator
         }
 
         return "If there is immediate danger, contact local emergency services now. I can also notify the host team immediately.";
+    }
+
+    private static ConciergeResponseResult BuildPaymentResponse(ConciergeResponseRequest request)
+    {
+        var grounding = request.PaymentGrounding;
+        if (grounding is null)
+        {
+            return new ConciergeResponseResult(
+                "I'm not able to verify payment details without a confirmed reservation on file. I can have the host check this for you.",
+                ConciergeResponseOutcome.Answered,
+                false,
+                false,
+                [],
+                request.RetrievalResult.ConfidenceLevel,
+                "PaymentGroundingUnavailable");
+        }
+
+        var normalized = request.GuestQuestion.Trim().ToLowerInvariant();
+        var text = BuildPaymentAnswer(normalized, grounding);
+
+        return new ConciergeResponseResult(
+            text,
+            ConciergeResponseOutcome.Answered,
+            false,
+            false,
+            [],
+            request.RetrievalResult.ConfidenceLevel,
+            "PaymentGrounded");
+    }
+
+    private static string BuildPaymentAnswer(string normalizedQuestion, ReservationPaymentGroundingDto grounding)
+    {
+        bool AsksAbout(params string[] keywords) => keywords.Any(keyword => normalizedQuestion.Contains(keyword, StringComparison.Ordinal));
+
+        if (AsksAbout("receipt", "transaction id", "transaction number"))
+        {
+            return string.IsNullOrWhiteSpace(grounding.LatestReceiptNumber)
+                ? "I don't have a payment receipt on file for this reservation yet."
+                : $"Your M-PESA receipt is {grounding.LatestReceiptNumber}.";
+        }
+
+        if (AsksAbout("owe", "outstanding", "balance", "remaining", "left to pay"))
+        {
+            return grounding.RemainingBalance is { } remaining
+                ? $"You have {remaining:0.00} {grounding.Currency} remaining to pay."
+                : "I don't have enough information to calculate your outstanding balance.";
+        }
+
+        if (AsksAbout("how can i pay", "how do i pay", "how to pay", "ways to pay", "payment method", "payment options"))
+        {
+            return "We currently accept payment via M-PESA. I can have the host follow up to arrange it, but I'm not able to start a payment request myself.";
+        }
+
+        if (AsksAbout("how much", "paid", "amount paid"))
+        {
+            return grounding.TotalPaid > 0
+                ? $"You have paid {grounding.TotalPaid:0.00} {grounding.Currency} so far."
+                : "I don't have a completed payment recorded for this reservation yet.";
+        }
+
+        return BuildPaymentStatusSummary(grounding);
+    }
+
+    private static string BuildPaymentStatusSummary(ReservationPaymentGroundingDto grounding)
+    {
+        if (grounding.HasSuccessfulPayment)
+        {
+            return string.IsNullOrWhiteSpace(grounding.LatestReceiptNumber)
+                ? $"Yes, we received your payment of {grounding.TotalPaid:0.00} {grounding.Currency}."
+                : $"Yes, we received your payment of {grounding.TotalPaid:0.00} {grounding.Currency}. Receipt: {grounding.LatestReceiptNumber}.";
+        }
+
+        if (grounding.PaymentCount == 0)
+        {
+            return "I don't see a completed payment recorded for this reservation yet.";
+        }
+
+        return grounding.LatestPaymentStatus switch
+        {
+            "Pending" or "Processing" => "Your payment is still being processed and hasn't been confirmed yet.",
+            "Failed" => string.IsNullOrWhiteSpace(grounding.LatestFailureMessage)
+                ? "Your last payment attempt was not completed."
+                : $"Your last payment attempt was not completed: {grounding.LatestFailureMessage}",
+            "Cancelled" => "Your last payment attempt was cancelled.",
+            "Expired" => "Your last payment request expired before it was completed.",
+            _ => "I don't have a completed payment recorded for this reservation yet."
+        };
     }
 
     private static string BuildSentence(string content)

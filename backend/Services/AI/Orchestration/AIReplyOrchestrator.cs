@@ -174,7 +174,8 @@ public sealed class AIReplyOrchestrator(
                 context.ConfirmationNumber,
                 ParseTone(request.RequestedTone, intelligence.DefaultTone),
                 "en",
-                context.HumanTakeoverEnabled));
+                context.HumanTakeoverEnabled,
+                paymentGrounding));
 
             output = generated.Text;
             conflictRequiresReview = generated.RequiresEscalation;
@@ -219,7 +220,8 @@ public sealed class AIReplyOrchestrator(
             && ((ranking.RequiresClarification && ShouldAskClarification(intentResult)) || ambiguousAccessClarification)
             && request.Operation != AIReplyOperation.SuggestedHostReplies
             && intent.Intent != GuestIntent.Emergency
-            && intent.Intent != GuestIntent.PetPolicy)
+            && intent.Intent != GuestIntent.PetPolicy
+            && intent.Intent != GuestIntent.Payment)
         {
             output = BuildClarificationPrompt(ranking.ClarificationChoices, latestGuestMessage);
         }

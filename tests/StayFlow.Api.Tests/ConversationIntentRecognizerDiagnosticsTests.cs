@@ -51,6 +51,13 @@ public sealed class ConversationIntentRecognizerDiagnosticsTests
     [InlineData("When can I get into the apartment?", GuestIntent.CheckIn)]
     [InlineData("How do I enter?", GuestIntent.PropertyAccess)]
     [InlineData("Can I bring pets?", GuestIntent.PetPolicy)]
+    [InlineData("Did you receive my payment?", GuestIntent.Payment)]
+    [InlineData("How much have I paid?", GuestIntent.Payment)]
+    [InlineData("How much do I still owe?", GuestIntent.Payment)]
+    [InlineData("What is the status of my M-PESA payment?", GuestIntent.Payment)]
+    [InlineData("What is my M-PESA receipt?", GuestIntent.Payment)]
+    [InlineData("I already paid. Can you check?", GuestIntent.Payment)]
+    [InlineData("How can I pay?", GuestIntent.Payment)]
     [InlineData("What color are the curtains?", GuestIntent.Unknown)]
     public void Recognize_ExpectedPrimaryIntent_WithDiagnostics(string query, GuestIntent expected)
     {

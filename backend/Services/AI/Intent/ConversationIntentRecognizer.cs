@@ -95,7 +95,16 @@ public sealed class ConversationIntentRecognizer : IConversationIntentRecognizer
                 "entry code"
             ],
             [GuestIntent.Reservation] = ["reservation", "booking", "stay dates", "confirmation"],
-            [GuestIntent.Payment] = ["payment", "pay", "charge", "invoice", "receipt"],
+            [GuestIntent.Payment] =
+            [
+                "payment", "pay", "paid", "charge", "invoice", "receipt", "owe", "outstanding", "outstanding balance",
+                "balance due", "mpesa", "m-pesa", "m pesa", "how can i pay", "how do i pay", "payment method",
+                "payment status", "still owe", "did you receive my payment", "how much have i paid", "how much do i still owe",
+                "what is the status of my payment", "what is the status of my mpesa payment", "what is the status of my m pesa payment",
+                "what is my mpesa receipt", "what is my m pesa receipt", "i already paid", "i paid", "already paid",
+                "have i paid", "have i already paid", "did i pay", "how much did i pay", "can you check if i paid",
+                "payment received", "payment confirmation", "paid amount", "amount paid"
+            ],
             [GuestIntent.HostContact] = ["host", "contact host", "call host", "message host"],
             [GuestIntent.GeneralQuestion] = ["can you help me", "i have a question", "general question", "need help with"],
             [GuestIntent.GeneralProperty] = ["stay information", "question about stay", "property information"]
@@ -109,7 +118,8 @@ public sealed class ConversationIntentRecognizer : IConversationIntentRecognizer
             [GuestIntent.Checkout] = ["checkout", "departure", "depart", "leave"],
             [GuestIntent.Parking] = ["parking", "park", "garage"],
             [GuestIntent.HouseRules] = ["smoking", "smoke", "party", "quiet"],
-            [GuestIntent.Emergency] = ["emergency", "urgent", "911", "fire", "ambulance", "danger", "unsafe"]
+            [GuestIntent.Emergency] = ["emergency", "urgent", "911", "fire", "ambulance", "danger", "unsafe"],
+            [GuestIntent.Payment] = ["paid", "receipt", "mpesa", "owe", "payment", "invoice", "outstanding", "balance due", "m pesa"]
         };
 
     private static readonly HashSet<string> EmergencyTerms =

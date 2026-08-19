@@ -1,3 +1,4 @@
+using StayFlow.Api.DTOs.Payments;
 using StayFlow.Api.Services.AI.Memory;
 using StayFlow.Api.Services.AI.Retrieval;
 using StayFlow.Api.Services.AI.Intent;
@@ -13,4 +14,5 @@ public sealed record ConciergeResponseRequest(
     string? ReservationContext,
     ConciergeTone Tone,
     string Language,
-    bool HumanTakeoverState);
+    bool HumanTakeoverState,
+    ReservationPaymentGroundingDto? PaymentGrounding = null);
