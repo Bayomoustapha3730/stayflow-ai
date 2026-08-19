@@ -137,6 +137,7 @@ public sealed class AIReplyPipelineTraceTests
             new AIReplySafetyEvaluator(),
             new ContextConfidenceEvaluator(),
             new AIReplyFallbackProvider(),
+            new NoOpReservationPaymentGroundingService(),
             Options.Create(new AIReplyOrchestratorOptions()),
             NullLogger<AIReplyOrchestrator>.Instance);
 

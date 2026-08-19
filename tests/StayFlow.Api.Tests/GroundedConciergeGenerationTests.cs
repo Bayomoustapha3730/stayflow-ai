@@ -89,6 +89,7 @@ public sealed class GroundedConciergeGenerationTests
             "en",
             "Demo Property",
             "CONF-123",
+            null,
             ConciergeTone.Warm,
             false,
             false,

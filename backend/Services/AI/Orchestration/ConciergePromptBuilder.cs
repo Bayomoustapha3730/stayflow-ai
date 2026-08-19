@@ -95,6 +95,7 @@ public sealed class ConciergePromptBuilder : IConciergePromptBuilder
             builder.AppendLine();
         }
 
+        AppendPaymentGrounding(builder, request);
         AppendMemoryContext(builder, request.MemoryContext);
         AppendKnowledge(builder, request);
 
@@ -140,6 +141,68 @@ public sealed class ConciergePromptBuilder : IConciergePromptBuilder
             {
                 builder.AppendLine($"- {SanitizeText(message)}");
             }
+        }
+
+        builder.AppendLine();
+    }
+
+    private static void AppendPaymentGrounding(StringBuilder builder, ConciergeLanguageModelRequest request)
+    {
+        if (request.PaymentGrounding is null)
+        {
+            return;
+        }
+
+        var payment = request.PaymentGrounding;
+        builder.AppendLine("Reservation payment snapshot:");
+        builder.AppendLine(payment.BookingAmount is { } bookingAmount
+            ? $"- Booking amount: {bookingAmount:0.00} {payment.Currency}"
+            : "- Booking amount: unavailable");
+        builder.AppendLine($"- Total paid: {payment.TotalPaid:0.00} {payment.Currency}");
+        builder.AppendLine(payment.RemainingBalance is { } remainingBalance
+            ? $"- Remaining balance: {remainingBalance:0.00} {payment.Currency}"
+            : "- Remaining balance: unavailable");
+        builder.AppendLine($"- Successful payment recorded: {(payment.HasSuccessfulPayment ? "Yes" : "No")}");
+        builder.AppendLine($"- Payment attempts: {payment.PaymentCount}");
+
+        if (!string.IsNullOrWhiteSpace(payment.LatestPaymentStatus))
+        {
+            builder.AppendLine($"- Latest payment status: {payment.LatestPaymentStatus}");
+        }
+
+        if (payment.LatestPaymentAmount is { } latestAmount)
+        {
+            builder.AppendLine($"- Latest payment amount: {latestAmount:0.00} {payment.Currency}");
+        }
+
+        if (payment.LatestPaymentRequestedAtUtc is { } requestedAt)
+        {
+            builder.AppendLine($"- Latest payment requested at: {requestedAt:O}");
+        }
+
+        if (payment.LatestPaymentCompletedAtUtc is { } completedAt)
+        {
+            builder.AppendLine($"- Latest payment completed at: {completedAt:O}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(payment.LatestProvider))
+        {
+            builder.AppendLine($"- Latest provider: {payment.LatestProvider}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(payment.LatestPaymentMethod))
+        {
+            builder.AppendLine($"- Latest payment method: {payment.LatestPaymentMethod}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(payment.LatestReceiptNumber))
+        {
+            builder.AppendLine($"- Latest receipt number: {payment.LatestReceiptNumber}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(payment.LatestFailureMessage))
+        {
+            builder.AppendLine($"- Latest failure message: {payment.LatestFailureMessage}");
         }
 
         builder.AppendLine();

@@ -319,6 +319,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IRoleService, Services.RoleService>();
         services.AddScoped<Services.IDevelopmentSeedService, Services.DevelopmentSeedService>();
         services.AddScoped<Repositories.IPaymentRepository, Repositories.PaymentRepository>();
+        services.AddScoped<Services.Payments.IReservationPaymentGroundingService, Services.Payments.ReservationPaymentGroundingService>();
         services.AddScoped<Services.Payments.IPaymentService, Services.Payments.PaymentService>();
         services.AddScoped<Services.Payments.IMpesaCredentialResolver, Services.Payments.MpesaCredentialResolver>();
         services.AddScoped<Services.Payments.IKenyanPhoneNumberNormalizer, Services.Payments.KenyanPhoneNumberNormalizer>();

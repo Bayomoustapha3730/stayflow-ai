@@ -10,6 +10,7 @@ using StayFlow.Api.Services.AI.Memory;
 using StayFlow.Api.Services.AI.Retrieval;
 using StayFlow.Api.Services.AI.Safety;
 using StayFlow.Api.Services.AI.Validation;
+using StayFlow.Api.Services.Payments;
 
 namespace StayFlow.Api.Services.AI.Orchestration;
 
@@ -22,6 +23,7 @@ public sealed class AIReplyOrchestrator(
     IAIReplySafetyEvaluator safetyEvaluator,
     IContextConfidenceEvaluator confidenceEvaluator,
     IAIReplyFallbackProvider fallbackProvider,
+    IReservationPaymentGroundingService paymentGroundingService,
     IOptions<AIReplyOrchestratorOptions> options,
     ILogger<AIReplyOrchestrator> logger,
     IConversationIntentRecognizer? conversationIntentRecognizer = null,
@@ -155,6 +157,10 @@ public sealed class AIReplyOrchestrator(
             .Select(candidate => MapProviderKnowledge(candidate.Item))
             .ToList();
 
+        var paymentGrounding = context.ReservationId is { } reservationId
+            ? await paymentGroundingService.GetReservationPaymentGroundingAsync(reservationId, companyId, cancellationToken)
+            : null;
+
         if (conciergeResponseGenerator is not null
             && request.Operation != AIReplyOperation.SuggestedHostReplies
             && !string.IsNullOrWhiteSpace(latestGuestMessage))
@@ -268,6 +274,7 @@ public sealed class AIReplyOrchestrator(
                     ParseLanguage(request.RequestedTone, "en"),
                     context.PropertyName,
                     context.ConfirmationNumber,
+                    paymentGrounding,
                     ParseTone(request.RequestedTone, intelligence.DefaultTone),
                     context.HumanTakeoverEnabled,
                     intent.Intent == GuestIntent.Emergency,

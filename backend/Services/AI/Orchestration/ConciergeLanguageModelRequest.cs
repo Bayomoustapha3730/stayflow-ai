@@ -1,3 +1,4 @@
+using StayFlow.Api.DTOs.Payments;
 using StayFlow.Api.Services.AI.Intent;
 using StayFlow.Api.Services.AI.Memory;
 using StayFlow.Api.Services.AI.Retrieval;
@@ -13,6 +14,7 @@ public sealed record ConciergeLanguageModelRequest(
     string Language,
     string? PropertyName,
     string? ReservationContext,
+    ReservationPaymentGroundingDto? PaymentGrounding,
     ConciergeTone Tone,
     bool HumanTakeoverState,
     bool IsEmergency,

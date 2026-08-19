@@ -181,6 +181,7 @@ public sealed class AIReplyOrchestratorGroundingTests
             new AIReplySafetyEvaluator(),
             new ContextConfidenceEvaluator(),
             new AIReplyFallbackProvider(),
+            new NoOpReservationPaymentGroundingService(),
             Options.Create(new AIReplyOrchestratorOptions
             {
                 EnableFallback = true,
