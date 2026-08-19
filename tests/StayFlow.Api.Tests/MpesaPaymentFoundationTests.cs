@@ -515,6 +515,7 @@ public sealed class MpesaPaymentFoundationTests
         private readonly List<PaymentWebhookEvent> events = [];
         public Payment? AddedPayment { get; private set; }
         public Task<Payment?> GetByIdAsync(Guid id, Guid companyId, CancellationToken cancellationToken) => Task.FromResult(payment?.Id == id && payment.CompanyId == companyId ? payment : null);
+        public Task<Payment?> GetByIdWithoutTenantScopeAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(payment?.Id == id ? payment : null);
         public Task<IReadOnlyCollection<Payment>> GetByReservationIdAsync(Guid reservationId, Guid companyId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyCollection<Payment>>(payment is not null && payment.ReservationId == reservationId && payment.CompanyId == companyId ? [payment] : []);
         public Task<Payment?> GetByCheckoutRequestIdAsync(string checkoutRequestId, CancellationToken cancellationToken) => Task.FromResult(payment?.ProviderCheckoutRequestId == checkoutRequestId ? payment : null);
 

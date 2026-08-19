@@ -38,6 +38,11 @@ public sealed class PaymentRepository(ApplicationDbContext dbContext) : IPayment
             .ToListAsync(cancellationToken);
     }
 
+    public Task<Payment?> GetByIdWithoutTenantScopeAsync(Guid id, CancellationToken cancellationToken)
+    {
+        return dbContext.Payments.FirstOrDefaultAsync(payment => payment.Id == id, cancellationToken);
+    }
+
     public Task<Payment?> GetByCheckoutRequestIdAsync(string checkoutRequestId, CancellationToken cancellationToken)
     {
         return dbContext.Payments

@@ -210,6 +210,10 @@ export function HostInboxPage() {
 
       <div className="sf-host-main-grid">
         <section className="sf-host-list-column" aria-label="Conversation inbox">
+          <header className="sf-host-list-header">
+            <h2>Conversations ({response?.totalCount ?? items.length})</h2>
+          </header>
+
           <HostConversationList
             isLoading={conversations.isLoading}
             error={conversations.error}

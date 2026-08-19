@@ -1,5 +1,6 @@
 import { ConversationStatus } from "../../models/enums";
 import { useHostConversationDetail } from "../../hooks/useHostConversationDetail";
+import { useReservationPayments } from "../../hooks/useReservationPayments";
 import { HostConversationActions } from "./HostConversationActions";
 import { HostConversationComposer } from "./HostConversationComposer";
 import { HostConversationDetailError } from "./HostConversationDetailError";
@@ -8,6 +9,8 @@ import { HostConversationHeader } from "./HostConversationHeader";
 import { HostConversationMetadata } from "./HostConversationMetadata";
 import { HostConversationTimeline } from "./HostConversationTimeline";
 import { HostInternalNoteComposer } from "./HostInternalNoteComposer";
+import { MpesaPaymentPanel } from "../payments/MpesaPaymentPanel";
+import "../../styles/mpesa-payment.css";
 
 interface HostConversationDetailProps {
   conversationId: string | null;
@@ -31,6 +34,14 @@ export function HostConversationDetail({
     accessToken,
     onUnauthorized,
     onConversationChanged
+  });
+
+  const reservationId = detail.conversation?.reservationId ?? null;
+
+  const reservationPayments = useReservationPayments({
+    reservationId,
+    accessToken,
+    onUnauthorized
   });
 
   if (!conversationId) {
@@ -81,6 +92,18 @@ export function HostConversationDetail({
         />
 
         <HostConversationMetadata conversation={conversation} />
+
+        {conversation.reservationId ? (
+          <MpesaPaymentPanel
+            payments={reservationPayments.payments}
+            isLoading={reservationPayments.isLoading}
+            isSubmitting={reservationPayments.isSubmitting}
+            error={reservationPayments.error}
+            onRequestPayment={reservationPayments.initiateMpesaPayment}
+            onRefresh={reservationPayments.refresh}
+            onClearError={reservationPayments.clearError}
+          />
+        ) : null}
 
         {detail.actionError ? (
           <div className="sf-host-inline-error" role="alert">

@@ -305,7 +305,13 @@ public sealed class DevelopmentSeedService(
 
         if (reservation is null)
         {
-            reservation = new Reservation { Id = DemoDemoReservationId };
+            reservation = new Reservation
+            {
+                Id = DemoDemoReservationId,
+                Currency = "KES",
+                BookingAmount = 5000.00m
+            };
+
             dbContext.Reservations.Add(reservation);
         }
 
@@ -321,8 +327,6 @@ public sealed class DevelopmentSeedService(
         reservation.Children = 0;
         reservation.TotalGuestCount = 2;
         reservation.Status = ReservationStatus.CheckedIn;
-        reservation.Currency = "KES";
-        reservation.BookingAmount = 5000.00m;
         reservation.SpecialRequests = "Demo reservation for StayFlow AI testing";
         reservation.IsActive = true;
         reservation.IsDeleted = false;

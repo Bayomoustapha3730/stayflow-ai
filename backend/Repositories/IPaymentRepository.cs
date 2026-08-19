@@ -15,6 +15,12 @@ public interface IPaymentRepository
     Task<IReadOnlyCollection<Payment>> GetByReservationIdAsync(Guid reservationId, Guid companyId, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Primary-key lookup without tenant scoping, for callers that have no tenant context
+    /// (development-only M-PESA callback simulator). Never expose through tenant-facing endpoints.
+    /// </summary>
+    Task<Payment?> GetByIdWithoutTenantScopeAsync(Guid id, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Callback correlation lookup. Intentionally NOT tenant-scoped: the caller (anonymous webhook)
     /// has no tenant context, and CompanyId is derived from the matched Payment, never trusted from the callback.
     /// </summary>

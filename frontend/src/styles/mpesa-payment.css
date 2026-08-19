@@ -1,0 +1,209 @@
+.mpesa-payment-panel {
+  display: grid;
+  font-size: 15px;
+  gap: 18px;
+  padding: 18px;
+  margin: 12px 0;
+  border: 1px solid var(--border-color, #d7dce2);
+  border-radius: 16px;
+  background: var(--surface-color, #fff);
+}
+
+.mpesa-payment-header,
+.mpesa-payment-summary-row,
+.mpesa-payment-input-row,
+.mpesa-payment-error,
+.mpesa-payment-history li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.mpesa-payment-eyebrow,
+.mpesa-payment-label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+
+.mpesa-payment-panel .mpesa-payment-header h2,
+.mpesa-payment-panel .mpesa-payment-history h3 {
+  margin: 4px 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.mpesa-payment-header p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.mpesa-payment-summary-row strong {
+  display: block;
+  font-size: 20px;
+  margin-top: 4px;
+}
+
+.mpesa-payment-latest,
+.mpesa-payment-empty {
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(127, 127, 127, 0.08);
+  font-size: 15px;
+}
+
+.mpesa-payment-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin: 16px 0 0;
+}
+
+.mpesa-payment-details div {
+  min-width: 0;
+}
+
+.mpesa-payment-details dt {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.mpesa-payment-details dd {
+  font-size: 15px;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.payment-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  background: rgba(127, 127, 127, 0.14);
+}
+
+.payment-status-paid {
+  background: rgba(20, 145, 74, 0.14);
+}
+
+.payment-status-pending,
+.payment-status-processing {
+  background: rgba(205, 140, 0, 0.15);
+}
+
+.payment-status-failed,
+.payment-status-expired {
+  background: rgba(190, 45, 45, 0.14);
+}
+
+.payment-status-cancelled {
+  background: rgba(110, 110, 110, 0.15);
+}
+
+.mpesa-payment-form {
+  display: grid;
+  gap: 8px;
+}
+
+.mpesa-payment-form > label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mpesa-payment-input-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color, #cfd5dc);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 15px;
+}
+
+.mpesa-payment-input-row button,
+.mpesa-payment-refresh {
+  min-height: 46px;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mpesa-payment-refresh {
+  min-height: 42px;
+  padding: 8px 16px;
+  font-size: 14px;
+}
+
+.mpesa-payment-input-row button:disabled,
+.mpesa-payment-refresh:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.mpesa-payment-validation,
+.mpesa-payment-failure,
+.mpesa-payment-error {
+  margin: 0;
+  font-size: 14px;
+}
+
+.mpesa-payment-progress {
+  margin-bottom: 0;
+  margin-top: 12px;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.mpesa-payment-history ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mpesa-payment-history li {
+  padding: 12px 0;
+  border-top: 1px solid var(--border-color, #e1e4e8);
+}
+
+.mpesa-payment-history li div {
+  display: grid;
+  gap: 2px;
+}
+
+.mpesa-payment-history li strong {
+  font-size: 15px;
+}
+
+.mpesa-payment-history li span {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+@media (max-width: 700px) {
+  .mpesa-payment-header,
+  .mpesa-payment-input-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mpesa-payment-details {
+    grid-template-columns: 1fr;
+  }
+}
