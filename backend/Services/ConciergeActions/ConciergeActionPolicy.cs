@@ -60,6 +60,11 @@ public sealed class ConciergeActionPolicy(ConciergeActionsOptions options) : ICo
                     ? (true, null, null, ConciergeActionConfirmationRequirement.Both, true)
                     : (false, "ReservationRequired", "I can submit parking requests after I verify your reservation.", ConciergeActionConfirmationRequirement.None, false),
 
+            ConciergeActionType.RequestPayment =>
+                conversation.ReservationId.HasValue && conversation.PropertyId.HasValue
+                    ? (true, null, null, ConciergeActionConfirmationRequirement.ExplicitGuestConfirmation, false)
+                    : (false, "ReservationRequired", "I can send the payment request after I verify your reservation context.", ConciergeActionConfirmationRequirement.None, false),
+
             ConciergeActionType.NotifyHost =>
                 options.EnableHostNotification
                     ? (true, null, null, ConciergeActionConfirmationRequirement.ExplicitGuestConfirmation, false)

@@ -15,6 +15,7 @@ public sealed class ConciergeActionExecutor(
     HousekeepingRequestHandler housekeepingRequestHandler,
     ExtraItemRequestHandler extraItemRequestHandler,
     ParkingRequestHandler parkingRequestHandler,
+    PaymentRequestHandler paymentRequestHandler,
     HostNotificationHandler hostNotificationHandler) : IConciergeActionExecutor
 {
     public async Task<ConciergeActionExecutionResult> ExecuteAsync(PendingConciergeAction pendingAction, CancellationToken cancellationToken)
@@ -96,31 +97,46 @@ public sealed class ConciergeActionExecutor(
                 ConciergeActionType.RequestHousekeeping => await housekeepingRequestHandler.HandleAsync(pendingAction.Id, (HousekeepingRequestAction)payload, cancellationToken),
                 ConciergeActionType.RequestExtraItem => await extraItemRequestHandler.HandleAsync(pendingAction.Id, (ExtraItemRequestAction)payload, cancellationToken),
                 ConciergeActionType.RequestParking => await parkingRequestHandler.HandleAsync(pendingAction.Id, (ParkingRequestAction)payload, cancellationToken),
+                ConciergeActionType.RequestPayment => await paymentRequestHandler.HandleAsync(pendingAction.Id, (PaymentRequestAction)payload, cancellationToken),
                 ConciergeActionType.NotifyHost => await hostNotificationHandler.HandleAsync(pendingAction.Id, (HostNotificationAction)payload, cancellationToken),
                 _ => throw new InvalidOperationException("Unsupported action type.")
             };
 
-            pendingAction.Status = result.RequiresHostApproval ? PendingConciergeActionStatus.AwaitingHostApproval : PendingConciergeActionStatus.Completed;
+            pendingAction.Status = result.Status == PendingConciergeActionStatus.Failed
+                ? PendingConciergeActionStatus.Failed
+                : result.RequiresHostApproval
+                    ? PendingConciergeActionStatus.AwaitingHostApproval
+                    : PendingConciergeActionStatus.Completed;
             pendingAction.ExecutedAt = DateTimeOffset.UtcNow;
 
-            await dbContext.ActionNotificationOutbox.AddAsync(new ActionNotificationOutbox
+            if (result.Status == PendingConciergeActionStatus.Failed)
             {
-                Id = Guid.NewGuid(),
-                CompanyId = pendingAction.CompanyId,
-                ActionId = pendingAction.Id,
-                NotificationType = pendingAction.ActionType.ToString(),
-                PayloadReference = $"action:{pendingAction.Id:N}",
-                Status = ActionNotificationOutboxStatus.Pending,
-                AttemptCount = 0,
-                NextAttemptAt = DateTimeOffset.UtcNow
-            }, cancellationToken);
+                pendingAction.FailureReasonCode = result.FailureCode ?? result.GuestSafeResultCode;
+            }
+
+            if (result.Status != PendingConciergeActionStatus.Failed)
+            {
+                await dbContext.ActionNotificationOutbox.AddAsync(new ActionNotificationOutbox
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = pendingAction.CompanyId,
+                    ActionId = pendingAction.Id,
+                    NotificationType = pendingAction.ActionType.ToString(),
+                    PayloadReference = $"action:{pendingAction.Id:N}",
+                    Status = ActionNotificationOutboxStatus.Pending,
+                    AttemptCount = 0,
+                    NextAttemptAt = DateTimeOffset.UtcNow
+                }, cancellationToken);
+            }
 
             await auditService.WriteAsync(
                 pendingAction.CompanyId,
                 pendingAction.ConversationId,
                 pendingAction.Id,
                 pendingAction.ActionType,
-                ConciergeActionAuditEventType.ExecutionSucceeded,
+                result.Status == PendingConciergeActionStatus.Failed
+                    ? ConciergeActionAuditEventType.ExecutionFailed
+                    : ConciergeActionAuditEventType.ExecutionSucceeded,
                 "System",
                 tenantContext.UserId,
                 "Chat",

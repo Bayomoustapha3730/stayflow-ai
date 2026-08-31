@@ -1,7 +1,9 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIOrchestration;
 using StayFlow.Api.DTOs.Chat;
+using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
@@ -9,6 +11,7 @@ using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
 using StayFlow.Api.Services.AI.Intent;
 using StayFlow.Api.Services.AI.Orchestration;
+using StayFlow.Api.Services.ConciergeActions;
 
 namespace StayFlow.Api.Tests;
 
@@ -400,6 +403,95 @@ public sealed class ChatServiceTests
         Assert.Equal(2, fixture.Repository.Conversations.Count);
     }
 
+    [Fact]
+    public async Task ConfirmPendingActionAsync_DoesNotPersistSyntheticGuestConfirmMessage()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        fixture.ChatService = new ChatService(
+            fixture.Repository,
+            fixture.ConversationService,
+            fixture.ReplyOrchestrator,
+            fixture.TenantContext,
+            Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
+            new FakeConciergeActionOrchestrator(),
+            NullLogger<ChatService>.Instance,
+            null);
+
+        var response = await fixture.ChatService.ConfirmPendingActionAsync(
+            conversation.Id,
+            Guid.NewGuid(),
+            new ConfirmPendingActionRequest { GuestId = fixture.Guest.Id },
+            CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(ConversationSenderType.AI, response.Data!.AssistantMessage!.SenderType);
+        Assert.Equal(ConversationSenderType.System, response.Data.GuestMessage.SenderType);
+        Assert.DoesNotContain(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest && message.Content == "Confirm");
+        Assert.DoesNotContain(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest && message.Content.Contains("payment", StringComparison.OrdinalIgnoreCase));
+        Assert.Single(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.AI);
+    }
+
+    [Fact]
+    public async Task PaymentProposalAndConfirmation_PersistOnlyOriginalGuestMessageAsGuest()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        var actionId = Guid.NewGuid();
+        var actionOrchestrator = new FakeConciergeActionOrchestrator
+        {
+            HandleResult = new ConciergeActionOrchestrationResult(
+                true,
+                "I can send a payment request for 3000.00 KES to +2******0002. Should I send it?",
+                new PendingActionCardDto(
+                    actionId,
+                    ConciergeActionType.RequestPayment,
+                    PendingConciergeActionStatus.AwaitingGuestConfirmation,
+                    ConciergeActionConfirmationRequirement.ExplicitGuestConfirmation,
+                    "I can send a payment request for 3000.00 KES to +2******0002. Should I send it?",
+                    false,
+                    DateTimeOffset.UtcNow.AddMinutes(5)),
+                null,
+                false,
+                PendingConciergeActionStatus.AwaitingGuestConfirmation),
+            ConfirmResult = new ConciergeActionOrchestrationResult(
+                true,
+                "I've sent the M-PESA payment request to your phone. Please confirm it on your device.",
+                null,
+                null,
+                false,
+                PendingConciergeActionStatus.Completed)
+        };
+        fixture.ChatService = new ChatService(
+            fixture.Repository,
+            fixture.ConversationService,
+            fixture.ReplyOrchestrator,
+            fixture.TenantContext,
+            Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
+            actionOrchestrator);
+
+        var proposal = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Send me an M-PESA request."), CancellationToken.None);
+        var confirmation = await fixture.ChatService.ConfirmPendingActionAsync(
+            conversation.Id,
+            actionId,
+            new ConfirmPendingActionRequest { GuestId = fixture.Guest.Id },
+            CancellationToken.None);
+
+        Assert.True(proposal.Success);
+        Assert.True(confirmation.Success);
+        Assert.Equal(1, fixture.Repository.Messages.Count(message => message.SenderType == ConversationSenderType.Guest));
+        Assert.Contains(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest && message.Content == "Send me an M-PESA request.");
+        Assert.DoesNotContain(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest && message.Content.Contains("I can send a payment request", StringComparison.Ordinal));
+        Assert.DoesNotContain(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest && message.Content.Contains("I've sent the M-PESA payment request", StringComparison.Ordinal));
+        Assert.Equal(2, fixture.Repository.Messages.Count(message => message.SenderType == ConversationSenderType.AI));
+        Assert.Equal(ConversationSenderType.AI, confirmation.Data!.AssistantMessage!.SenderType);
+        Assert.Equal(ConversationSenderType.System, confirmation.Data.GuestMessage.SenderType);
+        Assert.Equal(1, actionOrchestrator.ConfirmCallCount);
+    }
+
     private sealed class Fixture
     {
         public Fixture()
@@ -444,7 +536,7 @@ public sealed class ChatServiceTests
         public FakeCurrentTenantContext TenantContext { get; }
         public ConversationService ConversationService { get; }
         public FakeAIReplyOrchestrator ReplyOrchestrator { get; }
-        public ChatService ChatService { get; }
+        public ChatService ChatService { get; set; }
 
         public SendChatMessageRequest Request(string message)
         {
@@ -456,6 +548,31 @@ public sealed class ChatServiceTests
                 Channel = GuestChannel.Web
             };
         }
+    }
+
+    private sealed class FakeConciergeActionOrchestrator : IConciergeActionOrchestrator
+    {
+        public ConciergeActionOrchestrationResult? HandleResult { get; init; }
+        public ConciergeActionOrchestrationResult? ConfirmResult { get; init; }
+        public int ConfirmCallCount { get; private set; }
+
+        public Task<ConciergeActionOrchestrationResult> HandleGuestMessageAsync(Guid companyId, Conversation conversation, Guid guestMessageId, string guestMessage, CancellationToken cancellationToken)
+            => Task.FromResult(HandleResult ?? new ConciergeActionOrchestrationResult(false, string.Empty, null, null, false, null));
+
+        public Task<ConciergeActionOrchestrationResult> ConfirmPendingActionAsync(Guid companyId, Guid conversationId, Guid actionId, CancellationToken cancellationToken)
+        {
+            ConfirmCallCount++;
+            return Task.FromResult(ConfirmResult ?? new ConciergeActionOrchestrationResult(
+                true,
+                "I've sent the M-PESA payment request to your phone. Please confirm it on your device.",
+                null,
+                null,
+                false,
+                PendingConciergeActionStatus.Completed));
+        }
+
+        public Task<ConciergeActionOrchestrationResult> CancelPendingActionAsync(Guid companyId, Guid conversationId, Guid actionId, CancellationToken cancellationToken)
+            => Task.FromResult(new ConciergeActionOrchestrationResult(true, "Okay, I cancelled that request.", null, null, false, PendingConciergeActionStatus.Cancelled));
     }
 
     private sealed class FakeAIReplyOrchestrator : IAIReplyOrchestrator
@@ -555,7 +672,7 @@ public sealed class ChatServiceTests
             return Task.FromResult(message);
         }
 
-        public Task<Conversation?> GetOpenConversationAsync(Guid requestedCompanyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
+        public Task<Conversation?> GetOpenConversationAsync(Guid requestedCompanyId, Guid guestId, GuestChannel channel, string? channelIdentity, Guid? reservationId, Guid? propertyId, DateTimeOffset cutoff, CancellationToken cancellationToken)
         {
             return Task.FromResult(Conversations.FirstOrDefault(conversation =>
                 conversation.CompanyId == requestedCompanyId
@@ -563,7 +680,8 @@ public sealed class ChatServiceTests
                 && conversation.Channel == channel
                 && conversation.ChannelIdentity == channelIdentity
                 && conversation.Status != ConversationStatus.Closed
-                && conversation.LastActivityAt >= cutoff));
+                && conversation.LastActivityAt >= cutoff
+                && (reservationId == null ? conversation.ReservationId == null || propertyId == null || conversation.PropertyId == propertyId : conversation.ReservationId == reservationId)));
         }
 
         public Task<PagedResult<ConversationMessage>> GetMessagesAsync(Guid requestedCompanyId, Guid conversationId, ConversationHistoryQueryParameters query, CancellationToken cancellationToken)

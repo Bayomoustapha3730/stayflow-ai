@@ -637,14 +637,15 @@ public sealed class GuestWidgetGroundedReplyTests
             return Task.FromResult(message);
         }
 
-        public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
+        public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, Guid? reservationId, Guid? propertyId, DateTimeOffset cutoff, CancellationToken cancellationToken)
         {
             var conversation = Conversations.FirstOrDefault(item => item.CompanyId == companyId
                 && item.GuestId == guestId
                 && item.Channel == channel
                 && item.ChannelIdentity == channelIdentity
                 && item.Status != ConversationStatus.Closed
-                && item.LastActivityAt >= cutoff);
+                && item.LastActivityAt >= cutoff
+                && (reservationId == null ? item.ReservationId == null || propertyId == null || item.PropertyId == propertyId : item.ReservationId == reservationId));
             return Task.FromResult(conversation);
         }
 

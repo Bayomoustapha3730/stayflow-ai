@@ -290,6 +290,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.ConciergeActions.HousekeepingRequestHandler>();
         services.AddScoped<Services.ConciergeActions.ExtraItemRequestHandler>();
         services.AddScoped<Services.ConciergeActions.ParkingRequestHandler>();
+        services.AddScoped<Services.ConciergeActions.PaymentRequestHandler>();
         services.AddScoped<Services.ConciergeActions.HostNotificationHandler>();
         services.AddScoped<Services.ConciergeActions.IConciergeActionExecutor, Services.ConciergeActions.ConciergeActionExecutor>();
         services.AddScoped<Services.ConciergeActions.IConciergeActionOrchestrator, Services.ConciergeActions.ConciergeActionOrchestrator>();

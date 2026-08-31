@@ -1,7 +1,10 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using StayFlow.Api.Data;
+using StayFlow.Api.DTOs.Payments;
 using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.Models;
+using StayFlow.Api.Services.Payments;
 
 namespace StayFlow.Api.Services.ConciergeActions;
 
@@ -173,6 +176,63 @@ public sealed class HostNotificationHandler(ApplicationDbContext dbContext) : IC
     }
 }
 
+public sealed class PaymentRequestHandler(
+    ApplicationDbContext dbContext,
+    IPaymentService paymentService,
+    IReservationPaymentGroundingService paymentGroundingService) : IConciergeActionHandler<PaymentRequestAction>
+{
+    public ConciergeActionType ActionType => ConciergeActionType.RequestPayment;
+
+    public async Task<ConciergeActionExecutionResult> HandleAsync(Guid pendingActionId, PaymentRequestAction action, CancellationToken cancellationToken)
+    {
+        var pendingAction = await dbContext.PendingConciergeActions.FindAsync([pendingActionId], cancellationToken);
+        if (pendingAction is null)
+        {
+            return new ConciergeActionExecutionResult(pendingActionId, ActionType, PendingConciergeActionStatus.Failed, false, false, null, false, false, ConciergeActionResponseCodes.InvalidRequest, "MissingPendingAction", null);
+        }
+
+        if (pendingAction.ReservationId is not { } reservationId || reservationId == Guid.Empty)
+        {
+            return new ConciergeActionExecutionResult(pendingActionId, ActionType, PendingConciergeActionStatus.Failed, false, false, null, false, false, ConciergeActionResponseCodes.InvalidRequest, "ReservationRequired", null);
+        }
+
+        var grounding = await paymentGroundingService.GetReservationPaymentGroundingAsync(reservationId, pendingAction.CompanyId, cancellationToken);
+        if (grounding is null)
+        {
+            return new ConciergeActionExecutionResult(pendingActionId, ActionType, PendingConciergeActionStatus.Failed, false, false, null, false, false, ConciergeActionResponseCodes.ActionNotAllowed, "PaymentGroundingUnavailable", null);
+        }
+
+        if (grounding.RemainingBalance is <= 0m)
+        {
+            return new ConciergeActionExecutionResult(pendingActionId, ActionType, PendingConciergeActionStatus.Completed, false, false, null, false, false, ConciergeActionResponseCodes.AlreadySubmitted, "AlreadyPaid", DateTimeOffset.UtcNow);
+        }
+
+        var reservation = await dbContext.Reservations
+            .Include(item => item.PrimaryGuest)
+            .FirstOrDefaultAsync(item => item.Id == reservationId && item.CompanyId == pendingAction.CompanyId, cancellationToken);
+        if (reservation is null)
+        {
+            return new ConciergeActionExecutionResult(pendingActionId, ActionType, PendingConciergeActionStatus.Failed, false, false, null, false, false, ConciergeActionResponseCodes.ActionNotAllowed, "ReservationNotFound", null);
+        }
+
+        var response = await paymentService.InitiateMpesaPaymentAsync(new InitiateMpesaPaymentRequest
+        {
+            ReservationId = reservationId,
+            CustomerPhoneNumber = reservation.PrimaryGuest.PhoneNumber ?? string.Empty,
+            AmountOverride = grounding.RemainingBalance,
+            Description = string.IsNullOrWhiteSpace(action.Description) ? "Guest payment request" : action.Description,
+            IdempotencyKey = $"guest-payment:{pendingAction.Id:N}"
+        }, cancellationToken);
+
+        if (!response.Success || response.Data is null)
+        {
+            return new ConciergeActionExecutionResult(pendingActionId, ActionType, PendingConciergeActionStatus.Failed, false, false, null, false, false, response.Message ?? ConciergeActionResponseCodes.InvalidRequest, "PaymentRequestRejected", null);
+        }
+
+        return new ConciergeActionExecutionResult(pendingActionId, ActionType, PendingConciergeActionStatus.Completed, true, false, response.Data.Id, false, false, ConciergeActionResponseCodes.PaymentRequestSubmitted, null, DateTimeOffset.UtcNow);
+    }
+}
+
 public static class ConciergeActionSerialization
 {
     public static string Serialize(object value) => JsonSerializer.Serialize(value);
@@ -187,6 +247,7 @@ public static class ConciergeActionSerialization
             ConciergeActionType.RequestHousekeeping => JsonSerializer.Deserialize<HousekeepingRequestAction>(payload)!,
             ConciergeActionType.RequestExtraItem => JsonSerializer.Deserialize<ExtraItemRequestAction>(payload)!,
             ConciergeActionType.RequestParking => JsonSerializer.Deserialize<ParkingRequestAction>(payload)!,
+            ConciergeActionType.RequestPayment => JsonSerializer.Deserialize<PaymentRequestAction>(payload)!,
             ConciergeActionType.NotifyHost => JsonSerializer.Deserialize<HostNotificationAction>(payload)!,
             _ => throw new InvalidOperationException("Unsupported action payload.")
         };

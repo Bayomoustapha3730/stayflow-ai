@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace StayFlow.Api.DTOs.Payments;
 
@@ -9,6 +10,9 @@ public sealed class InitiateMpesaPaymentRequest
 
     [Required, StringLength(32)]
     public string CustomerPhoneNumber { get; init; } = string.Empty;
+
+    [JsonIgnore]
+    public decimal? AmountOverride { get; init; }
 
     [StringLength(160)]
     public string? Description { get; init; }

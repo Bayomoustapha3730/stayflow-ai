@@ -17,6 +17,25 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    # Ephemeral PostgreSQL for ConciergeActionOrchestratorPaymentRetryTests, which needs real
+    # unique-constraint enforcement (EF InMemory doesn't enforce it). Reachable at localhost:5432
+    # from job steps since this job runs directly on the runner, matching the test's default
+    # maintenance connection fallback (overridable via STAYFLOW_TEST_POSTGRES_CONNECTION).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
     steps:
     - uses: actions/checkout@v4
     - name: Setup .NET

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using StayFlow.Api.Data;
+using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Services;
@@ -18,6 +19,9 @@ public sealed class DevelopmentSeedService(
     private static readonly Guid DemoDemoUserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid DemoDemoGuestId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid DemoDemoReservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid DemoPayReservationId = Guid.Parse("55555555-5555-5555-5555-555555555556");
+    private static readonly Guid DemoPayPaymentId = Guid.Parse("77777777-7777-4777-8777-777777777771");
+    private static readonly Guid DemoPayConversationId = Guid.Parse("cccccccc-cccc-4ccc-8ccc-cccccccccc01");
     private static readonly Guid DemoDemoRoleId = Guid.Parse("66666666-6666-6666-6666-666666666666");
     private static readonly Guid DemoSubscriptionId = Guid.Parse("99999999-9999-4999-8999-999999999999");
     private static readonly Guid DemoWhatsAppIntegrationId = Guid.Parse("77777777-7777-7777-7777-777777777777");
@@ -32,6 +36,8 @@ public sealed class DevelopmentSeedService(
     private const string DemoUserEmail = "demo.user@stayflow.local";
     private const string DemoUserFullName = "Demo User";
     private const string DemoReservationReference = "DEMO-2026-001";
+    private const string DemoPayReservationReference = "DEMO-PAY-002";
+    private const string DemoPayReceiptNumber = "STAYFLOWDEVSEED001";
     private const string DemoRoleName = "Demo Administrator";
     private const string DemoOrganizationRole = nameof(OrganizationRole.Owner);
     private const string OnboardingTestUserEmail = "onboarding.user@stayflow.local";
@@ -53,6 +59,7 @@ public sealed class DevelopmentSeedService(
 
         var currentDate = DateOnly.FromDateTime(DateTime.UtcNow);
         await EnsureDemoReservationAsync(currentDate, cancellationToken);
+        await EnsureDemoPayReservationAsync(currentDate, cancellationToken);
         await EnsureDemoSubscriptionAsync(cancellationToken);
         await EnsureDemoPropertyKnowledgeAsync(cancellationToken);
         await EnsureDemoWhatsAppIntegrationAsync(cancellationToken);
@@ -332,6 +339,136 @@ public sealed class DevelopmentSeedService(
         reservation.IsDeleted = false;
         reservation.DeletedAt = null;
         reservation.DeletedBy = null;
+    }
+
+    private async Task EnsureDemoPayReservationAsync(DateOnly currentDate, CancellationToken cancellationToken)
+    {
+        var reservation = await dbContext.Reservations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(r => r.Id == DemoPayReservationId, cancellationToken);
+
+        if (reservation is null)
+        {
+            reservation = new Reservation
+            {
+                Id = DemoPayReservationId,
+                Currency = "KES",
+                BookingAmount = 4000.00m
+            };
+
+            dbContext.Reservations.Add(reservation);
+        }
+
+        reservation.CompanyId = SeedData.DemoCompanyId;
+        reservation.PropertyId = SeedData.DemoPropertyId;
+        reservation.PrimaryGuestId = DemoDemoGuestId;
+        reservation.ExternalReservationReference = DemoPayReservationReference;
+        reservation.ReservationSource = "DemoSeed";
+        reservation.ConfirmationNumber = DemoPayReservationReference;
+        reservation.CheckInDate = currentDate.AddDays(2);
+        reservation.CheckOutDate = currentDate.AddDays(5);
+        reservation.Adults = 2;
+        reservation.Children = 0;
+        reservation.TotalGuestCount = 2;
+        reservation.Status = ReservationStatus.PreArrival;
+        reservation.SpecialRequests = "Development-only payment seed for M-PESA phase 2 testing";
+        reservation.IsActive = true;
+        reservation.IsDeleted = false;
+        reservation.DeletedAt = null;
+        reservation.DeletedBy = null;
+
+        await EnsureDemoPayConversationAsync(cancellationToken);
+        await EnsureDemoPayPaymentAsync(cancellationToken);
+    }
+
+    private async Task EnsureDemoPayConversationAsync(CancellationToken cancellationToken)
+    {
+        var conversation = await dbContext.Conversations
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.Id == DemoPayConversationId, cancellationToken);
+
+        if (conversation is null)
+        {
+            conversation = new Conversation
+            {
+                Id = DemoPayConversationId,
+                CompanyId = SeedData.DemoCompanyId,
+                GuestId = DemoDemoGuestId,
+                ReservationId = DemoPayReservationId,
+                PropertyId = SeedData.DemoPropertyId,
+                Channel = GuestChannel.Web,
+                ChannelIdentity = "demo-pay-seeded-web",
+                Subject = "Demo M-PESA payment follow-up"
+            };
+
+            dbContext.Conversations.Add(conversation);
+        }
+
+        conversation.CompanyId = SeedData.DemoCompanyId;
+        conversation.GuestId = DemoDemoGuestId;
+        conversation.ReservationId = DemoPayReservationId;
+        conversation.PropertyId = SeedData.DemoPropertyId;
+        conversation.Channel = GuestChannel.Web;
+        conversation.ChannelIdentity = "demo-pay-seeded-web";
+        conversation.Status = ConversationStatus.Open;
+        conversation.Subject = "Demo M-PESA payment follow-up";
+        conversation.HumanTakeoverEnabled = true;
+        conversation.IsDeleted = false;
+        conversation.DeletedAt = null;
+        conversation.DeletedBy = null;
+        conversation.StartedAt = conversation.StartedAt == default ? DateTimeOffset.UtcNow : conversation.StartedAt;
+        conversation.LastActivityAt = DateTimeOffset.UtcNow;
+        conversation.ReservationContextBoundAt ??= DateTimeOffset.UtcNow;
+    }
+
+    private async Task EnsureDemoPayPaymentAsync(CancellationToken cancellationToken)
+    {
+        var payment = await dbContext.Payments
+            .FirstOrDefaultAsync(p => p.Id == DemoPayPaymentId || p.ProviderTransactionId == DemoPayReceiptNumber, cancellationToken);
+
+        if (payment is null)
+        {
+            payment = new Payment
+            {
+                Id = DemoPayPaymentId,
+                CompanyId = SeedData.DemoCompanyId,
+                PropertyId = SeedData.DemoPropertyId,
+                GuestId = DemoDemoGuestId,
+                ReservationId = DemoPayReservationId,
+                Currency = "KES",
+                Amount = 1000.00m,
+                Provider = "M-PESA",
+                ProviderEnvironment = "Sandbox",
+                PaymentMethod = "STKPush",
+                ProviderTransactionId = DemoPayReceiptNumber,
+                Status = PaymentStatus.Paid.ToStorageValue(),
+                RequestedAtUtc = DateTimeOffset.UtcNow,
+                CompletedAtUtc = DateTimeOffset.UtcNow
+            };
+
+            dbContext.Payments.Add(payment);
+        }
+
+        payment.CompanyId = SeedData.DemoCompanyId;
+        payment.PropertyId = SeedData.DemoPropertyId;
+        payment.GuestId = DemoDemoGuestId;
+        payment.ReservationId = DemoPayReservationId;
+        payment.Currency = "KES";
+        payment.Amount = 1000.00m;
+        payment.Provider = "M-PESA";
+        payment.ProviderEnvironment = "Sandbox";
+        payment.PaymentMethod = "STKPush";
+        payment.ProviderTransactionId = DemoPayReceiptNumber;
+        payment.Status = PaymentStatus.Paid.ToStorageValue();
+        payment.RequestedAtUtc ??= DateTimeOffset.UtcNow;
+        payment.CompletedAtUtc ??= DateTimeOffset.UtcNow;
+        payment.FailureCode = null;
+        payment.FailureMessage = null;
+        payment.FailedAtUtc = null;
+        payment.CancelledAtUtc = null;
+        payment.ExternalReference ??= DemoPayReservationReference;
+        payment.InternalReference ??= DemoPayReservationReference;
+        payment.CustomerPhoneNumber ??= "+254700000002";
     }
 
     private async Task EnsureDemoUserRoleAsync(Guid userId, Guid roleId, CancellationToken cancellationToken)

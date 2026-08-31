@@ -3,9 +3,12 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.InMemory;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using StayFlow.Api.Data;
 using StayFlow.Api.Models;
+using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
+using StayFlow.Api.Services.Payments;
 
 namespace StayFlow.Api.Tests;
 
@@ -14,9 +17,14 @@ public sealed class DevelopmentSeedServiceTests
     private static readonly Guid DemoDemoUserId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid DemoDemoGuestId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid DemoDemoReservationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid DemoPayReservationId = Guid.Parse("55555555-5555-5555-5555-555555555556");
+    private static readonly Guid DemoPayPaymentId = Guid.Parse("77777777-7777-4777-8777-777777777771");
+    private static readonly Guid DemoPayConversationId = Guid.Parse("cccccccc-cccc-4ccc-8ccc-cccccccccc01");
     private static readonly Guid OnboardingTestCompanyId = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1");
     private static readonly Guid OnboardingTestUserId = Guid.Parse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1");
     private const string DemoOrganizationRole = "Owner";
+    private const string DemoPayConfirmationNumber = "DEMO-PAY-002";
+    private const string DemoPayReceiptNumber = "STAYFLOWDEVSEED001";
 
     private const string DemoUserEmail = "demo.user@stayflow.local";
     private const string DemoUserFullName = "Demo User";
@@ -231,6 +239,72 @@ public sealed class DevelopmentSeedServiceTests
         var demoReservation = await dbContext.Reservations.FirstOrDefaultAsync(r => r.Id == DemoDemoReservationId);
         Assert.NotNull(demoReservation);
         Assert.Equal(ReservationStatus.CheckedIn, demoReservation.Status);
+    }
+
+    [Fact]
+    public async Task SeedAsync_WithConfiguredPassword_SeedsDemoPayReservationWithPaidMpesaPayment()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?> { ["DevelopmentSeed:DemoPassword"] = TestPassword });
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        var reservation = await dbContext.Reservations.SingleAsync(r => r.Id == DemoPayReservationId);
+        Assert.Equal(DemoPayConfirmationNumber, reservation.ConfirmationNumber);
+        Assert.Equal("KES", reservation.Currency);
+        Assert.Equal(4000.00m, reservation.BookingAmount);
+        Assert.Equal(SeedData.DemoCompanyId, reservation.CompanyId);
+        Assert.Equal(SeedData.DemoPropertyId, reservation.PropertyId);
+        Assert.Equal(DemoDemoGuestId, reservation.PrimaryGuestId);
+
+        var payment = await dbContext.Payments.SingleAsync(p => p.Id == DemoPayPaymentId);
+        Assert.Equal("M-PESA", payment.Provider);
+        Assert.Equal(1000.00m, payment.Amount);
+        Assert.Equal("KES", payment.Currency);
+        Assert.Equal(PaymentStatus.Paid.ToStorageValue(), payment.Status);
+        Assert.Equal(DemoPayReceiptNumber, payment.ProviderTransactionId);
+        Assert.NotNull(payment.CompletedAtUtc);
+        Assert.Null(payment.FailureCode);
+        Assert.Null(payment.FailureMessage);
+        Assert.Null(payment.FailedAtUtc);
+        Assert.Null(payment.CancelledAtUtc);
+        Assert.Equal(DemoPayReservationId, payment.ReservationId);
+
+        var conversation = await dbContext.Conversations.SingleAsync(c => c.Id == DemoPayConversationId);
+        Assert.Equal(SeedData.DemoCompanyId, conversation.CompanyId);
+        Assert.Equal(DemoDemoGuestId, conversation.GuestId);
+        Assert.Equal(DemoPayReservationId, conversation.ReservationId);
+        Assert.Equal(SeedData.DemoPropertyId, conversation.PropertyId);
+
+        var groundingService = new ReservationPaymentGroundingService(new PaymentRepository(dbContext), NullLogger<ReservationPaymentGroundingService>.Instance);
+        var grounding = await groundingService.GetReservationPaymentGroundingAsync(DemoPayReservationId, SeedData.DemoCompanyId, CancellationToken.None);
+
+        Assert.NotNull(grounding);
+        Assert.Equal(1000m, grounding.TotalPaid);
+        Assert.Equal(3000m, grounding.RemainingBalance);
+        Assert.True(grounding.HasSuccessfulPayment);
+        Assert.Equal(PaymentStatus.Paid.ToStorageValue(), grounding.LatestPaymentStatus);
+    }
+
+    [Fact]
+    public async Task SeedAsync_DemoPayReservationAndPayment_AreIdempotent()
+    {
+        var dbContext = CreateInMemoryDbContext();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?> { ["DevelopmentSeed:DemoPassword"] = TestPassword });
+
+        await seeder.SeedAsync(CancellationToken.None);
+        var firstRunReservationCount = await dbContext.Reservations.CountAsync(r => r.Id == DemoPayReservationId);
+        var firstRunPaymentCount = await dbContext.Payments.CountAsync(p => p.Id == DemoPayPaymentId || p.ProviderTransactionId == DemoPayReceiptNumber);
+        var firstRunConversationCount = await dbContext.Conversations.CountAsync(c => c.Id == DemoPayConversationId || c.ReservationId == DemoPayReservationId);
+
+        await seeder.SeedAsync(CancellationToken.None);
+        var secondRunReservationCount = await dbContext.Reservations.CountAsync(r => r.Id == DemoPayReservationId);
+        var secondRunPaymentCount = await dbContext.Payments.CountAsync(p => p.Id == DemoPayPaymentId || p.ProviderTransactionId == DemoPayReceiptNumber);
+        var secondRunConversationCount = await dbContext.Conversations.CountAsync(c => c.Id == DemoPayConversationId || c.ReservationId == DemoPayReservationId);
+
+        Assert.Equal(firstRunReservationCount, secondRunReservationCount);
+        Assert.Equal(firstRunPaymentCount, secondRunPaymentCount);
+        Assert.Equal(firstRunConversationCount, secondRunConversationCount);
     }
 
     [Fact]

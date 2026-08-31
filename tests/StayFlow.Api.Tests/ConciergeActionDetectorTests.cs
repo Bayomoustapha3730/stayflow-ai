@@ -14,6 +14,7 @@ public sealed class ConciergeActionDetectorTests
     [InlineData("Can I get two towels?", ConciergeActionType.RequestExtraItem)]
     [InlineData("Please clean the room tomorrow.", ConciergeActionType.RequestHousekeeping)]
     [InlineData("I need parking for two cars.", ConciergeActionType.RequestParking)]
+    [InlineData("Send me an M-PESA request so I can pay the balance.", ConciergeActionType.RequestPayment)]
     [InlineData("Tell the host I'll arrive late.", ConciergeActionType.NotifyHost)]
     public void Detect_ExplicitRequests_MapToExpectedActions(string message, ConciergeActionType expected)
     {

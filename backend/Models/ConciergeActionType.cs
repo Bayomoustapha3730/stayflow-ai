@@ -9,5 +9,6 @@ public enum ConciergeActionType
     RequestHousekeeping = 4,
     RequestExtraItem = 5,
     RequestParking = 6,
-    NotifyHost = 7
+    NotifyHost = 7,
+    RequestPayment = 8
 }

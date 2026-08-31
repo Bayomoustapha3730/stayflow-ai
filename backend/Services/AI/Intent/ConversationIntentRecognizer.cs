@@ -36,6 +36,29 @@ public sealed class ConversationIntentRecognizer : IConversationIntentRecognizer
         "access code"
     ];
 
+    private static readonly string[] ExplicitPaymentActionPhrases =
+    [
+        "i want to pay",
+        "i want to make a payment",
+        "i need to pay",
+        "i still owe money and want to pay",
+        "send me an mpesa request",
+        "send me an m-pesa request",
+        "send me the mpesa prompt",
+        "send me the m-pesa prompt",
+        "send the payment request to my phone",
+        "can i pay now",
+        "let me pay",
+        "pay now",
+        "make a payment",
+        "retry my payment",
+        "my payment failed let me try again",
+        "i want to pay send me an mpesa request",
+        "i want to pay send me an m-pesa request",
+        "i want to pay send me a payment request",
+        "send me a payment request"
+    ];
+
     private static readonly IReadOnlyDictionary<GuestIntent, string[]> IntentPhrases =
         new Dictionary<GuestIntent, string[]>
         {
@@ -103,7 +126,11 @@ public sealed class ConversationIntentRecognizer : IConversationIntentRecognizer
                 "what is the status of my payment", "what is the status of my mpesa payment", "what is the status of my m pesa payment",
                 "what is my mpesa receipt", "what is my m pesa receipt", "i already paid", "i paid", "already paid",
                 "have i paid", "have i already paid", "did i pay", "how much did i pay", "can you check if i paid",
-                "payment received", "payment confirmation", "paid amount", "amount paid"
+                "payment received", "payment confirmation", "paid amount", "amount paid",
+                "i want to pay", "i want to make a payment", "i need to pay", "let me pay", "can i pay now",
+                "send me an mpesa request", "send me an m-pesa request", "send me the mpesa prompt", "send me the m-pesa prompt",
+                "send me a payment request", "send the payment request to my phone", "retry my payment",
+                "my payment failed let me try again", "i still owe money and want to pay"
             ],
             [GuestIntent.HostContact] = ["host", "contact host", "call host", "message host"],
             [GuestIntent.GeneralQuestion] = ["can you help me", "i have a question", "general question", "need help with"],
@@ -150,6 +177,7 @@ public sealed class ConversationIntentRecognizer : IConversationIntentRecognizer
         var hasCredentialRequest = ContainsAnyPhrase(normalized, CredentialRequestPhrases);
         var hasAmbiguousAccess = ContainsAnyPhrase(normalized, AmbiguousAccessPhrases);
         var directPropertyEntryRequest = IsDirectPropertyEntryRequest(normalized);
+        var isExplicitPaymentActionRequest = IsExplicitPaymentActionRequest(normalized);
         var hasConnectQuestion = ContainsPhrase(normalized, "how do i connect")
             || ContainsPhrase(normalized, "how can i connect")
             || normalized == "connect"
@@ -210,6 +238,13 @@ public sealed class ConversationIntentRecognizer : IConversationIntentRecognizer
             var score = 0d;
             var signals = new HashSet<string>(StringComparer.Ordinal);
             var firstPos = int.MaxValue;
+
+            if (pair.Key == GuestIntent.Payment && isExplicitPaymentActionRequest)
+            {
+                score += 7.5;
+                signals.Add("action:explicit-payment-request");
+                firstPos = 0;
+            }
 
             if (pair.Key == GuestIntent.Reservation
                 && (normalized.Contains("extend", StringComparison.Ordinal)
@@ -479,6 +514,26 @@ public sealed class ConversationIntentRecognizer : IConversationIntentRecognizer
             || ContainsPhrase(normalized, "how do i get inside")
             || ContainsPhrase(normalized, "how to enter")
             || ContainsPhrase(normalized, "comment entrer");
+    }
+
+    private static bool IsExplicitPaymentActionRequest(string normalized)
+    {
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return false;
+        }
+
+        return ContainsAnyPhrase(normalized, ExplicitPaymentActionPhrases)
+            || normalized.Contains("pay now", StringComparison.Ordinal)
+            || normalized.Contains("send me the payment prompt", StringComparison.Ordinal)
+            || normalized.Contains("send payment request", StringComparison.Ordinal)
+            || normalized.Contains("i want to pay", StringComparison.Ordinal)
+            || normalized.Contains("want to pay", StringComparison.Ordinal)
+            || normalized.Contains("let me pay", StringComparison.Ordinal)
+            || normalized.Contains("can i pay now", StringComparison.Ordinal)
+            || normalized.Contains("retry my payment", StringComparison.Ordinal)
+            || normalized.Contains("my payment failed", StringComparison.Ordinal)
+            || normalized.Contains("still owe money and want to pay", StringComparison.Ordinal);
     }
 
     private static bool IsContextDependentFollowUp(string normalized, IReadOnlyCollection<string> tokens)

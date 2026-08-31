@@ -218,15 +218,28 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
                 && message.Id == messageId, cancellationToken);
     }
 
-    public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
+    public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, Guid? reservationId, Guid? propertyId, DateTimeOffset cutoff, CancellationToken cancellationToken)
     {
-        return dbContext.Conversations
+        var query = dbContext.Conversations
             .Where(conversation => conversation.CompanyId == companyId
                 && conversation.GuestId == guestId
                 && conversation.Channel == channel
                 && conversation.Status != ConversationStatus.Closed
                 && conversation.LastActivityAt >= cutoff)
-            .Where(conversation => conversation.ChannelIdentity == channelIdentity)
+            .Where(conversation => conversation.ChannelIdentity == channelIdentity);
+
+        if (reservationId is { } requestedReservationId)
+        {
+            // An explicit reservation was requested: only reuse a conversation already bound to that reservation.
+            query = query.Where(conversation => conversation.ReservationId == requestedReservationId);
+        }
+        else if (propertyId is { } requestedPropertyId)
+        {
+            // No reservation, but an explicit property was requested: avoid cross-property reuse.
+            query = query.Where(conversation => conversation.PropertyId == requestedPropertyId);
+        }
+
+        return query
             .OrderByDescending(conversation => conversation.LastActivityAt)
             .FirstOrDefaultAsync(cancellationToken);
     }

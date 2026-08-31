@@ -14,6 +14,7 @@ public sealed class ConciergeActionResultFormatter : IConciergeActionResultForma
             ConciergeActionResponseCodes.HousekeepingRequestSubmitted => "Your housekeeping request has been submitted.",
             ConciergeActionResponseCodes.ExtraItemRequestSubmitted => "Your extra-item request has been submitted.",
             ConciergeActionResponseCodes.ParkingRequestSubmitted => "I've submitted your parking request. The host will confirm availability.",
+            ConciergeActionResponseCodes.PaymentRequestSubmitted => "I've sent the M-PESA payment request to your phone. Please confirm it on your device.",
             ConciergeActionResponseCodes.HostNotified => "I've notified the host.",
             ConciergeActionResponseCodes.AlreadySubmitted => "That request was already submitted.",
             ConciergeActionResponseCodes.ActionNotAllowed => "I'm unable to submit that request for this reservation.",

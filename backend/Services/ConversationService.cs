@@ -94,7 +94,7 @@ public sealed class ConversationService(
         var now = DateTimeOffset.UtcNow;
         var normalizedIdentity = NormalizeIdentity(request.ChannelIdentity);
         var cutoff = now.AddMinutes(-options.Value.ReuseOpenConversationMinutes);
-        var existing = await conversationRepository.GetOpenConversationAsync(companyId, request.GuestId, request.Channel, normalizedIdentity, cutoff, cancellationToken);
+        var existing = await conversationRepository.GetOpenConversationAsync(companyId, request.GuestId, request.Channel, normalizedIdentity, request.ReservationId, request.PropertyId, cutoff, cancellationToken);
         if (existing is not null)
         {
             return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(existing), "Conversation retrieved successfully.");

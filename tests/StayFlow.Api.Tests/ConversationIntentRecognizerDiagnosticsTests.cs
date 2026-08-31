@@ -58,6 +58,12 @@ public sealed class ConversationIntentRecognizerDiagnosticsTests
     [InlineData("What is my M-PESA receipt?", GuestIntent.Payment)]
     [InlineData("I already paid. Can you check?", GuestIntent.Payment)]
     [InlineData("How can I pay?", GuestIntent.Payment)]
+    [InlineData("I want to pay", GuestIntent.Payment)]
+    [InlineData("I want to pay send me an M-PESA request", GuestIntent.Payment)]
+    [InlineData("Send me an M-PESA request", GuestIntent.Payment)]
+    [InlineData("Can I pay now?", GuestIntent.Payment)]
+    [InlineData("Let me pay", GuestIntent.Payment)]
+    [InlineData("Retry my payment", GuestIntent.Payment)]
     [InlineData("What color are the curtains?", GuestIntent.Unknown)]
     public void Recognize_ExpectedPrimaryIntent_WithDiagnostics(string query, GuestIntent expected)
     {
@@ -114,6 +120,36 @@ public sealed class ConversationIntentRecognizerDiagnosticsTests
         Assert.Equal(GuestIntent.WiFi, result.PrimaryIntent);
         Assert.Contains(GuestIntent.Checkout, result.SecondaryIntents);
         Assert.False(result.IsAmbiguous);
+    }
+
+    [Theory]
+    [InlineData("I want to pay")]
+    [InlineData("I want to pay send me an M-PESA request")]
+    [InlineData("Send me an M-PESA request")]
+    [InlineData("Can I pay now?")]
+    [InlineData("Let me pay")]
+    [InlineData("Retry my payment")]
+    public void Recognize_ExplicitPaymentActionRequests_AddActionSignal(string query)
+    {
+        var recognizer = new ConversationIntentRecognizer();
+        var result = recognizer.Recognize(query, maximumIntents: 3);
+
+        Assert.Equal(GuestIntent.Payment, result.PrimaryIntent);
+        Assert.Contains("action:explicit-payment-request", result.MatchedSignals, StringComparer.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Did you receive my payment?")]
+    [InlineData("How much have I paid?")]
+    [InlineData("How much do I still owe?")]
+    [InlineData("What is my M-PESA receipt?")]
+    public void Recognize_ReadOnlyPaymentQuestions_DoNotAddActionSignal(string query)
+    {
+        var recognizer = new ConversationIntentRecognizer();
+        var result = recognizer.Recognize(query, maximumIntents: 3);
+
+        Assert.Equal(GuestIntent.Payment, result.PrimaryIntent);
+        Assert.DoesNotContain("action:explicit-payment-request", result.MatchedSignals, StringComparer.Ordinal);
     }
 
     private static void AssertScoreBeatsUnknown(string query, GuestIntent expected)

@@ -77,13 +77,13 @@ public sealed class ReservationPaymentGroundingService(
             LatestPaymentStatus = latestPayment?.Status,
             LatestPaymentAmount = latestPayment?.Amount,
             LatestPaymentRequestedAtUtc = latestPayment?.RequestedAtUtc ?? latestPayment?.CreatedAt,
-            LatestPaymentCompletedAtUtc = latestPayment?.Status.ToPaymentStatus() == PaymentStatus.Paid
+            LatestPaymentCompletedAtUtc = latestPayment?.Status is { } status && status.ToPaymentStatus() == PaymentStatus.Paid
                 ? latestPayment.CompletedAtUtc
                 : null,
             LatestProvider = latestPayment?.Provider,
             LatestPaymentMethod = latestPayment?.PaymentMethod,
             LatestReceiptNumber = latestReceiptNumber,
-            LatestFailureMessage = latestPayment?.Status.ToPaymentStatus() == PaymentStatus.Failed
+            LatestFailureMessage = latestPayment?.Status is { } failureStatus && failureStatus.ToPaymentStatus() == PaymentStatus.Failed
                 ? latestPayment.FailureMessage
                 : null
         };

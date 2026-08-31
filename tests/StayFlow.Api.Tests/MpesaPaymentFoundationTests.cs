@@ -136,6 +136,34 @@ public sealed class MpesaPaymentFoundationTests
         Assert.Equal("KES", repository.AddedPayment.Currency);
     }
 
+    [Theory]
+    [InlineData(PaymentStatus.Failed)]
+    [InlineData(PaymentStatus.Cancelled)]
+    public async Task Initiate_AfterTerminalAttempt_CreatesANewPayment(PaymentStatus previousStatus)
+    {
+        var companyId = Guid.NewGuid();
+        var reservation = CreateReservation(companyId, 4000m, "KES");
+        var previousPayment = CreatePayment(companyId, previousStatus.ToStorageValue());
+        previousPayment.ReservationId = reservation.Id;
+        previousPayment.Amount = 3000m;
+        var repository = new FakePaymentRepository(previousPayment, reservation);
+        var service = CreateService(repository, companyId);
+
+        var result = await service.InitiateMpesaPaymentAsync(new InitiateMpesaPaymentRequest
+        {
+            ReservationId = reservation.Id,
+            CustomerPhoneNumber = "0712345678",
+            AmountOverride = 3000m,
+            IdempotencyKey = $"retry-{previousStatus}"
+        }, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.NotNull(repository.AddedPayment);
+        Assert.NotEqual(previousPayment.Id, repository.AddedPayment!.Id);
+        Assert.Equal(3000m, repository.AddedPayment.Amount);
+        Assert.Equal(previousStatus.ToStorageValue(), previousPayment.Status);
+    }
+
     [Fact]
     public async Task Initiate_RejectsReservationWithoutAValidAmount()
     {

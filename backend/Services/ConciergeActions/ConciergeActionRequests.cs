@@ -51,6 +51,15 @@ public sealed record ParkingRequestAction(
     DateOnly? RequestedTo,
     string? GuestNote);
 
+public sealed record PaymentRequestAction(
+    Guid ConversationId,
+    Guid ReservationId,
+    Guid PropertyId,
+    string CustomerPhoneNumber,
+    decimal AmountDue,
+    string Currency,
+    string? Description);
+
 public sealed record HostNotificationAction(
     Guid ConversationId,
     Guid? ReservationId,

@@ -8,6 +8,7 @@ public static class ConciergeActionResponseCodes
     public const string HousekeepingRequestSubmitted = "HousekeepingRequestSubmitted";
     public const string ExtraItemRequestSubmitted = "ExtraItemRequestSubmitted";
     public const string ParkingRequestSubmitted = "ParkingRequestSubmitted";
+    public const string PaymentRequestSubmitted = "PaymentRequestSubmitted";
     public const string HostNotified = "HostNotified";
     public const string AlreadySubmitted = "AlreadySubmitted";
     public const string AwaitingHostApproval = "AwaitingHostApproval";

@@ -24,6 +24,16 @@ services:
         Username=postgres;
         Password=postgres
 
+      # Maintenance connection for ephemeral Postgres-backed integration tests
+      # (e.g. ConciergeActionOrchestratorPaymentRetryTests). Points at the devcontainer's
+      # "postgres" service host, not the dev database, since tests create/drop their own DB.
+      STAYFLOW_TEST_POSTGRES_CONNECTION: >-
+        Host=postgres;
+        Port=5432;
+        Database=postgres;
+        Username=postgres;
+        Password=postgres
+
       AIProvider__Provider: Development
       DevelopmentSeed__DemoPassword: ChangeMe123!
 

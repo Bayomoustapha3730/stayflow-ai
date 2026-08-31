@@ -51,9 +51,15 @@ public sealed class PaymentService(
             return ApiResponse<PaymentDto>.Fail("Reservation was not found.");
         }
 
-        if (reservation.BookingAmount is not { } amount || amount <= 0)
+        if (reservation.BookingAmount is not { } bookingAmount || bookingAmount <= 0)
         {
             return ApiResponse<PaymentDto>.Fail("Reservation does not have a valid booking amount.");
+        }
+
+        var amount = request.AmountOverride ?? bookingAmount;
+        if (amount <= 0 || amount > bookingAmount)
+        {
+            return ApiResponse<PaymentDto>.Fail("Payment amount is outside the reservation amount.");
         }
 
         if (!string.Equals(reservation.Currency, "KES", StringComparison.OrdinalIgnoreCase))

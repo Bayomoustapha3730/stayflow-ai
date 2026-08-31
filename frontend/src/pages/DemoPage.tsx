@@ -5,8 +5,9 @@ const demoGuestId =
   import.meta.env.VITE_DEMO_GUEST_ID ??
   "44444444-4444-4444-4444-444444444444";
 
-const demoReservationId =
-  import.meta.env.VITE_DEMO_RESERVATION_ID;
+const defaultDemoReservationId =
+  import.meta.env.VITE_DEMO_RESERVATION_ID ??
+  "55555555-5555-5555-5555-555555555555";
 
 const demoPropertyId =
   import.meta.env.VITE_DEMO_PROPERTY_ID;
@@ -16,7 +17,28 @@ const demoEmail =
 
 const apiBaseUrl = getRuntimeApiUrl();
 
+const DEMO_PAYMENT_RESERVATION_REFERENCE = "DEMO-PAY-002";
+const DEMO_PAYMENT_RESERVATION_ID = "55555555-5555-5555-5555-555555555556";
+
+export function resolveDemoReservationId(): string {
+  const params = new URLSearchParams(window.location.search);
+  const reservationOverride = params.get("reservation")?.trim();
+
+  if (!reservationOverride) {
+    return defaultDemoReservationId;
+  }
+
+  const normalized = reservationOverride.toUpperCase();
+  if (normalized === DEMO_PAYMENT_RESERVATION_REFERENCE) {
+    return DEMO_PAYMENT_RESERVATION_ID;
+  }
+
+  return reservationOverride;
+}
+
 export function DemoPage() {
+  const demoReservationId = resolveDemoReservationId();
+
   return (
     <div className="sf-demo-page">
       <main className="sf-demo-content">

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-
 function toCanonicalOnboardingPath(step: string | null | undefined): string | null {
   if (!step) {
     return null;

@@ -92,6 +92,27 @@ public sealed partial class ConciergeActionDetector : IConciergeActionDetector
                 "ExtraItem");
         }
 
+        if (ContainsAny(text, "mpesa", "m-pesa", "m pesa", "payment request", "send me a payment request", "send me an mpesa request", "send me the payment prompt", "send me the mpesa prompt", "pay now", "i want to pay", "let me pay", "can i pay now")
+            && (ContainsAny(text, "send", "request", "prompt", "pay", "payment") || (text.Contains("want to pay", StringComparison.Ordinal) || text.Contains("can i pay", StringComparison.Ordinal))))
+        {
+            var missing = conversation.ReservationId.HasValue && conversation.PropertyId.HasValue ? new List<string>() : ["ReservationId", "PropertyId"];
+            var phoneNumber = conversation.Guest?.PhoneNumber ?? string.Empty;
+            var amountDue = ParseAmount(text);
+            var action = conversation.ReservationId.HasValue && conversation.PropertyId.HasValue
+                ? new PaymentRequestAction(conversation.Id, conversation.ReservationId.Value, conversation.PropertyId.Value, phoneNumber, amountDue, "KES", "Guest payment request")
+                : null;
+
+            return new ConciergeActionProposal(
+                ConciergeActionType.RequestPayment,
+                missing.Count == 0 ? ConciergeActionConfidenceLevel.High : ConciergeActionConfidenceLevel.Medium,
+                action,
+                missing,
+                missing.Count > 0,
+                missing.Count > 0 ? "I need to verify your reservation context before I can send a payment request." : null,
+                IsExplicitRequest(text),
+                "PaymentRequest");
+        }
+
         if (ContainsAny(text, "parking", "vehicle", "cars", "car"))
         {
             var count = ParseQuantity(text);
@@ -199,6 +220,23 @@ public sealed partial class ConciergeActionDetector : IConciergeActionDetector
         return null;
     }
 
+    private static decimal ParseAmount(string text)
+    {
+        var match = AmountRegex().Match(text);
+        if (!match.Success)
+        {
+            return 0m;
+        }
+
+        var amountText = match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value;
+        if (decimal.TryParse(amountText, out var amount))
+        {
+            return amount;
+        }
+
+        return 0m;
+    }
+
     private static TimeOnly? ParseTime(string text)
     {
         var match = TimeRegex().Match(text);
@@ -257,6 +295,9 @@ public sealed partial class ConciergeActionDetector : IConciergeActionDetector
 
     [GeneratedRegex(@"\b(\d{1,2})\b", RegexOptions.CultureInvariant)]
     private static partial Regex QuantityRegex();
+
+    [GeneratedRegex(@"(?:ksh|kes|kshs|shs)\s*(\d+(?:\.\d{1,2})?)|(?<!\d)(\d+(?:\.\d{1,2})?)(?:\s*(?:ksh|kes|kshs|shs))", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex AmountRegex();
 
     [GeneratedRegex(@"\b\d{1,2}(:\d{2})?\s?(am|pm)?\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex TimeRegex();

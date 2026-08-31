@@ -3,7 +3,9 @@ using Microsoft.Extensions.Options;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.Models;
+using StayFlow.Api.Services;
 using StayFlow.Api.Services.AI.Memory;
+using StayFlow.Api.Services.Payments;
 
 namespace StayFlow.Api.Services.ConciergeActions;
 
@@ -17,6 +19,7 @@ public sealed class ConciergeActionOrchestrator(
     IConciergeActionIdempotencyService idempotencyService,
     IConciergeActionResultFormatter formatter,
     IConversationMemoryService memoryService,
+    IReservationPaymentGroundingService paymentGroundingService,
     IOptions<ConciergeActionsOptions> options,
     ICurrentTenantContext tenantContext) : IConciergeActionOrchestrator
 {
@@ -99,6 +102,59 @@ public sealed class ConciergeActionOrchestrator(
             return NotHandled();
         }
 
+        if (proposal.ActionType == ConciergeActionType.RequestPayment
+            && proposal.ParsedParameters is PaymentRequestAction paymentAction)
+        {
+            var grounding = conversation.ReservationId is { } reservationId
+                ? await paymentGroundingService.GetReservationPaymentGroundingAsync(reservationId, companyId, cancellationToken)
+                : null;
+
+            if (grounding?.RemainingBalance is not { } remainingBalance || remainingBalance <= 0m)
+            {
+                return new ConciergeActionOrchestrationResult(
+                    true,
+                    grounding is not null
+                        ? "Your reservation is already fully paid. There is no payment request to send."
+                        : "I couldn't verify the payment balance for this reservation. Please contact the host.",
+                    null,
+                    null,
+                    false,
+                    null,
+                    grounding is not null ? "AlreadyPaid" : "PaymentGroundingUnavailable");
+            }
+
+            proposal = proposal with
+            {
+                ParsedParameters = paymentAction with
+                {
+                    AmountDue = remainingBalance,
+                    Currency = grounding.Currency,
+                    CustomerPhoneNumber = conversation.Guest?.PhoneNumber ?? paymentAction.CustomerPhoneNumber
+                }
+            };
+
+            var paymentReservationId = conversation.ReservationId.GetValueOrDefault();
+            var hasActivePayment = await dbContext.Payments.AnyAsync(payment =>
+                payment.CompanyId == companyId
+                && payment.ReservationId == paymentReservationId
+                && payment.Provider == "M-PESA"
+                && (payment.Status == PaymentStatus.Pending.ToStorageValue()
+                    || payment.Status == PaymentStatus.Processing.ToStorageValue()),
+                cancellationToken);
+
+            if (hasActivePayment)
+            {
+                return new ConciergeActionOrchestrationResult(
+                    true,
+                    "An M-PESA payment request is already pending for this reservation. Please complete it on your phone before requesting another.",
+                    null,
+                    null,
+                    false,
+                    null,
+                    "ActivePaymentExists");
+            }
+        }
+
         var serialized = ConciergeActionSerialization.Serialize(proposal.ParsedParameters!);
         var key = idempotencyService.CreateKey(companyId, conversation.Id, proposal.ActionType, conversation.PropertyId.Value, conversation.ReservationId, serialized);
         var existing = await dbContext.PendingConciergeActions
@@ -106,7 +162,9 @@ public sealed class ConciergeActionOrchestrator(
 
         if (existing is not null)
         {
-            if (existing.Status == PendingConciergeActionStatus.Completed || existing.Status == PendingConciergeActionStatus.AwaitingHostApproval)
+            var canReuseCompletedAction = existing.ActionType != ConciergeActionType.RequestPayment;
+            if (canReuseCompletedAction
+                && (existing.Status == PendingConciergeActionStatus.Completed || existing.Status == PendingConciergeActionStatus.AwaitingHostApproval))
             {
                 var replayResult = new ConciergeActionExecutionResult(existing.Id, existing.ActionType, existing.Status, false, true, null, existing.Status == PendingConciergeActionStatus.AwaitingHostApproval, false, ConciergeActionResponseCodes.AlreadySubmitted, null, existing.ExecutedAt);
                 return new ConciergeActionOrchestrationResult(true, formatter.ToGuestMessage(replayResult), null, replayResult, existing.Status == PendingConciergeActionStatus.AwaitingHostApproval, existing.Status);
@@ -116,6 +174,13 @@ public sealed class ConciergeActionOrchestrator(
             {
                 var prompt = BuildConfirmationPrompt(existing.ActionType, proposal.ParsedParameters!, policyResult.RequiresHostApproval);
                 return new ConciergeActionOrchestrationResult(true, prompt, ToPendingCard(existing, policyResult.ConfirmationRequirement, prompt, policyResult.RequiresHostApproval), null, false, existing.Status);
+            }
+
+            if (existing.ActionType == ConciergeActionType.RequestPayment)
+            {
+                // Payment retries are governed by the current payment rows above. A terminal
+                // historical action must not collide with the unique action idempotency index.
+                key = $"{key}:{guestMessageId:N}";
             }
         }
 
@@ -383,9 +448,24 @@ public sealed class ConciergeActionOrchestrator(
             ConciergeActionType.RequestEarlyCheckIn => $"I can submit an early check-in request{FormatTime(parameters)}. {(requiresHostApproval ? "This requires host approval. " : string.Empty)}Should I submit it?",
             ConciergeActionType.RequestLateCheckout => $"I can submit a late checkout request{FormatTime(parameters)}. {(requiresHostApproval ? "This requires host approval. " : string.Empty)}Should I submit it?",
             ConciergeActionType.RequestParking => "I can submit a parking request. This requires host approval. Should I submit it?",
+            ConciergeActionType.RequestPayment => FormatPaymentPrompt(parameters),
             ConciergeActionType.NotifyHost => "I can notify the host. Should I submit it?",
             _ => "Should I submit this request?"
         };
+    }
+
+    private static string FormatPaymentPrompt(object parameters)
+    {
+        if (parameters is not PaymentRequestAction payment)
+        {
+            return "I can send a payment request to your phone. Should I send it?";
+        }
+
+        var amount = payment.AmountDue > 0m ? payment.AmountDue : 0m;
+        var mask = PhoneNumberMasker.Mask(payment.CustomerPhoneNumber);
+        var phone = string.IsNullOrWhiteSpace(mask) ? "your phone" : mask;
+        var currency = string.IsNullOrWhiteSpace(payment.Currency) ? "KES" : payment.Currency;
+        return $"I can send a payment request for {amount:0.00} {currency} to {phone}. Should I send it?";
     }
 
     private static string FormatTime(object parameters)

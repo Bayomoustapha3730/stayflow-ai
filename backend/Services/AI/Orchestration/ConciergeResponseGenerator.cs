@@ -201,6 +201,26 @@ public sealed class ConciergeResponseGenerator : IConciergeResponseGenerator
     {
         bool AsksAbout(params string[] keywords) => keywords.Any(keyword => normalizedQuestion.Contains(keyword, StringComparison.Ordinal));
 
+        if (IsExplicitPaymentActionRequest(normalizedQuestion))
+        {
+            if (grounding.RemainingBalance is <= 0m)
+            {
+                return "Your reservation is already fully paid. You have no remaining balance.";
+            }
+
+            if (grounding.PaymentCount == 0)
+            {
+                return "I don't see a completed payment recorded for this reservation yet.";
+            }
+
+            if (grounding.RemainingBalance is { } remainingBalance)
+            {
+                return $"There is {remainingBalance:0.00} {grounding.Currency} remaining to pay before this reservation is fully settled.";
+            }
+
+            return "I can help with the payment request, but I need the payment details to confirm the outstanding balance.";
+        }
+
         if (AsksAbout("receipt", "transaction id", "transaction number"))
         {
             return string.IsNullOrWhiteSpace(grounding.LatestReceiptNumber)
@@ -228,6 +248,30 @@ public sealed class ConciergeResponseGenerator : IConciergeResponseGenerator
         }
 
         return BuildPaymentStatusSummary(grounding);
+    }
+
+    private static bool IsExplicitPaymentActionRequest(string normalizedQuestion)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedQuestion))
+        {
+            return false;
+        }
+
+        return normalizedQuestion.Contains("i want to pay", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("want to pay", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("i need to pay", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("send me an m-pesa request", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("send me the m-pesa prompt", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("send me an mpesa request", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("send me the mpesa prompt", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("send me a payment request", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("can i pay now", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("let me pay", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("pay now", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("make a payment", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("retry my payment", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("my payment failed", StringComparison.Ordinal)
+            || normalizedQuestion.Contains("still owe money and want to pay", StringComparison.Ordinal);
     }
 
     private static string BuildPaymentStatusSummary(ReservationPaymentGroundingDto grounding)

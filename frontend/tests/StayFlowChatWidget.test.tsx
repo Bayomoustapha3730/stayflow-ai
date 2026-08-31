@@ -63,6 +63,72 @@ function messageResponse(
   });
 }
 
+function paymentProposalResponse() {
+  return apiResponse({
+    conversationId: "11111111-1111-1111-1111-111111111111",
+    conversationStatus: ConversationStatus.Open,
+    guestMessage: {
+      id: "payment-guest-message",
+      conversationId: "11111111-1111-1111-1111-111111111111",
+      senderType: ConversationSenderType.Guest,
+      content: "Send me an M-PESA request.",
+      messageType: ConversationMessageType.Text,
+      sentAt: "2026-01-01T10:00:00Z"
+    },
+    assistantMessage: {
+      id: "payment-proposal",
+      conversationId: "11111111-1111-1111-1111-111111111111",
+      senderType: ConversationSenderType.AI,
+      content: "I can send a payment request for 3000.00 KES to +2******0002. Should I send it?",
+      messageType: ConversationMessageType.Text,
+      sentAt: "2026-01-01T10:00:01Z"
+    },
+    humanTakeoverEnabled: false,
+    requiresHostAttention: false,
+    escalationReason: null,
+    providerMetadata: null,
+    pendingAction: {
+      actionId: "payment-action",
+      actionType: 8,
+      status: 0,
+      confirmationRequirement: 1,
+      prompt: "I can send a payment request for 3000.00 KES to +2******0002. Should I send it?",
+      requiresHostApproval: false,
+      expiresAt: "2026-01-01T10:05:00Z"
+    },
+    createdAt: "2026-01-01T10:00:01Z"
+  });
+}
+
+function paymentConfirmationResponse() {
+  return apiResponse({
+    conversationId: "11111111-1111-1111-1111-111111111111",
+    conversationStatus: ConversationStatus.Open,
+    guestMessage: {
+      id: "payment-confirmation-event",
+      conversationId: "11111111-1111-1111-1111-111111111111",
+      senderType: ConversationSenderType.System,
+      content: "Guest confirmed the pending action.",
+      messageType: ConversationMessageType.InternalNote,
+      sentAt: "2026-01-01T10:00:02Z"
+    },
+    assistantMessage: {
+      id: "payment-completion",
+      conversationId: "11111111-1111-1111-1111-111111111111",
+      senderType: ConversationSenderType.AI,
+      content: "I've sent the M-PESA payment request to your phone. Please confirm it on your device.",
+      messageType: ConversationMessageType.Text,
+      sentAt: "2026-01-01T10:00:03Z"
+    },
+    humanTakeoverEnabled: false,
+    requiresHostAttention: false,
+    escalationReason: null,
+    providerMetadata: null,
+    pendingAction: null,
+    createdAt: "2026-01-01T10:00:03Z"
+  });
+}
+
 function conversationResponse() {
   return apiResponse({
     conversationId: "11111111-1111-1111-1111-111111111111",
@@ -210,6 +276,56 @@ describe("StayFlowChatWidget", () => {
     await user.click(sendButton);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("confirms a payment action once without rendering action text as guest input", async () => {
+    const fetchMock = vi.fn((url: string, _options?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === "/auth/login") {
+        return Promise.resolve(authResponse());
+      }
+
+      if (path === "/chat/message") {
+        return Promise.resolve(paymentProposalResponse());
+      }
+
+      if (path.endsWith("/actions/payment-action/confirm")) {
+        return Promise.resolve(paymentConfirmationResponse());
+      }
+
+      if (path.endsWith("/history")) {
+        return Promise.resolve(historyResponse());
+      }
+
+      if (path.endsWith("/read")) {
+        return Promise.resolve(apiResponse(true));
+      }
+
+      return Promise.resolve(conversationResponse());
+    });
+
+    const user = await openAndLogin(fetchMock);
+    const input = screen.getByRole("textbox", { name: /^message$/i });
+
+    await user.type(input, "Send me an M-PESA request.");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    const confirmButton = await screen.findByRole("button", { name: /^confirm$/i });
+    expect(screen.getAllByText(/i can send a payment request for 3000\.00 kes/i)).toHaveLength(2);
+
+    await user.click(confirmButton);
+
+    await screen.findByText(/i've sent the m-pesa payment request/i);
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^confirm$/i })).not.toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /^cancel$/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Send me an M-PESA request.")).toHaveLength(1);
+    expect(screen.queryByText(/^I can send a payment request for 3000\.00 KES\.$/i)).not.toBeInTheDocument();
+
+    const confirmationCall = fetchMock.mock.calls.find(
+      ([url, options]) => new URL(url).pathname.endsWith("/actions/payment-action/confirm") && options?.method === "POST"
+    );
+    expect(confirmationCall).toBeDefined();
+    expect(fetchMock.mock.calls.filter(([url]) => new URL(url).pathname.endsWith("/actions/payment-action/confirm"))).toHaveLength(1);
   });
 
   it("keeps shift enter as a draft newline and enter sends", async () => {

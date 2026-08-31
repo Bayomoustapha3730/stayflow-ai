@@ -1,4 +1,4 @@
-import { ConversationMessageType } from "../models/enums";
+import { ConversationMessageType, ConversationSenderType } from "../models/enums";
 import type { ChatMessage } from "../models/chat";
 
 export function isGuestVisibleMessage(message: ChatMessage): boolean {
@@ -24,7 +24,20 @@ export function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]):
     byId.set(message.id, message);
   }
 
-  return sortMessages(Array.from(byId.values()));
+  const messages = Array.from(byId.values());
+  const assistantContents = new Set(
+    messages
+      .filter((message) => message.senderType === ConversationSenderType.AI)
+      .map((message) => message.content.trim())
+  );
+
+  return sortMessages(
+    messages.filter(
+      (message) =>
+        message.senderType !== ConversationSenderType.Guest ||
+        !assistantContents.has(message.content.trim())
+    )
+  );
 }
 
 export function buildLocalMessage(content: string, conversationId = "pending"): ChatMessage {

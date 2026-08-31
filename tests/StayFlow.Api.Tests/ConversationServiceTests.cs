@@ -272,6 +272,108 @@ public sealed class ConversationServiceTests
     }
 
     [Fact]
+    public async Task CreateOrGetConversationAsync_ReusesConversationForSameReservation()
+    {
+        var fixture = new Fixture();
+        var existing = fixture.Repository.NewConversation(reservation: fixture.Reservation);
+        fixture.Repository.Conversations.Add(existing);
+
+        var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
+        {
+            GuestId = fixture.Guest.Id,
+            ReservationId = fixture.Reservation.Id,
+            Channel = existing.Channel,
+            ChannelIdentity = existing.ChannelIdentity
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(existing.Id, response.Data!.Id);
+        Assert.Single(fixture.Repository.Conversations);
+    }
+
+    [Fact]
+    public async Task CreateOrGetConversationAsync_DoesNotReuseConversationBoundToDifferentReservation()
+    {
+        var fixture = new Fixture();
+        var reservationB = new Reservation
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            PropertyId = fixture.Property.Id,
+            PrimaryGuestId = fixture.Guest.Id,
+            Property = fixture.Property,
+            PrimaryGuest = fixture.Guest,
+            CheckInDate = new DateOnly(2026, 9, 1),
+            CheckOutDate = new DateOnly(2026, 9, 4),
+            IsActive = true
+        };
+        fixture.Repository.Reservations.Add(reservationB);
+
+        var existingForReservationA = fixture.Repository.NewConversation(reservation: fixture.Reservation);
+        fixture.Repository.Conversations.Add(existingForReservationA);
+
+        var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
+        {
+            GuestId = fixture.Guest.Id,
+            ReservationId = reservationB.Id,
+            Channel = existingForReservationA.Channel,
+            ChannelIdentity = existingForReservationA.ChannelIdentity
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotEqual(existingForReservationA.Id, response.Data!.Id);
+        Assert.Equal(reservationB.Id, response.Data.ReservationId);
+        Assert.Equal(2, fixture.Repository.Conversations.Count);
+        Assert.Equal(fixture.Reservation.Id, existingForReservationA.ReservationId);
+    }
+
+    [Fact]
+    public async Task CreateOrGetConversationAsync_DoesNotReuseCrossTenantConversationEvenWithMatchingReservationId()
+    {
+        var fixture = new Fixture();
+        var crossTenantConversation = fixture.Repository.NewConversation(overrideCompanyId: Guid.NewGuid(), reservation: fixture.Reservation);
+        fixture.Repository.Conversations.Add(crossTenantConversation);
+
+        var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
+        {
+            GuestId = fixture.Guest.Id,
+            ReservationId = fixture.Reservation.Id,
+            Channel = crossTenantConversation.Channel,
+            ChannelIdentity = crossTenantConversation.ChannelIdentity
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotEqual(crossTenantConversation.Id, response.Data!.Id);
+        Assert.Equal(2, fixture.Repository.Conversations.Count);
+        var created = fixture.Repository.Conversations.Single(conversation => conversation.Id == response.Data.Id);
+        Assert.Equal(fixture.CompanyId, created.CompanyId);
+    }
+
+    [Fact]
+    public async Task CreateOrGetConversationAsync_DoesNotReuseConversationFromDifferentPropertyWhenPropertyExplicit()
+    {
+        var fixture = new Fixture();
+        var otherProperty = new Property { Id = Guid.NewGuid(), CompanyId = fixture.CompanyId, Name = "Lavington Villa", City = "Nairobi", CountryCode = "KE", AddressLine1 = "Lane", TimeZone = "Africa/Nairobi", IsActive = true };
+        fixture.Repository.Properties.Add(otherProperty);
+
+        var existingForOtherProperty = fixture.Repository.NewConversation(property: otherProperty);
+        fixture.Repository.Conversations.Add(existingForOtherProperty);
+
+        var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
+        {
+            GuestId = fixture.Guest.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = existingForOtherProperty.Channel,
+            ChannelIdentity = existingForOtherProperty.ChannelIdentity
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.NotEqual(existingForOtherProperty.Id, response.Data!.Id);
+        Assert.Equal(fixture.Property.Id, response.Data.PropertyId);
+        Assert.Equal(2, fixture.Repository.Conversations.Count);
+    }
+
+    [Fact]
     public async Task AddGuestMessageAsync_StoresMessageAndUpdatesLastActivity()
     {
         var fixture = new Fixture();
@@ -793,15 +895,23 @@ public sealed class ConversationServiceTests
             return Task.FromResult(message);
         }
 
-        public Task<Conversation?> GetOpenConversationAsync(Guid requestedCompanyId, Guid guestId, GuestChannel channel, string? channelIdentity, DateTimeOffset cutoff, CancellationToken cancellationToken)
+        public Task<Conversation?> GetOpenConversationAsync(Guid requestedCompanyId, Guid guestId, GuestChannel channel, string? channelIdentity, Guid? reservationId, Guid? propertyId, DateTimeOffset cutoff, CancellationToken cancellationToken)
         {
-            return Task.FromResult(Conversations.FirstOrDefault(conversation =>
+            var candidates = Conversations.Where(conversation =>
                 conversation.CompanyId == requestedCompanyId
                 && conversation.GuestId == guestId
                 && conversation.Channel == channel
                 && conversation.ChannelIdentity == channelIdentity
                 && conversation.Status != ConversationStatus.Closed
-                && conversation.LastActivityAt >= cutoff));
+                && conversation.LastActivityAt >= cutoff);
+
+            candidates = reservationId is { } requestedReservationId
+                ? candidates.Where(conversation => conversation.ReservationId == requestedReservationId)
+                : propertyId is { } requestedPropertyId
+                    ? candidates.Where(conversation => conversation.PropertyId == requestedPropertyId)
+                    : candidates;
+
+            return Task.FromResult(candidates.OrderByDescending(conversation => conversation.LastActivityAt).FirstOrDefault());
         }
 
         public Task<PagedResult<ConversationMessage>> GetMessagesAsync(Guid requestedCompanyId, Guid conversationId, ConversationHistoryQueryParameters query, CancellationToken cancellationToken)

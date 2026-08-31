@@ -291,14 +291,13 @@ public sealed class ChatService(
             return ApiResponse<ChatMessageResponse>.Fail("Pending action was not found.");
         }
 
-        var guestMessage = await conversationService.AddGuestMessageAsync(conversation.Id, new AddGuestMessageRequest
+        var actionEvent = await conversationService.AddInternalNoteAsync(conversation.Id, new AddInternalNoteRequest
         {
-            Content = "Confirm",
-            SentAt = DateTimeOffset.UtcNow
+            Content = "Guest confirmed the pending action."
         }, cancellationToken);
-        if (!guestMessage.Success || guestMessage.Data is null)
+        if (!actionEvent.Success || actionEvent.Data is null)
         {
-            return ApiResponse<ChatMessageResponse>.Fail(guestMessage.Message, guestMessage.Errors);
+            return ApiResponse<ChatMessageResponse>.Fail(actionEvent.Message, actionEvent.Errors);
         }
 
         var assistantMessage = await conversationService.AddAIMessageAsync(conversation.Id, result.AssistantMessage, new AIOrchestrationResult
@@ -317,7 +316,7 @@ public sealed class ChatService(
             conversation.Status = ConversationStatus.AwaitingHost;
         }
 
-        return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, guestMessage.Data, assistantMessage.Data, null, [], [], result.PendingAction));
+        return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, actionEvent.Data, assistantMessage.Data, null, [], [], result.PendingAction));
     }
 
     public async Task<ApiResponse<ChatMessageResponse>> CancelPendingActionAsync(Guid conversationId, Guid actionId, CancelPendingActionRequest request, CancellationToken cancellationToken)
@@ -340,14 +339,13 @@ public sealed class ChatService(
             return ApiResponse<ChatMessageResponse>.Fail("Pending action was not found.");
         }
 
-        var guestMessage = await conversationService.AddGuestMessageAsync(conversation.Id, new AddGuestMessageRequest
+        var actionEvent = await conversationService.AddInternalNoteAsync(conversation.Id, new AddInternalNoteRequest
         {
-            Content = "Cancel",
-            SentAt = DateTimeOffset.UtcNow
+            Content = "Guest cancelled the pending action."
         }, cancellationToken);
-        if (!guestMessage.Success || guestMessage.Data is null)
+        if (!actionEvent.Success || actionEvent.Data is null)
         {
-            return ApiResponse<ChatMessageResponse>.Fail(guestMessage.Message, guestMessage.Errors);
+            return ApiResponse<ChatMessageResponse>.Fail(actionEvent.Message, actionEvent.Errors);
         }
 
         var assistantMessage = await conversationService.AddAIMessageAsync(conversation.Id, result.AssistantMessage, new AIOrchestrationResult
@@ -360,7 +358,7 @@ public sealed class ChatService(
             return ApiResponse<ChatMessageResponse>.Fail(assistantMessage.Message, assistantMessage.Errors);
         }
 
-        return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, guestMessage.Data, assistantMessage.Data, null, [], [], result.PendingAction));
+        return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, actionEvent.Data, assistantMessage.Data, null, [], [], result.PendingAction));
     }
 
     public async Task<ApiResponse<ChatConversationResponse>> GetGuestConversationAsync(Guid conversationId, CancellationToken cancellationToken)

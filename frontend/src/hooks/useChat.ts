@@ -110,6 +110,7 @@ export function useChat(options: UseChatOptions): UseChatResult {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingActionCard | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const pendingActionExecutionRef = useRef<string | null>(null);
   const [isOpen, setIsOpen] = useState(() => sessionStorage.getItem(openStorageKey) === "true");
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -511,13 +512,20 @@ export function useChat(options: UseChatOptions): UseChatResult {
   }, [conversationStorageKey]);
 
   const confirmPendingAction = useCallback(async () => {
-    if (!conversationId || !options.guestId || !pendingAction) {
+    const currentAction = pendingAction;
+    if (!conversationId || !options.guestId || !currentAction) {
       return;
     }
 
+    if (pendingActionExecutionRef.current === currentAction.actionId) {
+      return;
+    }
+
+    pendingActionExecutionRef.current = currentAction.actionId;
+    setPendingAction(null);
     setError(null);
     try {
-      const response = await chatApi.confirmPendingAction(conversationId, pendingAction.actionId, options.guestId);
+      const response = await chatApi.confirmPendingAction(conversationId, currentAction.actionId, options.guestId);
       setConversationStatus(response.conversationStatus);
       setHumanTakeoverEnabled(response.humanTakeoverEnabled);
       setRequiresAttention(
@@ -530,17 +538,28 @@ export function useChat(options: UseChatOptions): UseChatResult {
       markReadIfVisible();
     } catch (failure) {
       handleError(failure);
+    } finally {
+      if (pendingActionExecutionRef.current === currentAction.actionId) {
+        pendingActionExecutionRef.current = null;
+      }
     }
   }, [chatApi, conversationId, handleError, markReadIfVisible, options.guestId, pendingAction]);
 
   const cancelPendingAction = useCallback(async () => {
-    if (!conversationId || !options.guestId || !pendingAction) {
+    const currentAction = pendingAction;
+    if (!conversationId || !options.guestId || !currentAction) {
       return;
     }
 
+    if (pendingActionExecutionRef.current === currentAction.actionId) {
+      return;
+    }
+
+    pendingActionExecutionRef.current = currentAction.actionId;
+    setPendingAction(null);
     setError(null);
     try {
-      const response = await chatApi.cancelPendingAction(conversationId, pendingAction.actionId, options.guestId);
+      const response = await chatApi.cancelPendingAction(conversationId, currentAction.actionId, options.guestId);
       setConversationStatus(response.conversationStatus);
       setHumanTakeoverEnabled(response.humanTakeoverEnabled);
       setRequiresAttention(
@@ -553,6 +572,10 @@ export function useChat(options: UseChatOptions): UseChatResult {
       markReadIfVisible();
     } catch (failure) {
       handleError(failure);
+    } finally {
+      if (pendingActionExecutionRef.current === currentAction.actionId) {
+        pendingActionExecutionRef.current = null;
+      }
     }
   }, [chatApi, conversationId, handleError, markReadIfVisible, options.guestId, pendingAction]);
 

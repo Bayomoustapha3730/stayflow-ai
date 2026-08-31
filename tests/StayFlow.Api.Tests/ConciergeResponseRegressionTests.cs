@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using StayFlow.Api.DTOs.Payments;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services.AI.Context;
 using StayFlow.Api.Services.AI.Intent;
@@ -121,6 +122,64 @@ public sealed class ConciergeResponseRegressionTests
         Assert.False(result.RequiresClarification);
         Assert.Contains("StayFlowGuest", result.Text);
         Assert.Contains("11:00 AM", result.Text);
+    }
+
+    [Fact]
+    public void Generate_PaymentActionRequest_WhenFullyPaid_ReturnsFullyPaidGroundedResponse()
+    {
+        var generator = new ConciergeResponseGenerator();
+        var intent = new ConversationIntentResult(
+            GuestIntent.Payment,
+            [],
+            0.9,
+            ConversationIntentConfidenceLevel.High,
+            ["pay", "m-pesa", "request"],
+            false,
+            [],
+            "i want to pay send me an m-pesa request");
+
+        var retrieval = new KnowledgeRetrievalResult(
+            intent.ToGuestIntentResult(),
+            [],
+            [],
+            0.8,
+            KnowledgeConfidenceLevel.Medium,
+            KnowledgeRetrievalReasonCode.StrongIntentMatch,
+            false,
+            false,
+            false,
+            false,
+            [],
+            []);
+
+        var result = generator.Generate(new ConciergeResponseRequest(
+            "I want to pay send me an M-PESA request",
+            intent,
+            retrieval,
+            EmptyMemory(),
+            "Demo Property",
+            null,
+            ConciergeTone.Warm,
+            "en",
+            false,
+            new ReservationPaymentGroundingDto
+            {
+                BookingAmount = 1.00m,
+                Currency = "KES",
+                TotalPaid = 1.00m,
+                RemainingBalance = 0.00m,
+                HasSuccessfulPayment = true,
+                LatestPaymentStatus = "Paid",
+                LatestReceiptNumber = "STAYFLOWDEV-123",
+                PaymentCount = 1,
+                LatestFailureMessage = null,
+                LatestProvider = "M-PESA",
+                LatestPaymentRequestedAtUtc = DateTimeOffset.UtcNow
+            }));
+
+        Assert.Contains("already fully paid", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no remaining balance", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(ConciergeResponseOutcome.Answered, result.Outcome);
     }
 
     private static IPropertyKnowledgeRetriever BuildRetriever()

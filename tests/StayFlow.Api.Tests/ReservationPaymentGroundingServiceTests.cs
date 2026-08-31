@@ -85,6 +85,21 @@ public sealed class ReservationPaymentGroundingServiceTests
     }
 
     [Fact]
+    public async Task GetReservationPaymentGroundingAsync_DemoPay002FailedRetry_RemainsOutstanding()
+    {
+        var (service, companyId, reservationId, ctx) = await SeedAsync(bookingAmount: 4000m);
+        await AddPaymentAsync(ctx, companyId, reservationId, 1000m, PaymentStatus.Paid, receipt: "MPESA-PAID", offsetMinutes: -10);
+        await AddPaymentAsync(ctx, companyId, reservationId, 3000m, PaymentStatus.Failed, failureMessage: "No response from user.", offsetMinutes: -1);
+
+        var result = await service.GetReservationPaymentGroundingAsync(reservationId, companyId, CancellationToken.None);
+
+        Assert.Equal(1000m, result!.TotalPaid);
+        Assert.Equal(3000m, result.RemainingBalance);
+        Assert.Equal(PaymentStatus.Failed.ToStorageValue(), result.LatestPaymentStatus);
+        Assert.Equal(2, result.PaymentCount);
+    }
+
+    [Fact]
     public async Task GetReservationPaymentGroundingAsync_RemainingBalance_IsBookingAmountMinusTotalPaid()
     {
         var (service, companyId, reservationId, ctx) = await SeedAsync(bookingAmount: 5000m);
