@@ -244,6 +244,14 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public Task<Conversation?> GetLatestConversationForReservationAsync(Guid companyId, Guid reservationId, CancellationToken cancellationToken)
+    {
+        return dbContext.Conversations
+            .Where(conversation => conversation.CompanyId == companyId && conversation.ReservationId == reservationId)
+            .OrderByDescending(conversation => conversation.LastActivityAt)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task<int> GetTotalUnreadCountForHostAsync(Guid companyId, Guid hostUserId, CancellationToken cancellationToken)
     {
         var readStates = dbContext.ConversationParticipantReadStates

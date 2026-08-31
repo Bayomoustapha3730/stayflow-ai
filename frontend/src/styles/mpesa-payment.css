@@ -110,6 +110,70 @@
   background: rgba(110, 110, 110, 0.15);
 }
 
+.reservation-payment-summary {
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+}
+
+.reservation-payment-summary-paid {
+  background: rgba(20, 145, 74, 0.1);
+  border-color: rgba(20, 145, 74, 0.35);
+}
+
+.reservation-payment-summary-due {
+  background: rgba(205, 140, 0, 0.1);
+  border-color: rgba(205, 140, 0, 0.35);
+}
+
+.reservation-payment-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.reservation-payment-status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.reservation-payment-status-paid {
+  background: rgba(20, 145, 74, 0.2);
+}
+
+.reservation-payment-status-due {
+  background: rgba(205, 140, 0, 0.22);
+}
+
+.reservation-payment-summary-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 24px;
+  margin: 16px 0 0;
+}
+
+.reservation-payment-summary-figures dt {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.reservation-payment-summary-figures dd {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
 .mpesa-payment-form {
   display: grid;
   gap: 8px;
@@ -204,6 +268,10 @@
   }
 
   .mpesa-payment-details {
+    grid-template-columns: 1fr;
+  }
+
+  .reservation-payment-summary-figures {
     grid-template-columns: 1fr;
   }
 }

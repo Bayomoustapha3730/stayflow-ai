@@ -10,7 +10,8 @@ import { createPaymentsApi } from "../api/paymentsApi";
 import { ApiError, HttpClient } from "../api/httpClient";
 import type {
   InitiateMpesaPaymentRequest,
-  Payment
+  Payment,
+  ReservationPaymentSummary
 } from "../models/payments";
 import { isActivePaymentStatus } from "../models/payments";
 
@@ -19,10 +20,13 @@ interface UseReservationPaymentsOptions {
   accessToken: string | null;
   onUnauthorized: () => void;
   pollingIntervalMs?: number;
+  /// Changing this value re-fetches payments, letting realtime conversation events reconcile state.
+  reloadSignal?: number | string;
 }
 
 export interface UseReservationPaymentsResult {
   payments: Payment[];
+  summary: ReservationPaymentSummary | null;
   isLoading: boolean;
   isSubmitting: boolean;
   error: string | null;
@@ -39,9 +43,11 @@ export function useReservationPayments({
   reservationId,
   accessToken,
   onUnauthorized,
-  pollingIntervalMs = 5000
+  pollingIntervalMs = 5000,
+  reloadSignal
 }: UseReservationPaymentsOptions): UseReservationPaymentsResult {
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [summary, setSummary] = useState<ReservationPaymentSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +86,7 @@ export function useReservationPayments({
   const loadPayments = useCallback(async () => {
     if (!reservationId || !accessToken) {
       setPayments([]);
+      setSummary(null);
       setError(null);
       setSessionExpired(false);
       return;
@@ -91,14 +98,17 @@ export function useReservationPayments({
     setError(null);
 
     try {
-      const result =
-        await api.listReservationPayments(reservationId);
+      const [result, groundedSummary] = await Promise.all([
+        api.listReservationPayments(reservationId),
+        api.getReservationPaymentSummary(reservationId)
+      ]);
 
       if (version !== requestVersion.current) {
         return;
       }
 
       setPayments(Array.isArray(result) ? result : []);
+      setSummary(groundedSummary ?? null);
     } catch (failure) {
       if (version !== requestVersion.current) {
         return;
@@ -122,7 +132,7 @@ export function useReservationPayments({
 
   useEffect(() => {
     void loadPayments();
-  }, [loadPayments]);
+  }, [loadPayments, reloadSignal]);
 
   const hasActivePayment = payments.some((payment) =>
     isActivePaymentStatus(payment.status)
@@ -207,6 +217,7 @@ export function useReservationPayments({
 
   return {
     payments,
+    summary,
     isLoading,
     isSubmitting,
     error,

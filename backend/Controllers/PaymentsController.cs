@@ -51,4 +51,17 @@ public sealed class PaymentsController(IPaymentService paymentService) : Control
         var response = await paymentService.GetReservationPaymentsAsync(reservationId, cancellationToken);
         return response.Success ? Ok(response) : NotFound(response);
     }
+
+    /// <summary>Gets the grounded payment summary (booking amount, paid, remaining balance) for a reservation.</summary>
+    [HttpGet("/api/reservations/{reservationId:guid}/payment-summary")]
+    [RequiresPermission("reservations.read")]
+    [ProducesResponseType(typeof(ApiResponse<ReservationPaymentGroundingDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<ReservationPaymentGroundingDto>), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ApiResponse<ReservationPaymentGroundingDto>>> GetReservationPaymentSummary(
+        Guid reservationId,
+        CancellationToken cancellationToken)
+    {
+        var response = await paymentService.GetReservationPaymentSummaryAsync(reservationId, cancellationToken);
+        return response.Success ? Ok(response) : NotFound(response);
+    }
 }

@@ -409,7 +409,63 @@ public sealed class ConversationServiceTests
     }
 
     [Fact]
+    public async Task AddPaymentConfirmationMessageAsync_StoresSystemMessageVisibleToGuest()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(status: ConversationStatus.HumanManaged, humanTakeover: true);
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.AddPaymentConfirmationMessageAsync(
+            fixture.CompanyId,
+            conversation.Id,
+            "Payment received. We have received your payment of 4,000.00 KES. Your reservation is now paid in full. Thank you.",
+            "payment-confirmation:11111111-1111-1111-1111-111111111111",
+            CancellationToken.None);
+
+        Assert.True(response.Success, response.Message + " " + string.Join(",", response.Errors));
+        Assert.Equal(ConversationSenderType.System, response.Data!.SenderType);
+        Assert.False(response.Data.IsInternal);
+        Assert.Single(fixture.Repository.Messages);
+    }
+
+    [Fact]
+    public async Task AddPaymentConfirmationMessageAsync_DuplicateIdempotencyKeyDoesNotCreateSecondMessage()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        const string idempotencyKey = "payment-confirmation:22222222-2222-2222-2222-222222222222";
+
+        var first = await fixture.Service.AddPaymentConfirmationMessageAsync(fixture.CompanyId, conversation.Id, "Payment received.", idempotencyKey, CancellationToken.None);
+        var second = await fixture.Service.AddPaymentConfirmationMessageAsync(fixture.CompanyId, conversation.Id, "Payment received.", idempotencyKey, CancellationToken.None);
+
+        Assert.True(first.Success);
+        Assert.True(second.Success);
+        Assert.Equal(first.Data!.Id, second.Data!.Id);
+        Assert.Single(fixture.Repository.Messages);
+    }
+
+    [Fact]
+    public async Task AddPaymentConfirmationMessageAsync_SameIdempotencyKeyIsTenantScoped()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+        var otherCompanyId = Guid.NewGuid();
+        var otherConversation = fixture.Repository.NewConversation(overrideCompanyId: otherCompanyId);
+        fixture.Repository.Conversations.Add(otherConversation);
+        const string idempotencyKey = "payment-confirmation:33333333-3333-3333-3333-333333333333";
+
+        await fixture.Service.AddPaymentConfirmationMessageAsync(fixture.CompanyId, conversation.Id, "Payment received.", idempotencyKey, CancellationToken.None);
+        var otherTenantResult = await fixture.Service.AddPaymentConfirmationMessageAsync(otherCompanyId, otherConversation.Id, "Payment received.", idempotencyKey, CancellationToken.None);
+
+        Assert.True(otherTenantResult.Success);
+        Assert.Equal(2, fixture.Repository.Messages.Count);
+    }
+
+    [Fact]
     public async Task AddGuestMessageAsync_PreventsDuplicateExternalMessageId()
+
     {
         var fixture = new Fixture();
         var conversation = fixture.Repository.NewConversation();

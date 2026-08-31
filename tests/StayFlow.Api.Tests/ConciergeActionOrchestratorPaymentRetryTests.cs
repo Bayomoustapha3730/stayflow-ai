@@ -18,11 +18,14 @@ namespace StayFlow.Api.Tests;
 /// IX_PendingConciergeActions_IdempotencyKey. Runs against a real, ephemeral Npgsql/PostgreSQL
 /// database (created and dropped per test) rather than the EF InMemory provider, because
 /// InMemory does not enforce unique indexes and would silently hide this class of bug.
-/// Requires a reachable PostgreSQL server; configure via the STAYFLOW_TEST_POSTGRES_CONNECTION
-/// environment variable (maintenance/admin connection string), defaulting to a local instance.
+/// Requires a reachable PostgreSQL server. Connection resolution order:
+/// STAYFLOW_TEST_POSTGRES_CONNECTION; ConnectionStrings__DefaultConnection with Database=postgres;
+/// finally a local development fallback.
 /// </summary>
 public sealed class ConciergeActionOrchestratorPaymentRetryTests : IAsyncLifetime
 {
+    private const string TestPostgresConnectionVariable = "STAYFLOW_TEST_POSTGRES_CONNECTION";
+    private const string DefaultConnectionVariable = "ConnectionStrings__DefaultConnection";
     private const string DefaultMaintenanceConnection = "Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=postgres";
 
     private readonly string databaseName = $"stayflow_test_{Guid.NewGuid():N}";
@@ -31,7 +34,7 @@ public sealed class ConciergeActionOrchestratorPaymentRetryTests : IAsyncLifetim
 
     public async Task InitializeAsync()
     {
-        maintenanceConnectionString = Environment.GetEnvironmentVariable("STAYFLOW_TEST_POSTGRES_CONNECTION") ?? DefaultMaintenanceConnection;
+        maintenanceConnectionString = ResolveMaintenanceConnectionString();
 
         await using (var maintenanceConnection = new NpgsqlConnection(maintenanceConnectionString))
         {
@@ -47,6 +50,28 @@ public sealed class ConciergeActionOrchestratorPaymentRetryTests : IAsyncLifetim
 
         await using var schemaContext = new ApplicationDbContext(dbOptions);
         await schemaContext.Database.EnsureCreatedAsync();
+    }
+
+    private static string ResolveMaintenanceConnectionString()
+    {
+        var explicitConnection = Environment.GetEnvironmentVariable(TestPostgresConnectionVariable);
+        if (!string.IsNullOrWhiteSpace(explicitConnection))
+        {
+            return explicitConnection;
+        }
+
+        var defaultConnection = Environment.GetEnvironmentVariable(DefaultConnectionVariable);
+        if (!string.IsNullOrWhiteSpace(defaultConnection))
+        {
+            var builder = new NpgsqlConnectionStringBuilder(defaultConnection)
+            {
+                Database = "postgres"
+            };
+
+            return builder.ConnectionString;
+        }
+
+        return DefaultMaintenanceConnection;
     }
 
     public async Task DisposeAsync()

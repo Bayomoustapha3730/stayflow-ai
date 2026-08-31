@@ -1,5 +1,7 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Payments;
 using StayFlow.Api.Models;
@@ -55,6 +57,82 @@ public sealed class MpesaPaymentFoundationTests
         Assert.Equal(MpesaCallbackResult.DuplicateIgnored, await service.HandleMpesaCallbackAsync(failure, CancellationToken.None));
         Assert.Equal(PaymentStatus.Paid.ToStorageValue(), payment.Status);
     }
+
+    [Fact]
+    public async Task Callback_ConcurrentDuplicateUniqueViolation_IsTreatedAsDuplicate()
+    {
+        var companyId = Guid.NewGuid();
+        var payment = CreatePayment(companyId, PaymentStatus.Processing.ToStorageValue());
+        var repository = new FakePaymentRepository(
+            payment,
+            saveChangesException: WebhookEventUniqueViolation());
+        var service = CreateService(repository, companyId);
+
+        var result = await service.HandleMpesaCallbackAsync(
+            Callback(payment.ProviderCheckoutRequestId!, 0, "Receipt-123"),
+            CancellationToken.None);
+
+        Assert.Equal(MpesaCallbackResult.DuplicateIgnored, result);
+    }
+
+    [Fact]
+    public async Task Callback_NonUniqueDbUpdateException_IsNotTreatedAsDuplicate()
+    {
+        var companyId = Guid.NewGuid();
+        var payment = CreatePayment(companyId, PaymentStatus.Processing.ToStorageValue());
+        var repository = new FakePaymentRepository(
+            payment,
+            saveChangesException: new DbUpdateException(
+                "foreign key violation",
+                new PostgresException("insert or update violates foreign key constraint", "ERROR", "ERROR", PostgresErrorCodes.ForeignKeyViolation)));
+        var service = CreateService(repository, companyId);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.HandleMpesaCallbackAsync(
+            Callback(payment.ProviderCheckoutRequestId!, 0, "Receipt-123"),
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Callback_UniqueViolationOnUnrelatedConstraint_IsNotTreatedAsDuplicate()
+    {
+        var companyId = Guid.NewGuid();
+        var payment = CreatePayment(companyId, PaymentStatus.Processing.ToStorageValue());
+        var repository = new FakePaymentRepository(
+            payment,
+            saveChangesException: new DbUpdateException(
+                "duplicate key",
+                new PostgresException("duplicate key value violates unique constraint", "ERROR", "ERROR", PostgresErrorCodes.UniqueViolation, constraintName: "IX_SomeOtherTable_SomeColumn")));
+        var service = CreateService(repository, companyId);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.HandleMpesaCallbackAsync(
+            Callback(payment.ProviderCheckoutRequestId!, 0, "Receipt-123"),
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Callback_PlainDbUpdateExceptionWithoutPostgresCause_IsNotTreatedAsDuplicate()
+    {
+        var companyId = Guid.NewGuid();
+        var payment = CreatePayment(companyId, PaymentStatus.Processing.ToStorageValue());
+        var repository = new FakePaymentRepository(
+            payment,
+            saveChangesException: new DbUpdateException("concurrency failure"));
+        var service = CreateService(repository, companyId);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => service.HandleMpesaCallbackAsync(
+            Callback(payment.ProviderCheckoutRequestId!, 0, "Receipt-123"),
+            CancellationToken.None));
+    }
+
+    private static DbUpdateException WebhookEventUniqueViolation() =>
+        new(
+            "duplicate key",
+            new PostgresException(
+                "duplicate key value violates unique constraint",
+                "ERROR",
+                "ERROR",
+                PostgresErrorCodes.UniqueViolation,
+                constraintName: "IX_PaymentWebhookEvents_Provider_EventId"));
 
     [Fact]
     public async Task Callback_UnknownCheckoutRequestIsIgnored()
@@ -237,6 +315,7 @@ public sealed class MpesaPaymentFoundationTests
                 ReconciliationBatchSize = 50,
                 ReconciliationMaxAgeSeconds = 600
             }),
+            new NoOpPostPaymentNotificationService(),
             NullLogger<MpesaPaymentReconciliationService>.Instance);
 
         var count = await service.ReconcileStalePaymentsAsync(
@@ -436,6 +515,8 @@ public sealed class MpesaPaymentFoundationTests
             new FakeMpesaApiClient(),
             new FakeCredentialResolver(),
             Options.Create(new MpesaOptions { Enabled = true, ShortCode = "123456", CallbackBaseUrl = "https://example.test", DevelopmentMode = true }),
+            new NoOpReservationPaymentGroundingService(),
+            new NoOpPostPaymentNotificationService(),
             NullLogger<PaymentService>.Instance);
     }
 
@@ -457,6 +538,7 @@ public sealed class MpesaPaymentFoundationTests
                 ReconciliationScanIntervalSeconds = 30,
                 ReconciliationBatchSize = 50
             }),
+            new NoOpPostPaymentNotificationService(),
             NullLogger<MpesaPaymentReconciliationService>.Instance);
     }
 
@@ -538,7 +620,8 @@ public sealed class MpesaPaymentFoundationTests
     private sealed class FakePaymentRepository(
         Payment? payment,
         Reservation? reservation = null,
-        IReadOnlyCollection<Payment>? stalePayments = null) : IPaymentRepository
+        IReadOnlyCollection<Payment>? stalePayments = null,
+        Exception? saveChangesException = null) : IPaymentRepository
     {
         private readonly List<PaymentWebhookEvent> events = [];
         public Payment? AddedPayment { get; private set; }
@@ -570,6 +653,7 @@ public sealed class MpesaPaymentFoundationTests
             return Task.FromResult(true);
         }
         public Task AddAuditLogAsync(AuditLog auditLog, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SaveChangesAsync(CancellationToken cancellationToken) =>
+            saveChangesException is null ? Task.CompletedTask : Task.FromException(saveChangesException);
     }
 }

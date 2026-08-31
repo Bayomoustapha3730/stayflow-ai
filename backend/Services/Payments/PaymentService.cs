@@ -1,8 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Payments;
 using StayFlow.Api.Models;
@@ -17,6 +19,8 @@ public sealed class PaymentService(
     IMpesaApiClient mpesaApiClient,
     IMpesaCredentialResolver credentialResolver,
     IOptions<MpesaOptions> mpesaOptions,
+    IReservationPaymentGroundingService paymentGroundingService,
+    IPostPaymentNotificationService postPaymentNotificationService,
     ILogger<PaymentService> logger) : IPaymentService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -189,6 +193,19 @@ public sealed class PaymentService(
         return ApiResponse<IReadOnlyCollection<PaymentDto>>.Ok(payments.Select(MapToDto).ToList());
     }
 
+    public async Task<ApiResponse<ReservationPaymentGroundingDto>> GetReservationPaymentSummaryAsync(Guid reservationId, CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out _, out var tenantError))
+        {
+            return ApiResponse<ReservationPaymentGroundingDto>.Fail(tenantError, [tenantError]);
+        }
+
+        var grounding = await paymentGroundingService.GetReservationPaymentGroundingAsync(reservationId, companyId, cancellationToken);
+        return grounding is null
+            ? ApiResponse<ReservationPaymentGroundingDto>.Fail("Reservation was not found.")
+            : ApiResponse<ReservationPaymentGroundingDto>.Ok(grounding);
+    }
+
     public async Task<MpesaCallbackResult> HandleMpesaCallbackAsync(string rawBody, CancellationToken cancellationToken)
     {
         var stkCallback = TryParseCallback(rawBody);
@@ -260,7 +277,7 @@ public sealed class PaymentService(
         {
             await paymentRepository.SaveChangesAsync(cancellationToken);
         }
-        catch (Exception ex) when (IsUniqueConstraintViolation(ex))
+        catch (Exception ex) when (IsWebhookEventDuplicateViolation(ex))
         {
             // Concurrent retry of the same callback raced past the AnyAsync check; the unique
             // (Provider, EventId) index rejected the duplicate. Treat as already-processed.
@@ -270,7 +287,29 @@ public sealed class PaymentService(
             return MpesaCallbackResult.DuplicateIgnored;
         }
 
+        await NotifyIfPaidAsync(payment, cancellationToken);
+
         return MpesaCallbackResult.Processed;
+    }
+
+    // Fires after the Paid transition is durably saved. NotifyPaymentPaidAsync never throws, but a
+    // defensive try/catch here guarantees a notification failure can never surface as a callback
+    // failure or affect the already-authoritative payment record.
+    private async Task NotifyIfPaidAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(payment.Status, PaymentStatus.Paid.ToStorageValue(), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            await postPaymentNotificationService.NotifyPaymentPaidAsync(payment, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Post-payment notification threw unexpectedly for payment {PaymentId}.", payment.Id);
+        }
     }
 
     private static void ApplyCallbackToPayment(Payment payment, MpesaStkCallback stkCallback)
@@ -400,8 +439,22 @@ public sealed class PaymentService(
         return Convert.ToHexString(hash);
     }
 
-    private static bool IsUniqueConstraintViolation(Exception ex) =>
-        ex.GetType().Name.Contains("DbUpdateException", StringComparison.Ordinal);
+    // Index name is fixed by the EnhancePaymentModelForMpesa migration.
+    private const string WebhookEventUniqueIndexName = "IX_PaymentWebhookEvents_Provider_EventId";
+
+    // Only a genuine 23505 on the webhook-event dedupe index means "already processed". Every other
+    // DbUpdateException is a real persistence failure and must not be masked as a benign duplicate.
+    private static bool IsWebhookEventDuplicateViolation(Exception ex)
+    {
+        if (ex is not DbUpdateException dbUpdateException)
+        {
+            return false;
+        }
+
+        return dbUpdateException.GetBaseException() is PostgresException postgresException
+            && postgresException.SqlState == PostgresErrorCodes.UniqueViolation
+            && string.Equals(postgresException.ConstraintName, WebhookEventUniqueIndexName, StringComparison.Ordinal);
+    }
 
     private static PaymentDto MapToDto(Payment payment) => new()
     {

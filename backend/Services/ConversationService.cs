@@ -617,6 +617,35 @@ public sealed class ConversationService(
         });
     }
 
+    public async Task<ApiResponse<ConversationMessageResponse>> AddPaymentConfirmationMessageAsync(
+        Guid companyId,
+        Guid conversationId,
+        string content,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var duplicate = await conversationRepository.FindByExternalMessageIdAsync(companyId, idempotencyKey, null, cancellationToken);
+        if (duplicate is not null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(duplicate), "Payment confirmation already delivered.");
+        }
+
+        return await AddMessageAsync(
+            companyId,
+            conversationId,
+            ConversationSenderType.System,
+            ConversationMessageType.Text,
+            content,
+            DateTimeOffset.UtcNow,
+            idempotencyKey,
+            ConversationMessageProvider.None,
+            null,
+            null,
+            false,
+            "PaymentConfirmationStored",
+            cancellationToken);
+    }
+
     private async Task<ApiResponse<ConversationMessageResponse>> AddMessageAsync(
         Guid conversationId,
         ConversationSenderType senderType,
@@ -636,6 +665,24 @@ public sealed class ConversationService(
             return ApiResponse<ConversationMessageResponse>.Fail(tenantError, [tenantError]);
         }
 
+        return await AddMessageAsync(companyId, conversationId, senderType, messageType, content, sentAt, externalMessageId, provider, deliveryStatus, aiResult, isInternal, auditAction, cancellationToken);
+    }
+
+    private async Task<ApiResponse<ConversationMessageResponse>> AddMessageAsync(
+        Guid companyId,
+        Guid conversationId,
+        ConversationSenderType senderType,
+        ConversationMessageType messageType,
+        string content,
+        DateTimeOffset? sentAt,
+        string? externalMessageId,
+        ConversationMessageProvider provider,
+        ConversationMessageDeliveryStatus? deliveryStatus,
+        AIOrchestrationResult? aiResult,
+        bool isInternal,
+        string auditAction,
+        CancellationToken cancellationToken)
+    {
         var errors = ValidateContent(content);
         if (errors.Count > 0)
         {
@@ -739,8 +786,9 @@ public sealed class ConversationService(
             timestamp = DateTimeOffset.UtcNow
         }, cancellationToken);
 
-        if (!isInternal && senderType is ConversationSenderType.Host or ConversationSenderType.AI)
+        if (!isInternal && senderType is ConversationSenderType.Host or ConversationSenderType.AI or ConversationSenderType.System)
         {
+            // System covers e.g. payment confirmations: reuse the same outbound dispatch as Host/AI messages.
             await conversationChannelDispatcher.DispatchOutboundMessageAsync(conversation, message, cancellationToken);
         }
 
@@ -1231,7 +1279,7 @@ public sealed class ConversationService(
             return requestedProvider;
         }
 
-        return conversation.Channel == DTOs.ReservationContext.GuestChannel.WhatsApp && senderType is ConversationSenderType.Host or ConversationSenderType.AI
+        return conversation.Channel == DTOs.ReservationContext.GuestChannel.WhatsApp && senderType is ConversationSenderType.Host or ConversationSenderType.AI or ConversationSenderType.System
             ? ConversationMessageProvider.WhatsAppCloud
             : ConversationMessageProvider.None;
     }
@@ -1253,7 +1301,7 @@ public sealed class ConversationService(
             return requestedStatus;
         }
 
-        if (provider == ConversationMessageProvider.WhatsAppCloud && senderType is ConversationSenderType.Host or ConversationSenderType.AI)
+        if (provider == ConversationMessageProvider.WhatsAppCloud && senderType is ConversationSenderType.Host or ConversationSenderType.AI or ConversationSenderType.System)
         {
             return ConversationMessageDeliveryStatus.Pending;
         }

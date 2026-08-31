@@ -41,7 +41,9 @@ export function HostConversationDetail({
   const reservationPayments = useReservationPayments({
     reservationId,
     accessToken,
-    onUnauthorized
+    onUnauthorized,
+    // Realtime message arrivals (including the backend payment confirmation) re-ground payment state.
+    reloadSignal: detail.messages.length
   });
 
   if (!conversationId) {
@@ -96,6 +98,7 @@ export function HostConversationDetail({
         {conversation.reservationId ? (
           <MpesaPaymentPanel
             payments={reservationPayments.payments}
+            summary={reservationPayments.summary}
             isLoading={reservationPayments.isLoading}
             isSubmitting={reservationPayments.isSubmitting}
             error={reservationPayments.error}

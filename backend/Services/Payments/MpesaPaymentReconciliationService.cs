@@ -15,6 +15,7 @@ public sealed class MpesaPaymentReconciliationService(
     IMpesaApiClient mpesaApiClient,
     IMpesaCredentialResolver credentialResolver,
     IOptions<MpesaOptions> options,
+    IPostPaymentNotificationService postPaymentNotificationService,
     ILogger<MpesaPaymentReconciliationService> logger)
     : IMpesaPaymentReconciliationService
 {
@@ -130,6 +131,8 @@ public sealed class MpesaPaymentReconciliationService(
                     payment.Id,
                     response.ResultCode.Value,
                     payment.Status);
+
+                await NotifyIfPaidAsync(payment, cancellationToken);
             }
             catch (OperationCanceledException)
                 when (cancellationToken.IsCancellationRequested)
@@ -150,6 +153,25 @@ public sealed class MpesaPaymentReconciliationService(
         }
 
         return reconciled;
+    }
+
+    // Mirrors PaymentService's guard: a notification failure must never affect the
+    // already-authoritative Paid payment reconciled above.
+    private async Task NotifyIfPaidAsync(Payment payment, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(payment.Status, PaymentStatus.Paid.ToStorageValue(), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            await postPaymentNotificationService.NotifyPaymentPaidAsync(payment, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Post-payment notification threw unexpectedly for reconciled payment {PaymentId}.", payment.Id);
+        }
     }
 
     private bool ApplyResult(

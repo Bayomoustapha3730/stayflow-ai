@@ -138,6 +138,8 @@ public sealed class MpesaDevelopmentControllerTests
                 CallbackBaseUrl = "https://example.test",
                 DevelopmentMode = true
             }),
+            new NoOpReservationPaymentGroundingService(),
+            new NoOpPostPaymentNotificationService(),
             NullLogger<PaymentService>.Instance);
 
         return new MpesaDevelopmentController(

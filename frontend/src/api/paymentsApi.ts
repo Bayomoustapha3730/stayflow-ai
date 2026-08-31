@@ -1,7 +1,8 @@
 import type { HttpClient } from "./httpClient";
 import type {
   InitiateMpesaPaymentRequest,
-  Payment
+  Payment,
+  ReservationPaymentSummary
 } from "../models/payments";
 
 export function createPaymentsApi(http: HttpClient) {
@@ -22,6 +23,12 @@ export function createPaymentsApi(http: HttpClient) {
     listReservationPayments(reservationId: string) {
       return http.get<Payment[]>(
         `/api/reservations/${encodeURIComponent(reservationId)}/payments`
+      );
+    },
+
+    getReservationPaymentSummary(reservationId: string) {
+      return http.get<ReservationPaymentSummary>(
+        `/api/reservations/${encodeURIComponent(reservationId)}/payment-summary`
       );
     }
   };

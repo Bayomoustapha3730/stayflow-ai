@@ -27,11 +27,39 @@ export interface Payment {
   createdAt: string;
 }
 
+/// Backend-grounded payment snapshot for a reservation. The backend is the source of truth for
+/// paid/balance-due status; the UI must never recompute it from the raw payment list.
+export interface ReservationPaymentSummary {
+  reservationId: string;
+  bookingAmount?: number | null;
+  currency: string;
+  totalPaid: number;
+  remainingBalance?: number | null;
+  hasSuccessfulPayment: boolean;
+  paymentCount: number;
+  latestPaymentStatus?: string | null;
+  latestPaymentAmount?: number | null;
+  latestPaymentRequestedAtUtc?: string | null;
+  latestPaymentCompletedAtUtc?: string | null;
+  latestProvider?: string | null;
+  latestPaymentMethod?: string | null;
+  latestReceiptNumber?: string | null;
+  latestFailureMessage?: string | null;
+}
+
 export interface InitiateMpesaPaymentRequest {
   reservationId: string;
   customerPhoneNumber: string;
   description?: string;
   idempotencyKey?: string;
+}
+
+export function isPaidInFull(summary?: ReservationPaymentSummary | null): boolean {
+  if (!summary || summary.bookingAmount == null || summary.remainingBalance == null) {
+    return false;
+  }
+
+  return summary.hasSuccessfulPayment && summary.remainingBalance <= 0;
 }
 
 export function isActivePaymentStatus(status?: string | null): boolean {

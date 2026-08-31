@@ -3,12 +3,14 @@ import {
   useMemo,
   useState
 } from "react";
-import type { Payment } from "../../models/payments";
-import { isActivePaymentStatus } from "../../models/payments";
+import type { Payment, ReservationPaymentSummary } from "../../models/payments";
+import { isActivePaymentStatus, isPaidInFull } from "../../models/payments";
 import { PaymentStatusBadge } from "./PaymentStatusBadge";
+import { ReservationPaymentSummaryCard } from "./ReservationPaymentSummaryCard";
 
 interface MpesaPaymentPanelProps {
   payments: Payment[];
+  summary?: ReservationPaymentSummary | null;
   isLoading: boolean;
   isSubmitting: boolean;
   error: string | null;
@@ -70,6 +72,7 @@ function formatDate(value?: string | null) {
 
 export function MpesaPaymentPanel({
   payments,
+  summary = null,
   isLoading,
   isSubmitting,
   error,
@@ -86,6 +89,9 @@ export function MpesaPaymentPanel({
     () => payments.some((payment) => isActivePaymentStatus(payment.status)),
     [payments]
   );
+
+  const paidInFull = isPaidInFull(summary);
+  const requestsBlocked = hasActivePayment || paidInFull;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,6 +139,8 @@ export function MpesaPaymentPanel({
           {isLoading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
+
+      <ReservationPaymentSummaryCard summary={summary} formatMoney={formatMoney} />
 
       {latestPayment ? (
         <div className="mpesa-payment-latest">
@@ -208,22 +216,24 @@ export function MpesaPaymentPanel({
               setPhone(event.target.value);
               setPhoneError(null);
             }}
-            disabled={isSubmitting || hasActivePayment}
+            disabled={isSubmitting || requestsBlocked}
           />
 
           <button
             type="submit"
             disabled={
               isSubmitting ||
-              hasActivePayment ||
+              requestsBlocked ||
               !phone.trim()
             }
           >
             {isSubmitting
               ? "Sending…"
-              : hasActivePayment
-                ? "Payment in progress"
-                : "Request M-PESA payment"}
+              : paidInFull
+                ? "Paid in full"
+                : hasActivePayment
+                  ? "Payment in progress"
+                  : "Request M-PESA payment"}
           </button>
         </div>
 
