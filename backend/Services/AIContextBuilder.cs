@@ -13,7 +13,8 @@ public sealed class AIContextBuilder(
     IQuestionRelevanceClassifier questionRelevanceClassifier,
     ICurrentTenantContext currentTenantContext,
     IOptions<AIContextOptions> options,
-    ILogger<AIContextBuilder> logger) : IAIContextBuilder
+    ILogger<AIContextBuilder> logger,
+    IReservationLifecycleService reservationLifecycleService) : IAIContextBuilder
 {
     public async Task<AIContextBuildResult> BuildAsync(AIContextRequest request, CancellationToken cancellationToken)
     {
@@ -157,6 +158,28 @@ public sealed class AIContextBuilder(
         var returningGuest = await aiContextRepository.CountCompletedReservationsForGuestAsync(companyId, guest.Id, cancellationToken) > 0;
         var requiresAccessAuthorization = categories.Contains(QuestionContextCategory.PropertyAccess);
         var knowledge = BuildKnowledgeContext(property, categories, requiresAccessAuthorization);
+        ReservationLifecycleContext lifecycleContext;
+        try
+        {
+            lifecycleContext = reservationLifecycleService.GetContext(reservation, property);
+        }
+        catch (ArgumentException)
+        {
+            return new AIContextBuildResult
+            {
+                Outcome = AIContextBuildOutcome.EscalationRequired,
+                QuestionCategories = categories,
+                Metadata = new AIContextBuildMetadata
+                {
+                    CompanyId = companyId,
+                    GuestId = guest.Id,
+                    ReservationId = reservation.Id,
+                    PropertyId = property.Id
+                },
+                EscalationReason = "ReservationLifecycleContextUnavailable",
+                Message = "Reservation lifecycle context could not be calculated safely."
+            };
+        }
 
         return new AIContextBuildResult
         {
@@ -181,7 +204,14 @@ public sealed class AIContextBuilder(
                     Status = reservation.Status.ToString(),
                     CheckInDate = reservation.CheckInDate,
                     CheckOutDate = reservation.CheckOutDate,
-                    CurrentStayPhase = DetermineStayPhase(reservation, request.CurrentTimestamp),
+                    CurrentStayPhase = lifecycleContext.LifecycleStage.ToString(),
+                    LifecycleStage = lifecycleContext.LifecycleStage.ToString(),
+                    CheckInLocal = lifecycleContext.CheckInLocal,
+                    CheckOutLocal = lifecycleContext.CheckOutLocal,
+                    DaysUntilCheckIn = lifecycleContext.DaysUntilCheckIn,
+                    DaysUntilCheckOut = lifecycleContext.DaysUntilCheckOut,
+                    IsCurrentlyInStay = lifecycleContext.IsCurrentlyInStay,
+                    PropertyTimeZone = lifecycleContext.PropertyTimeZone,
                     Adults = reservation.Adults,
                     Children = reservation.Children,
                     SpecialRequests = string.IsNullOrWhiteSpace(reservation.SpecialRequests) ? null : reservation.SpecialRequests.Trim()
@@ -380,28 +410,6 @@ public sealed class AIContextBuilder(
     {
         var text = $"{title} {content}".ToLowerInvariant();
         return ContainsAny(text, ["door code", "lockbox", "smart lock", "gate code", "alarm code", "access code", "pin code", "password"]);
-    }
-
-    private static string DetermineStayPhase(Reservation reservation, DateTimeOffset currentTimestamp)
-    {
-        var currentDate = DateOnly.FromDateTime(currentTimestamp.UtcDateTime);
-        if (currentDate < reservation.CheckInDate)
-        {
-            return "PreArrival";
-        }
-
-        if (currentDate > reservation.CheckOutDate)
-        {
-            return "PostStay";
-        }
-
-        return reservation.Status switch
-        {
-            ReservationStatus.ReadyForCheckIn => "ReadyForCheckIn",
-            ReservationStatus.CheckedIn or ReservationStatus.ActiveStay or ReservationStatus.CheckOutPending => "ActiveStay",
-            ReservationStatus.CheckedOut or ReservationStatus.PostStay or ReservationStatus.Completed => "PostStay",
-            _ => "InStayWindow"
-        };
     }
 
     private async Task AuditAsync(

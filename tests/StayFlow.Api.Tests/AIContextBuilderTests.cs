@@ -90,6 +90,37 @@ public sealed class AIContextBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_UsesInjectedLifecycleServiceForLifecycleFieldsAndCurrentStayPhaseCompatibility()
+    {
+        var lifecycleService = new FixedLifecycleService(ReservationLifecycleStage.CheckingOutToday);
+        var fixture = new Fixture(lifecycleService);
+
+        var result = await fixture.BuildAsync("What is check in?");
+
+        Assert.True(lifecycleService.WasCalled);
+        Assert.Equal("CheckingOutToday", result.Context!.Reservation!.LifecycleStage);
+        Assert.Equal(result.Context.Reservation.LifecycleStage, result.Context.Reservation.CurrentStayPhase);
+        Assert.Equal(fixture.Reservation.CheckInDate, result.Context.Reservation.CheckInLocal);
+        Assert.Equal(fixture.Reservation.CheckOutDate, result.Context.Reservation.CheckOutLocal);
+        Assert.Equal(2, result.Context.Reservation.DaysUntilCheckIn);
+        Assert.Equal(5, result.Context.Reservation.DaysUntilCheckOut);
+        Assert.True(result.Context.Reservation.IsCurrentlyInStay);
+        Assert.Equal("Africa/Nairobi", result.Context.Reservation.PropertyTimeZone);
+    }
+
+    [Fact]
+    public async Task BuildAsync_LifecycleServiceFailureEscalatesWithoutReturningReservationContext()
+    {
+        var fixture = new Fixture(new ThrowingLifecycleService());
+
+        var result = await fixture.BuildAsync("What is check in?");
+
+        Assert.Equal(AIContextBuildOutcome.EscalationRequired, result.Outcome);
+        Assert.Equal("ReservationLifecycleContextUnavailable", result.EscalationReason);
+        Assert.Null(result.Context);
+    }
+
+    [Fact]
     public async Task BuildAsync_CheckOutQuestionIncludesCheckoutContext()
     {
         var fixture = new Fixture();
@@ -292,7 +323,7 @@ public sealed class AIContextBuilderTests
     [Fact]
     public async Task BuildAsync_ContextLimitsAreEnforced()
     {
-        var fixture = new Fixture(new AIContextOptions { MaxKnowledgeArticles = 1, MaxRecommendations = 1, MaxHouseRules = 1, MaxEmergencyContacts = 1 });
+        var fixture = new Fixture(options: new AIContextOptions { MaxKnowledgeArticles = 1, MaxRecommendations = 1, MaxHouseRules = 1, MaxEmergencyContacts = 1 });
         fixture.Property.PropertyKnowledgeArticles.Add(Article(fixture, "Emergency 1", "Emergency contact one."));
         fixture.Property.PropertyKnowledgeArticles.Add(Article(fixture, "Emergency 2", "Emergency contact two."));
         fixture.Property.PropertyRecommendations.Add(Recommendation("Hospital A", "Emergency"));
@@ -379,7 +410,7 @@ public sealed class AIContextBuilderTests
 
     private sealed class Fixture
     {
-        public Fixture(AIContextOptions? options = null)
+        public Fixture(IReservationLifecycleService? lifecycleService = null, AIContextOptions? options = null)
         {
             Property = new Property
             {
@@ -430,13 +461,15 @@ public sealed class AIContextBuilderTests
             };
             Repository = new FakeAIContextRepository(this);
             Resolver = new FakeReservationContextResolver(this);
+            LifecycleService = lifecycleService ?? new FixedLifecycleService(ReservationLifecycleStage.PreArrival);
             Builder = new AIContextBuilder(
                 Repository,
                 Resolver,
                 new KeywordQuestionRelevanceClassifier(),
                 new FakeCurrentTenantContext(CompanyId),
                 Options.Create(options ?? new AIContextOptions()),
-                NullLogger<AIContextBuilder>.Instance);
+                NullLogger<AIContextBuilder>.Instance,
+                LifecycleService);
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();
@@ -449,6 +482,7 @@ public sealed class AIContextBuilderTests
         public Conversation Conversation { get; }
         public FakeAIContextRepository Repository { get; }
         public FakeReservationContextResolver Resolver { get; }
+        public IReservationLifecycleService LifecycleService { get; }
         private AIContextBuilder Builder { get; }
 
         public Task<AIContextBuildResult> BuildAsync(string question, Guid? conversationId = null)
@@ -469,6 +503,38 @@ public sealed class AIContextBuilderTests
         public Guid? UserId { get; } = Guid.NewGuid();
         public string? CorrelationId { get; } = "ai-context-test-correlation";
         public bool IsAuthenticated { get; } = true;
+    }
+
+    private sealed class FixedLifecycleService(ReservationLifecycleStage stage) : IReservationLifecycleService
+    {
+        public bool WasCalled { get; private set; }
+
+        public ReservationLifecycleContext GetContext(Reservation reservation, Property property)
+        {
+            WasCalled = true;
+            return new ReservationLifecycleContext
+            {
+                ReservationId = reservation.Id,
+                CompanyId = reservation.CompanyId,
+                PropertyId = reservation.PropertyId,
+                GuestId = reservation.PrimaryGuestId,
+                LifecycleStage = stage,
+                CheckInLocal = reservation.CheckInDate,
+                CheckOutLocal = reservation.CheckOutDate,
+                DaysUntilCheckIn = 2,
+                DaysUntilCheckOut = 5,
+                IsCurrentlyInStay = true,
+                PropertyTimeZone = property.TimeZone
+            };
+        }
+    }
+
+    private sealed class ThrowingLifecycleService : IReservationLifecycleService
+    {
+        public ReservationLifecycleContext GetContext(Reservation reservation, Property property)
+        {
+            throw new ArgumentException("Invalid property timezone.");
+        }
     }
 
     private sealed class FakeReservationContextResolver(Fixture fixture) : IReservationContextResolver

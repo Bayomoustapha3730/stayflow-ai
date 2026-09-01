@@ -36,7 +36,11 @@ function fail(status: number, message: string) {
   };
 }
 
-function detail(status = ConversationStatus.HumanManaged, humanTakeoverEnabled = true) {
+function detail(
+  status = ConversationStatus.HumanManaged,
+  humanTakeoverEnabled = true,
+  lifecycleStage?: string | null
+) {
   return {
     id: "c-1",
     conversationId: "c-1",
@@ -65,7 +69,8 @@ function detail(status = ConversationStatus.HumanManaged, humanTakeoverEnabled =
       confirmationNumber: "ABC123",
       checkInDate: "2026-08-10",
       checkOutDate: "2026-08-14",
-      status: 0
+      status: 0,
+      lifecycleStage
     },
     assignedUser: {
       id: "u-1",
@@ -326,5 +331,79 @@ describe("HostConversationDetail", () => {
     expect(timeline?.contains(noteInput)).toBe(false);
     expect(composerStack?.contains(replyInput)).toBe(true);
     expect(composerStack?.contains(noteInput)).toBe(true);
+  });
+
+  describe("reservation lifecycle badge", () => {
+    const cases: Array<[string, string]> = [
+      ["NotConfirmed", "NOT CONFIRMED"],
+      ["FutureConfirmed", "FUTURE"],
+      ["PreArrival", "PRE-ARRIVAL"],
+      ["ArrivingToday", "ARRIVING TODAY"],
+      ["InStay", "IN STAY"],
+      ["CheckingOutToday", "CHECKING OUT TODAY"],
+      ["Completed", "COMPLETED"],
+      ["Cancelled", "CANCELLED"],
+      ["NoShow", "NO SHOW"]
+    ];
+
+    it.each(cases)("renders %s as %s", async (lifecycleStage, expectedLabel) => {
+      vi.stubGlobal("fetch", createFetchMock(detail(ConversationStatus.HumanManaged, true, lifecycleStage)));
+
+      render(
+        <HostConversationDetail
+          conversationId="c-1"
+          accessToken="host-token"
+          onUnauthorized={vi.fn()}
+        />
+      );
+
+      await waitFor(() => expect(screen.getByText(expectedLabel)).toBeInTheDocument());
+    });
+
+    it("omits the badge when lifecycle stage is missing", async () => {
+      vi.stubGlobal("fetch", createFetchMock(detail(ConversationStatus.HumanManaged, true, null)));
+
+      render(
+        <HostConversationDetail
+          conversationId="c-1"
+          accessToken="host-token"
+          onUnauthorized={vi.fn()}
+        />
+      );
+
+      await waitFor(() => expect(screen.getByText("ABC123")).toBeInTheDocument());
+      expect(screen.queryByText("NOT CONFIRMED")).not.toBeInTheDocument();
+      expect(screen.queryByText("IN STAY")).not.toBeInTheDocument();
+    });
+
+    it("omits the badge for an unrecognized lifecycle stage without crashing", async () => {
+      vi.stubGlobal("fetch", createFetchMock(detail(ConversationStatus.HumanManaged, true, "SomeFutureStage")));
+
+      render(
+        <HostConversationDetail
+          conversationId="c-1"
+          accessToken="host-token"
+          onUnauthorized={vi.fn()}
+        />
+      );
+
+      await waitFor(() => expect(screen.getByText("ABC123")).toBeInTheDocument());
+      expect(screen.queryByText("SomeFutureStage")).not.toBeInTheDocument();
+    });
+
+    it("still renders the M-PESA payment summary alongside the lifecycle badge", async () => {
+      vi.stubGlobal("fetch", createFetchMock(detail(ConversationStatus.HumanManaged, true, "InStay")));
+
+      render(
+        <HostConversationDetail
+          conversationId="c-1"
+          accessToken="host-token"
+          onUnauthorized={vi.fn()}
+        />
+      );
+
+      await waitFor(() => expect(screen.getByText("IN STAY")).toBeInTheDocument());
+      expect(screen.getByRole("heading", { name: "M-PESA" })).toBeInTheDocument();
+    });
   });
 });

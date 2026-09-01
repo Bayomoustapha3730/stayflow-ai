@@ -15,7 +15,8 @@ public sealed class ConversationService(
     IConversationStatusTransitionPolicy transitionPolicy,
     IConversationRealtimePublisher realtimePublisher,
     IConversationChannelDispatcher conversationChannelDispatcher,
-    IOptions<ConversationOptions> options) : IConversationService
+    IOptions<ConversationOptions> options,
+    IReservationLifecycleService reservationLifecycleService) : IConversationService
 {
     public async Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(ConversationListQueryParameters query, CancellationToken cancellationToken)
     {
@@ -1135,7 +1136,7 @@ public sealed class ConversationService(
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
-    private static ConversationDetailResponse MapDetail(Conversation conversation)
+    private ConversationDetailResponse MapDetail(Conversation conversation)
     {
         return new ConversationDetailResponse
         {
@@ -1164,16 +1165,7 @@ public sealed class ConversationService(
                 MaskedPhoneNumber = PhoneNumberMasker.Mask(conversation.Guest?.PhoneNumber),
                 PreferredLanguage = conversation.Guest?.PreferredLanguage ?? string.Empty
             },
-            Reservation = conversation.Reservation is null
-                ? null
-                : new ConversationReservationSummary
-                {
-                    Id = conversation.Reservation.Id,
-                    ConfirmationNumber = conversation.Reservation.ConfirmationNumber,
-                    CheckInDate = conversation.Reservation.CheckInDate,
-                    CheckOutDate = conversation.Reservation.CheckOutDate,
-                    Status = conversation.Reservation.Status
-                },
+            Reservation = MapReservationSummary(conversation.Reservation, conversation.Property ?? conversation.Reservation?.Property),
             Property = conversation.Property is null
                 ? null
                 : new ConversationPropertySummary
@@ -1205,6 +1197,38 @@ public sealed class ConversationService(
     private static ConversationMessageResponse MapMessage(ConversationMessage message)
     {
         return MapMessage(message, null);
+    }
+
+    private ConversationReservationSummary? MapReservationSummary(Reservation? reservation, Property? property)
+    {
+        if (reservation is null)
+        {
+            return null;
+        }
+
+        string? lifecycleStage = null;
+        if (property is not null)
+        {
+            try
+            {
+                var context = reservationLifecycleService.GetContext(reservation, property);
+                lifecycleStage = context.LifecycleStage.ToString();
+            }
+            catch (ArgumentException)
+            {
+                // Degrade gracefully if property timezone is invalid or missing.
+            }
+        }
+
+        return new ConversationReservationSummary
+        {
+            Id = reservation.Id,
+            ConfirmationNumber = reservation.ConfirmationNumber,
+            CheckInDate = reservation.CheckInDate,
+            CheckOutDate = reservation.CheckOutDate,
+            Status = reservation.Status,
+            LifecycleStage = lifecycleStage
+        };
     }
 
     private static ConversationMessageResponse MapMessage(ConversationMessage message, Conversation? conversation)

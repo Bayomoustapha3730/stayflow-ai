@@ -498,7 +498,8 @@ public sealed class GuestWidgetGroundedReplyTests
                 new ConversationStatusTransitionPolicy(),
                 new NoOpConversationRealtimePublisher(),
                 new NoOpConversationChannelDispatcher(),
-                Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
+                Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
+                new ReservationLifecycleService(TimeProvider.System, Options.Create(new ReservationContextOptions())));
 
             var replyOrchestrator = new AIReplyOrchestrator(
                 new ConversationContextBuilder(

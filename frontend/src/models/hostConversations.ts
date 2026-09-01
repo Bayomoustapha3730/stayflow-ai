@@ -128,6 +128,8 @@ export interface ConversationReservationSummary {
   checkInDate: string;
   checkOutDate: string;
   status: number;
+  // Backend-derived; absent when lifecycle context could not be calculated.
+  lifecycleStage?: string | null;
 }
 
 export interface ConversationAssignedUserSummary {

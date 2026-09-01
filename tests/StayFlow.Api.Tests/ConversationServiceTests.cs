@@ -850,7 +850,8 @@ public sealed class ConversationServiceTests
                 new ConversationStatusTransitionPolicy(),
                 RealtimePublisher,
                 new NoOpConversationChannelDispatcher(),
-                Options.Create(new ConversationOptions { MaxMessageCharacters = maxMessageCharacters, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
+                Options.Create(new ConversationOptions { MaxMessageCharacters = maxMessageCharacters, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
+                new ReservationLifecycleService(TimeProvider.System, Options.Create(new ReservationContextOptions())));
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();

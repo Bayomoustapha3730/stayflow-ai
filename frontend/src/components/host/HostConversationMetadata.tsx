@@ -1,6 +1,7 @@
 import type { ConversationDetail } from "../../models/hostConversations";
 import { channelLabel } from "../../models/enums";
 import { formatReservationRange } from "../../utils/dateTime";
+import { HostReservationLifecycleBadge } from "./HostReservationLifecycleBadge";
 
 interface HostConversationMetadataProps {
   conversation: ConversationDetail;
@@ -25,7 +26,10 @@ export function HostConversationMetadata({ conversation }: HostConversationMetad
         </div>
         <div>
           <dt>Reservation</dt>
-          <dd>{reservationNumber}</dd>
+          <dd>
+            {reservationNumber}
+            <HostReservationLifecycleBadge lifecycleStage={conversation.reservation?.lifecycleStage} />
+          </dd>
         </div>
         <div>
           <dt>Stay dates</dt>

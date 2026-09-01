@@ -197,6 +197,7 @@ public sealed class ConversationReservationSummary
     public DateOnly CheckInDate { get; init; }
     public DateOnly CheckOutDate { get; init; }
     public ReservationStatus Status { get; init; }
+    public string? LifecycleStage { get; init; }
 }
 
 public sealed class ConversationPropertySummary

@@ -218,7 +218,8 @@ public sealed class AIPromptBuilder(IOptions<AIPromptOptions> options) : IAIProm
         {
             "Use only the context sections provided here.",
             "If context is missing for a sensitive or operational decision, ask for verification or escalate.",
-            "Do not include internal notes, identifiers, audit data, or hidden context."
+            "Do not include internal notes, identifiers, audit data, or hidden context.",
+            "Lifecycle stage describes reservation timing only. It is context, not authorization. Never approve, trigger, or imply that an action, service request, or override was granted solely because of the lifecycle stage."
         };
 
         if (propertyAccessRestricted)
@@ -250,9 +251,13 @@ public sealed class AIPromptBuilder(IOptions<AIPromptOptions> options) : IAIProm
             var reservationItems = new List<string>
             {
                 $"Status: {context.Reservation.Status}",
-                $"Check-in date: {context.Reservation.CheckInDate:yyyy-MM-dd}",
-                $"Check-out date: {context.Reservation.CheckOutDate:yyyy-MM-dd}",
-                $"Current stay phase: {context.Reservation.CurrentStayPhase}",
+                $"Lifecycle stage: {context.Reservation.LifecycleStage}",
+                $"Check-in date: {context.Reservation.CheckInLocal:yyyy-MM-dd}",
+                $"Check-out date: {context.Reservation.CheckOutLocal:yyyy-MM-dd}",
+                $"Days until check-in: {context.Reservation.DaysUntilCheckIn}",
+                $"Days until check-out: {context.Reservation.DaysUntilCheckOut}",
+                $"Currently in stay: {context.Reservation.IsCurrentlyInStay}",
+                $"Property time zone: {context.Reservation.PropertyTimeZone}",
                 $"Adults: {context.Reservation.Adults}",
                 $"Children: {context.Reservation.Children}"
             };
