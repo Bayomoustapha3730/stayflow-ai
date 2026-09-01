@@ -33,6 +33,7 @@ public sealed class ApplicationDbContext(
     public DbSet<PropertyEmergencyContact> PropertyEmergencyContacts => Set<PropertyEmergencyContact>();
     public DbSet<Guest> Guests => Set<Guest>();
     public DbSet<Reservation> Reservations => Set<Reservation>();
+    public DbSet<ReservationLifecycleEvent> ReservationLifecycleEvents => Set<ReservationLifecycleEvent>();
     public DbSet<KnowledgeBaseItem> KnowledgeBaseItems => Set<KnowledgeBaseItem>();
     public DbSet<PropertyKnowledgeArticle> PropertyKnowledgeArticles => Set<PropertyKnowledgeArticle>();
     public DbSet<Conversation> Conversations => Set<Conversation>();

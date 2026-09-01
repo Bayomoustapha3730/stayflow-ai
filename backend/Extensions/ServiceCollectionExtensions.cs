@@ -18,6 +18,8 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(Services.ReservationContextOptions.SectionName))
             .Validate(options => options.PreArrivalWindowDays >= 0 && options.PreArrivalWindowDays <= 365, "Reservation context pre-arrival window must be between 0 and 365 days.")
             .ValidateOnStart();
+        services.AddOptions<Services.ReservationLifecycleEventOptions>()
+            .Bind(configuration.GetSection(Services.ReservationLifecycleEventOptions.SectionName));
         services.AddOptions<Services.AIContextOptions>()
             .Bind(configuration.GetSection(Services.AIContextOptions.SectionName))
             .Validate(options => options.MaxKnowledgeArticles >= 0 && options.MaxKnowledgeArticles <= 50, "AI context knowledge article limit must be between 0 and 50.")
@@ -203,6 +205,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IReservationStatusTransitionPolicy, Services.ReservationStatusTransitionPolicy>();
         services.AddScoped<Services.IReservationLifecycleService, Services.ReservationLifecycleService>();
         services.AddScoped<Services.IReservationService, Services.ReservationService>();
+        services.AddScoped<Repositories.IReservationLifecycleEventRepository, Repositories.ReservationLifecycleEventRepository>();
+        services.AddSingleton<Services.IReservationLifecycleEventIdempotencyKeyBuilder, Services.ReservationLifecycleEventIdempotencyKeyBuilder>();
+        services.AddScoped<Services.IReservationLifecycleEventService, Services.ReservationLifecycleEventService>();
         services.AddScoped<Repositories.IConversationRepository, Repositories.ConversationRepository>();
         services.AddSingleton<Services.IConversationStatusTransitionPolicy, Services.ConversationStatusTransitionPolicy>();
         services.AddScoped<Services.IConversationService, Services.ConversationService>();
