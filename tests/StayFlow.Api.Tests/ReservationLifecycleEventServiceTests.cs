@@ -492,6 +492,36 @@ public sealed class ReservationLifecycleEventServiceTests
             return Task.FromResult<IReadOnlyCollection<ReservationLifecycleEvent>>([]);
         }
 
+        public Task<IReadOnlyCollection<Reservation>> GetGenerationCandidatesAsync(DateOnly windowStart, DateOnly windowEnd, int limit, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyCollection<Reservation>>([]);
+        }
+
+        public Task<IReadOnlyCollection<ReservationLifecycleEvent>> ClaimDueAsync(DateTimeOffset nowUtc, int batchSize, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyCollection<ReservationLifecycleEvent>>([]);
+        }
+
+        public Task<int> RecoverStaleProcessingAsync(DateTimeOffset staleBeforeUtc, DateTimeOffset nowUtc, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(0);
+        }
+
+        public Task<int> RecoverRetryableFailedAsync(DateTimeOffset retryBeforeUtc, DateTimeOffset nowUtc, int maxAttempts, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(0);
+        }
+
+        public Task<Reservation?> GetReservationForEventAsync(ReservationLifecycleEvent lifecycleEvent, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<Reservation?>(null);
+        }
+
+        public Task<int> SuppressObsoleteUnprocessedAsync(Guid companyId, Guid reservationId, IReadOnlyCollection<string> currentIdempotencyKeys, DateTimeOffset nowUtc, string reason, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(0);
+        }
+
         public Task AddAsync(ReservationLifecycleEvent lifecycleEvent, CancellationToken cancellationToken)
         {
             pendingInsert = lifecycleEvent;

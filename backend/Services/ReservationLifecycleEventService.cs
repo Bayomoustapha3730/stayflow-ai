@@ -151,6 +151,23 @@ public sealed class ReservationLifecycleEventService(
         return entity;
     }
 
+    public async Task<ReservationLifecycleEvent> MarkSuppressedAsync(Guid companyId, Guid eventId, string reason, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+
+        var entity = await GetForTenantOrThrowAsync(companyId, eventId, cancellationToken);
+        if (entity.Status != ReservationLifecycleEventStatus.Processing)
+        {
+            throw new InvalidOperationException($"Cannot transition lifecycle event from {entity.Status} to Suppressed.");
+        }
+
+        entity.Status = ReservationLifecycleEventStatus.Suppressed;
+        entity.ProcessedAtUtc = timeProvider.GetUtcNow();
+        entity.LastError = reason.Length > 500 ? reason[..500] : reason;
+        await repository.SaveChangesAsync(cancellationToken);
+        return entity;
+    }
+
     private async Task<ReservationLifecycleEvent> GetForTenantOrThrowAsync(Guid companyId, Guid eventId, CancellationToken cancellationToken)
     {
         return await repository.GetByIdAsync(companyId, eventId, cancellationToken)

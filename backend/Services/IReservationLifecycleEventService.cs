@@ -26,4 +26,6 @@ public interface IReservationLifecycleEventService
     Task<ReservationLifecycleEvent> MarkProcessedAsync(Guid companyId, Guid eventId, CancellationToken cancellationToken);
 
     Task<ReservationLifecycleEvent> MarkFailedAsync(Guid companyId, Guid eventId, string error, CancellationToken cancellationToken);
+
+    Task<ReservationLifecycleEvent> MarkSuppressedAsync(Guid companyId, Guid eventId, string reason, CancellationToken cancellationToken);
 }

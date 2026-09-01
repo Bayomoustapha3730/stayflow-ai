@@ -19,7 +19,16 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.PreArrivalWindowDays >= 0 && options.PreArrivalWindowDays <= 365, "Reservation context pre-arrival window must be between 0 and 365 days.")
             .ValidateOnStart();
         services.AddOptions<Services.ReservationLifecycleEventOptions>()
-            .Bind(configuration.GetSection(Services.ReservationLifecycleEventOptions.SectionName));
+            .Bind(configuration.GetSection(Services.ReservationLifecycleEventOptions.SectionName))
+            .Validate(options => options.PollingIntervalSeconds is >= 1 and <= 3600, "Reservation lifecycle polling interval must be between 1 and 3600 seconds.")
+            .Validate(options => options.GenerationBatchSize is >= 1 and <= 1000, "Reservation lifecycle generation batch size must be between 1 and 1000.")
+            .Validate(options => options.ProcessingBatchSize is >= 1 and <= 500, "Reservation lifecycle processing batch size must be between 1 and 500.")
+            .Validate(options => options.GenerationLookbackDays is >= 0 and <= 30, "Reservation lifecycle generation lookback must be between 0 and 30 days.")
+            .Validate(options => options.GenerationHorizonDays is >= 1 and <= 365, "Reservation lifecycle generation horizon must be between 1 and 365 days.")
+            .Validate(options => options.ProcessingLeaseTimeoutMinutes is >= 1 and <= 1440, "Reservation lifecycle processing lease timeout must be between 1 and 1440 minutes.")
+            .Validate(options => options.RetryDelayMinutes is >= 1 and <= 1440, "Reservation lifecycle retry delay must be between 1 and 1440 minutes.")
+            .Validate(options => options.MaxAttempts is >= 1 and <= 20, "Reservation lifecycle max attempts must be between 1 and 20.")
+            .ValidateOnStart();
         services.AddOptions<Services.AIContextOptions>()
             .Bind(configuration.GetSection(Services.AIContextOptions.SectionName))
             .Validate(options => options.MaxKnowledgeArticles >= 0 && options.MaxKnowledgeArticles <= 50, "AI context knowledge article limit must be between 0 and 50.")
@@ -208,6 +217,10 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Repositories.IReservationLifecycleEventRepository, Repositories.ReservationLifecycleEventRepository>();
         services.AddSingleton<Services.IReservationLifecycleEventIdempotencyKeyBuilder, Services.ReservationLifecycleEventIdempotencyKeyBuilder>();
         services.AddScoped<Services.IReservationLifecycleEventService, Services.ReservationLifecycleEventService>();
+        services.AddScoped<Services.IReservationLifecycleEventGenerator, Services.ReservationLifecycleEventGenerator>();
+        services.AddScoped<Services.IReservationLifecycleEventHandler, Services.NoOpReservationLifecycleEventHandler>();
+        services.AddScoped<Services.IReservationLifecycleEventProcessor, Services.ReservationLifecycleEventProcessor>();
+        services.AddHostedService<Services.ReservationLifecycleWorker>();
         services.AddScoped<Repositories.IConversationRepository, Repositories.ConversationRepository>();
         services.AddSingleton<Services.IConversationStatusTransitionPolicy, Services.ConversationStatusTransitionPolicy>();
         services.AddScoped<Services.IConversationService, Services.ConversationService>();

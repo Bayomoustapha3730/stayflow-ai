@@ -5,5 +5,6 @@ public enum ReservationLifecycleEventStatus
     Pending,
     Processing,
     Processed,
-    Failed
+    Failed,
+    Suppressed
 }
