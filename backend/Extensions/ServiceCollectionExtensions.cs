@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
 namespace StayFlow.Api.Extensions;
 
 public static class ServiceCollectionExtensions
@@ -9,6 +11,7 @@ public static class ServiceCollectionExtensions
         {
             options.MaximumReceiveMessageSize = 64 * 1024;
         });
+        services.TryAddSingleton(TimeProvider.System);
         services.AddHttpClient();
         services.AddTransient<Services.OutboundCorrelationHandler>();
         services.AddOptions<Services.ReservationContextOptions>()
@@ -198,6 +201,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IConversationService, Services.ConversationService>();
         services.AddScoped<Repositories.IReservationRepository, Repositories.ReservationRepository>();
         services.AddSingleton<Services.IReservationStatusTransitionPolicy, Services.ReservationStatusTransitionPolicy>();
+        services.AddScoped<Services.IReservationLifecycleService, Services.ReservationLifecycleService>();
         services.AddScoped<Services.IReservationService, Services.ReservationService>();
         services.AddScoped<Repositories.IConversationRepository, Repositories.ConversationRepository>();
         services.AddSingleton<Services.IConversationStatusTransitionPolicy, Services.ConversationStatusTransitionPolicy>();
