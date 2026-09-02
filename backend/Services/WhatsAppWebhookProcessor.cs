@@ -13,6 +13,7 @@ public sealed class WhatsAppWebhookProcessor(
     IConversationRepository conversationRepository,
     IChatService chatService,
     IConversationService conversationService,
+    IGuestJourneyDeliveryReceiptSynchronizer guestJourneyDeliveryReceiptSynchronizer,
     IPhoneNumberNormalizer phoneNumberNormalizer,
     ITenantExecutionContextAccessor tenantExecutionContextAccessor,
     ILogger<WhatsAppWebhookProcessor> logger) : IWhatsAppWebhookProcessor
@@ -207,6 +208,17 @@ public sealed class WhatsAppWebhookProcessor(
         {
             await conversationService.UpdateMessageDeliveryStatusAsync(
                 message.ConversationId,
+                message.Id,
+                deliveryStatus,
+                occurredAt,
+                failureCode,
+                failureReason,
+                cancellationToken);
+
+            // Lifecycle-originated messages also carry a durable GuestJourneyMessage intent; the
+            // ConversationMessage above was already resolved under integration.CompanyId.
+            await guestJourneyDeliveryReceiptSynchronizer.SyncAsync(
+                integration.CompanyId,
                 message.Id,
                 deliveryStatus,
                 occurredAt,

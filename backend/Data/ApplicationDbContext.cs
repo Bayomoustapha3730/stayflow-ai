@@ -35,6 +35,7 @@ public sealed class ApplicationDbContext(
     public DbSet<Reservation> Reservations => Set<Reservation>();
     public DbSet<ReservationLifecycleEvent> ReservationLifecycleEvents => Set<ReservationLifecycleEvent>();
     public DbSet<GuestJourneyMessage> GuestJourneyMessages => Set<GuestJourneyMessage>();
+    public DbSet<ReservationLifecycleWhatsAppTemplateMapping> ReservationLifecycleWhatsAppTemplateMappings => Set<ReservationLifecycleWhatsAppTemplateMapping>();
     public DbSet<KnowledgeBaseItem> KnowledgeBaseItems => Set<KnowledgeBaseItem>();
     public DbSet<PropertyKnowledgeArticle> PropertyKnowledgeArticles => Set<PropertyKnowledgeArticle>();
     public DbSet<Conversation> Conversations => Set<Conversation>();

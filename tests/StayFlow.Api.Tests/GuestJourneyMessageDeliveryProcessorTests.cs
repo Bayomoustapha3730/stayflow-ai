@@ -5,6 +5,7 @@ using StayFlow.Api.DTOs.AIOrchestration;
 using StayFlow.Api.DTOs.Chat;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
+using StayFlow.Api.DTOs.WhatsApp;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
@@ -184,15 +185,167 @@ public sealed class GuestJourneyMessageDeliveryProcessorTests
         Assert.Equal(GuestJourneyMessageStatus.Processing, message.Status);
     }
 
+    [Fact]
+    public async Task OpenWindow_UsesFreeFormLifecycleMessage()
+    {
+        var lifecycleEvent = NewLifecycleEvent();
+        var reservation = NewReservation(lifecycleEvent);
+        var message = NewMessage(lifecycleEvent, conversationId: Guid.NewGuid());
+        var repository = new FakeRepository([message], lifecycleEvent, reservation, hasIntegration: true);
+        var conversationMessage = NewConversationMessage(ConversationMessageDeliveryStatus.Sent, externalMessageId: "wamid.open");
+        var conversationService = new FakeConversationServiceForDelivery(ApiResponse<ConversationMessageResponse>.Ok(NewResponse(conversationMessage.Id)));
+        var templateResolver = new RecordingTemplateResolver(ReservationLifecycleTemplateResolution.Blocked("not used"));
+        var templateService = new RecordingWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Fail("not used"));
+
+        var processor = CreateProcessor(
+            repository,
+            conversationService,
+            new FakeConversationRepository(conversationMessage),
+            new ConfigurableWindowEvaluator(isOpen: true),
+            templateResolver,
+            templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Accepted);
+        Assert.Equal(1, conversationService.CallCount);
+        Assert.Equal(0, templateResolver.CallCount);
+        Assert.Equal(0, templateService.CallCount);
+        Assert.Equal(GuestJourneyMessageStatus.Accepted, message.Status);
+        Assert.Null(message.DeliveredAtUtc);
+        Assert.Equal("wamid.open", message.ProviderMessageId);
+    }
+
+    [Fact]
+    public async Task ClosedWindow_WithApprovedMappedTemplate_UsesTemplate()
+    {
+        var lifecycleEvent = NewLifecycleEvent();
+        var reservation = NewReservation(lifecycleEvent);
+        var message = NewMessage(lifecycleEvent, conversationId: Guid.NewGuid());
+        var repository = new FakeRepository([message], lifecycleEvent, reservation, hasIntegration: true);
+        var conversationMessage = NewConversationMessage(ConversationMessageDeliveryStatus.Sent, externalMessageId: "wamid.template");
+        conversationMessage.IsTemplateMessage = true;
+        conversationMessage.TemplateName = "tenant_approved_template";
+        var conversationService = new FakeConversationServiceForDelivery(ApiResponse<ConversationMessageResponse>.Fail("free form must not be used"));
+        var template = new WhatsAppTemplate { Id = Guid.NewGuid(), CompanyId = lifecycleEvent.CompanyId, WhatsAppIntegrationId = repository.IntegrationId, Name = "tenant_approved_template", LanguageCode = "en", Status = "APPROVED", IsActive = true };
+        var templateResolver = new RecordingTemplateResolver(new ReservationLifecycleTemplateResolution(true, template, ["Ada"], null));
+        var templateService = new RecordingWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Ok(NewResponse(conversationMessage.Id)));
+
+        var processor = CreateProcessor(
+            repository,
+            conversationService,
+            new FakeConversationRepository(conversationMessage),
+            new ConfigurableWindowEvaluator(isOpen: false),
+            templateResolver,
+            templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Accepted);
+        Assert.Equal(0, conversationService.CallCount);
+        Assert.Equal(1, templateResolver.CallCount);
+        Assert.Equal(1, templateService.CallCount);
+        Assert.True(conversationMessage.IsTemplateMessage);
+        Assert.Equal(ConversationMessageType.LifecycleAutomation, conversationMessage.MessageType);
+        Assert.Equal("wamid.template", message.ProviderMessageId);
+        Assert.Equal(GuestJourneyMessageStatus.Accepted, message.Status);
+        Assert.Null(message.DeliveredAtUtc);
+    }
+
+    [Fact]
+    public async Task ClosedWindow_WithoutTemplate_BlocksWithoutFreeFormFallback()
+    {
+        var lifecycleEvent = NewLifecycleEvent();
+        var reservation = NewReservation(lifecycleEvent);
+        var message = NewMessage(lifecycleEvent, conversationId: Guid.NewGuid());
+        var repository = new FakeRepository([message], lifecycleEvent, reservation, hasIntegration: true);
+        var conversationService = new FakeConversationServiceForDelivery(ApiResponse<ConversationMessageResponse>.Fail("free form must not be used"));
+        var templateResolver = new RecordingTemplateResolver(ReservationLifecycleTemplateResolution.Blocked("No enabled WhatsApp template mapping is configured for ArrivalDay."));
+        var templateService = new RecordingWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Fail("not used"));
+
+        var processor = CreateProcessor(
+            repository,
+            conversationService,
+            new FakeConversationRepository(null),
+            new ConfigurableWindowEvaluator(isOpen: false),
+            templateResolver,
+            templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Blocked);
+        Assert.Equal(0, conversationService.CallCount);
+        Assert.Equal(1, templateResolver.CallCount);
+        Assert.Equal(0, templateService.CallCount);
+        Assert.Equal(GuestJourneyMessageStatus.Blocked, message.Status);
+    }
+
+    [Fact]
+    public async Task ClosedWindow_WithDisabledMapping_Blocks()
+    {
+        var lifecycleEvent = NewLifecycleEvent();
+        var reservation = NewReservation(lifecycleEvent);
+        var message = NewMessage(lifecycleEvent, conversationId: Guid.NewGuid());
+        var repository = new FakeRepository([message], lifecycleEvent, reservation, hasIntegration: true);
+        var conversationService = new FakeConversationServiceForDelivery(ApiResponse<ConversationMessageResponse>.Fail("free form must not be used"));
+        var templateResolver = new RecordingTemplateResolver(ReservationLifecycleTemplateResolution.Blocked("No enabled WhatsApp template mapping is configured for ArrivalDay."));
+        var templateService = new RecordingWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Fail("not used"));
+
+        var processor = CreateProcessor(repository, conversationService, new FakeConversationRepository(null), new ConfigurableWindowEvaluator(false), templateResolver, templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Blocked);
+        Assert.Equal(GuestJourneyMessageStatus.Blocked, message.Status);
+        Assert.Equal(0, conversationService.CallCount);
+        Assert.Equal(0, templateService.CallCount);
+    }
+
+    [Fact]
+    public async Task ClosedWindow_WithUnapprovedTemplate_Blocks()
+    {
+        var lifecycleEvent = NewLifecycleEvent();
+        var reservation = NewReservation(lifecycleEvent);
+        var message = NewMessage(lifecycleEvent, conversationId: Guid.NewGuid());
+        var repository = new FakeRepository([message], lifecycleEvent, reservation, hasIntegration: true);
+        var conversationService = new FakeConversationServiceForDelivery(ApiResponse<ConversationMessageResponse>.Fail("free form must not be used"));
+        var templateResolver = new RecordingTemplateResolver(ReservationLifecycleTemplateResolution.Blocked("Configured lifecycle template is not approved for sending."));
+        var templateService = new RecordingWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Fail("not used"));
+
+        var processor = CreateProcessor(repository, conversationService, new FakeConversationRepository(null), new ConfigurableWindowEvaluator(false), templateResolver, templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Blocked);
+        Assert.Equal(GuestJourneyMessageStatus.Blocked, message.Status);
+        Assert.Equal(0, conversationService.CallCount);
+        Assert.Equal(0, templateService.CallCount);
+    }
+
     private static GuestJourneyMessageDeliveryProcessor CreateProcessor(
         FakeRepository repository,
         IConversationService conversationService,
         Repositories.IConversationRepository conversationRepository)
     {
+        return CreateProcessor(
+            repository,
+            conversationService,
+            conversationRepository,
+            new OpenWindowEvaluator(),
+            new BlockingTemplateResolver(),
+            new BlockingWhatsAppTemplateService());
+    }
+
+    private static GuestJourneyMessageDeliveryProcessor CreateProcessor(
+        FakeRepository repository,
+        IConversationService conversationService,
+        Repositories.IConversationRepository conversationRepository,
+        IWhatsAppCustomerServiceWindowEvaluator windowEvaluator,
+        IReservationLifecycleWhatsAppTemplateResolver templateResolver,
+        IWhatsAppTemplateService whatsAppTemplateService)
+    {
         return new GuestJourneyMessageDeliveryProcessor(
             repository,
             conversationService,
             conversationRepository,
+            windowEvaluator,
+            templateResolver,
+            whatsAppTemplateService,
             new ReservationLifecycleEventIdempotencyKeyBuilder(),
             new MutableTimeProvider(new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero)),
             Options.Create(new GuestJourneyDeliveryOptions { BatchSize = 10 }),
@@ -295,6 +448,7 @@ public sealed class GuestJourneyMessageDeliveryProcessorTests
         Reservation primaryReservation,
         bool hasIntegration) : IGuestJourneyMessageRepository
     {
+        public Guid IntegrationId { get; } = Guid.NewGuid();
         public Dictionary<Guid, (ReservationLifecycleEvent Event, Reservation Reservation)> AdditionalLifecycleEvents { get; } = [];
 
         public Task<IReadOnlyCollection<GuestJourneyMessage>> ClaimDueAsync(DateTimeOffset nowUtc, int batchSize, CancellationToken cancellationToken)
@@ -315,12 +469,16 @@ public sealed class GuestJourneyMessageDeliveryProcessorTests
             if (message.ReservationLifecycleEventId == primaryLifecycleEvent.Id)
             {
                 primaryLifecycleEvent.Reservation = primaryReservation;
+                primaryLifecycleEvent.Property = new Property { Id = primaryLifecycleEvent.PropertyId, CompanyId = primaryLifecycleEvent.CompanyId, Name = "Demo Property", AddressLine1 = "Road", City = "Nairobi", CountryCode = "KE", TimeZone = "Africa/Nairobi", IsActive = true };
+                primaryLifecycleEvent.Guest = new Guest { Id = primaryLifecycleEvent.GuestId, CompanyId = primaryLifecycleEvent.CompanyId, FirstName = "Ada", LastName = "Guest", PreferredLanguage = "en", CountryCode = "KE", IsActive = true };
                 return Task.FromResult<ReservationLifecycleEvent?>(primaryLifecycleEvent);
             }
 
             if (AdditionalLifecycleEvents.TryGetValue(message.ReservationLifecycleEventId, out var entry))
             {
                 entry.Event.Reservation = entry.Reservation;
+                entry.Event.Property = new Property { Id = entry.Event.PropertyId, CompanyId = entry.Event.CompanyId, Name = "Demo Property", AddressLine1 = "Road", City = "Nairobi", CountryCode = "KE", TimeZone = "Africa/Nairobi", IsActive = true };
+                entry.Event.Guest = new Guest { Id = entry.Event.GuestId, CompanyId = entry.Event.CompanyId, FirstName = "Ada", LastName = "Guest", PreferredLanguage = "en", CountryCode = "KE", IsActive = true };
                 return Task.FromResult<ReservationLifecycleEvent?>(entry.Event);
             }
 
@@ -329,7 +487,7 @@ public sealed class GuestJourneyMessageDeliveryProcessorTests
 
         public Task<WhatsAppIntegration?> GetActiveWhatsAppIntegrationAsync(Guid companyId, CancellationToken cancellationToken)
         {
-            return Task.FromResult(hasIntegration ? new WhatsAppIntegration { Id = Guid.NewGuid(), CompanyId = companyId, IsActive = true } : null);
+            return Task.FromResult(hasIntegration ? new WhatsAppIntegration { Id = IntegrationId, CompanyId = companyId, IsActive = true } : null);
         }
 
         public Task MarkAcceptedAsync(GuestJourneyMessage message, Guid conversationMessageId, string? providerMessageId, DateTimeOffset nowUtc, CancellationToken cancellationToken)
@@ -366,10 +524,83 @@ public sealed class GuestJourneyMessageDeliveryProcessorTests
         public Task<ReservationLifecycleEvent?> GetLifecycleEventContextAsync(Guid companyId, Guid lifecycleEventId, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<GuestJourneyMessage?> GetByLifecycleEventAsync(Guid companyId, Guid lifecycleEventId, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<Conversation?> GetLatestConversationForReservationAsync(Guid companyId, Guid reservationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<GuestJourneyMessage?> FindByConversationMessageAsync(Guid companyId, Guid conversationMessageId, CancellationToken cancellationToken) => Task.FromResult<GuestJourneyMessage?>(null);
         public Task AddConversationAsync(Conversation conversation, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task AddAsync(GuestJourneyMessage message, CancellationToken cancellationToken) => throw new NotImplementedException();
         public void Detach(GuestJourneyMessage message) => throw new NotImplementedException();
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class OpenWindowEvaluator : IWhatsAppCustomerServiceWindowEvaluator
+    {
+        public Task<WhatsAppCustomerServiceWindowEvaluation> EvaluateAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new WhatsAppCustomerServiceWindowEvaluation { IsOpen = true, Reason = "open" });
+        }
+    }
+
+    private sealed class ConfigurableWindowEvaluator(bool isOpen) : IWhatsAppCustomerServiceWindowEvaluator
+    {
+        public Task<WhatsAppCustomerServiceWindowEvaluation> EvaluateAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new WhatsAppCustomerServiceWindowEvaluation { IsOpen = isOpen, Reason = isOpen ? "open" : "closed" });
+        }
+    }
+
+    private sealed class BlockingTemplateResolver : IReservationLifecycleWhatsAppTemplateResolver
+    {
+        public Task<ReservationLifecycleTemplateResolution> ResolveAsync(Guid companyId, Guid integrationId, ReservationLifecycleEventType eventType, string? guestPreferredLanguage, Reservation reservation, Property property, Guest guest, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(ReservationLifecycleTemplateResolution.Blocked("not used"));
+        }
+    }
+
+    private sealed class RecordingTemplateResolver(ReservationLifecycleTemplateResolution result) : IReservationLifecycleWhatsAppTemplateResolver
+    {
+        public int CallCount { get; private set; }
+
+        public Task<ReservationLifecycleTemplateResolution> ResolveAsync(Guid companyId, Guid integrationId, ReservationLifecycleEventType eventType, string? guestPreferredLanguage, Reservation reservation, Property property, Guest guest, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(result);
+        }
+    }
+
+    private sealed class BlockingWhatsAppTemplateService : IWhatsAppTemplateService
+    {
+        public Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(Guid companyId, Guid conversationId, Guid integrationId, Guid templateId, IReadOnlyCollection<string> variables, string idempotencyKey, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(ApiResponse<ConversationMessageResponse>.Fail("not used"));
+        }
+
+        public Task<ApiResponse<IReadOnlyCollection<WhatsAppIntegrationSummaryResponse>>> GetIntegrationsAsync(CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationHealthResponse>> CheckHealthAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplateSyncResponse>> SyncTemplatesAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplateListResponse>> ListTemplatesAsync(Guid integrationId, WhatsAppTemplateListQuery query, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplateDetailResponse>> GetTemplateAsync(Guid integrationId, Guid templateId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplatePreviewResponse>> PreviewTemplateAsync(Guid integrationId, Guid templateId, WhatsAppTemplatePreviewRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ConversationMessageResponse>> SendTemplateMessageAsync(Guid conversationId, Guid templateId, SendWhatsAppTemplateMessageRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>> GetCustomerServiceWindowStatusAsync(Guid conversationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+    }
+
+    private sealed class RecordingWhatsAppTemplateService(ApiResponse<ConversationMessageResponse> result) : IWhatsAppTemplateService
+    {
+        public int CallCount { get; private set; }
+
+        public Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(Guid companyId, Guid conversationId, Guid integrationId, Guid templateId, IReadOnlyCollection<string> variables, string idempotencyKey, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(result);
+        }
+
+        public Task<ApiResponse<IReadOnlyCollection<WhatsAppIntegrationSummaryResponse>>> GetIntegrationsAsync(CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationHealthResponse>> CheckHealthAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplateSyncResponse>> SyncTemplatesAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplateListResponse>> ListTemplatesAsync(Guid integrationId, WhatsAppTemplateListQuery query, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplateDetailResponse>> GetTemplateAsync(Guid integrationId, Guid templateId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplatePreviewResponse>> PreviewTemplateAsync(Guid integrationId, Guid templateId, WhatsAppTemplatePreviewRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ConversationMessageResponse>> SendTemplateMessageAsync(Guid conversationId, Guid templateId, SendWhatsAppTemplateMessageRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>> GetCustomerServiceWindowStatusAsync(Guid conversationId, CancellationToken cancellationToken) => throw new NotImplementedException();
     }
 
     private sealed class FakeConversationRepository(ConversationMessage? message) : Repositories.IConversationRepository

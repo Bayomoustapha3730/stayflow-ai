@@ -13,5 +13,16 @@ public interface IWhatsAppTemplateService
     Task<ApiResponse<WhatsAppTemplateDetailResponse>> GetTemplateAsync(Guid integrationId, Guid templateId, CancellationToken cancellationToken);
     Task<ApiResponse<WhatsAppTemplatePreviewResponse>> PreviewTemplateAsync(Guid integrationId, Guid templateId, WhatsAppTemplatePreviewRequest request, CancellationToken cancellationToken);
     Task<ApiResponse<ConversationMessageResponse>> SendTemplateMessageAsync(Guid conversationId, Guid templateId, SendWhatsAppTemplateMessageRequest request, CancellationToken cancellationToken);
+    // Trusted, service-to-service entry point for automated lifecycle sends (no HTTP tenant
+    // context, no human-takeover requirement). companyId/integrationId come from an
+    // already-verified caller (GuestJourneyMessageDeliveryProcessor), not tenant HTTP context.
+    Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(
+        Guid companyId,
+        Guid conversationId,
+        Guid integrationId,
+        Guid templateId,
+        IReadOnlyCollection<string> variables,
+        string idempotencyKey,
+        CancellationToken cancellationToken);
     Task<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>> GetCustomerServiceWindowStatusAsync(Guid conversationId, CancellationToken cancellationToken);
 }

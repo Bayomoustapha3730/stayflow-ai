@@ -294,6 +294,7 @@ public sealed class WhatsAppWebhookProcessorTests
                 new FakeConversationRepository(Repository.Messages),
                 ChatService,
                 ConversationService,
+                new NoOpGuestJourneyDeliveryReceiptSynchronizer(),
                 new PhoneNumberNormalizer(),
                 TenantAccessor,
                 NullLogger<WhatsAppWebhookProcessor>.Instance);
@@ -310,6 +311,14 @@ public sealed class WhatsAppWebhookProcessorTests
         public FakeChatService ChatService { get; }
         public FakeConversationService ConversationService { get; }
         public WhatsAppWebhookProcessor Processor { get; }
+    }
+
+    private sealed class NoOpGuestJourneyDeliveryReceiptSynchronizer : IGuestJourneyDeliveryReceiptSynchronizer
+    {
+        public Task<bool> SyncAsync(Guid companyId, Guid conversationMessageId, ConversationMessageDeliveryStatus deliveryStatus, DateTimeOffset occurredAt, string? failureCode, string? failureReason, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(false);
+        }
     }
 
     private sealed class FakeWhatsAppRepository : IWhatsAppRepository

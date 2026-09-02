@@ -230,8 +230,11 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IReservationLifecycleEventProcessor, Services.ReservationLifecycleEventProcessor>();
         services.AddHostedService<Services.ReservationLifecycleWorker>();
         services.AddSingleton<Services.IReservationLifecycleMessageComposer, Services.ReservationLifecycleMessageComposer>();
+        services.AddScoped<Repositories.IReservationLifecycleWhatsAppTemplateMappingRepository, Repositories.ReservationLifecycleWhatsAppTemplateMappingRepository>();
+        services.AddScoped<Services.IReservationLifecycleWhatsAppTemplateResolver, Services.ReservationLifecycleWhatsAppTemplateResolver>();
         services.AddScoped<Repositories.IGuestJourneyMessageRepository, Repositories.GuestJourneyMessageRepository>();
         services.AddScoped<Services.IGuestJourneyMessageService, Services.GuestJourneyMessageService>();
+        services.AddScoped<Services.IGuestJourneyDeliveryReceiptSynchronizer, Services.GuestJourneyDeliveryReceiptSynchronizer>();
         services.AddScoped<Services.IGuestJourneyMessageDeliveryProcessor, Services.GuestJourneyMessageDeliveryProcessor>();
         services.AddHostedService<Services.GuestJourneyDeliveryWorker>();
         services.AddScoped<Repositories.IConversationRepository, Repositories.ConversationRepository>();

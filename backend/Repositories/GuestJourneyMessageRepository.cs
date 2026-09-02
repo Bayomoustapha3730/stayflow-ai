@@ -107,7 +107,15 @@ public sealed class GuestJourneyMessageRepository(ApplicationDbContext dbContext
     {
         return dbContext.ReservationLifecycleEvents
             .Include(item => item.Reservation)
+            .Include(item => item.Property)
+            .Include(item => item.Guest)
             .FirstOrDefaultAsync(item => item.CompanyId == message.CompanyId && item.Id == message.ReservationLifecycleEventId, cancellationToken);
+    }
+
+    public Task<GuestJourneyMessage?> FindByConversationMessageAsync(Guid companyId, Guid conversationMessageId, CancellationToken cancellationToken)
+    {
+        return dbContext.GuestJourneyMessages
+            .FirstOrDefaultAsync(item => item.CompanyId == companyId && item.ConversationMessageId == conversationMessageId, cancellationToken);
     }
 
     public Task<WhatsAppIntegration?> GetActiveWhatsAppIntegrationAsync(Guid companyId, CancellationToken cancellationToken)

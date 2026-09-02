@@ -429,6 +429,175 @@ public sealed class WhatsAppTemplateService(
         return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Template message processed.");
     }
 
+    public async Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(
+        Guid companyId,
+        Guid conversationId,
+        Guid integrationId,
+        Guid templateId,
+        IReadOnlyCollection<string> variables,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var duplicate = await conversationRepository.FindByExternalMessageIdAsync(companyId, idempotencyKey, null, cancellationToken);
+        if (duplicate is not null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(duplicate), "Lifecycle automation template message already exists.");
+        }
+
+        var conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation was not found.");
+        }
+
+        if (conversation.Channel != DTOs.ReservationContext.GuestChannel.WhatsApp)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Template messages are only available for WhatsApp conversations.");
+        }
+
+        if (conversation.Status == ConversationStatus.Closed)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation state does not allow this message.");
+        }
+
+        var integration = await whatsAppRepository.GetActiveIntegrationByCompanyIdAsync(companyId, cancellationToken);
+        if (integration is null || integration.Id != integrationId)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("WhatsApp integration is not configured for this company.");
+        }
+
+        // Ownership (company + integration + template) is enforced by this same lookup used
+        // elsewhere; never trust a caller-supplied template without re-verifying it here.
+        var template = await whatsAppRepository.GetTemplateForCompanyAsync(companyId, integrationId, templateId, cancellationToken);
+        if (template is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Template was not found.");
+        }
+
+        if (!template.IsActive || !string.Equals(template.Status, "APPROVED", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Only approved active templates can be sent.");
+        }
+
+        var validation = variableValidator.Validate(template, variables);
+        if (!validation.Success)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Template variable validation failed.", validation.Errors.ToList());
+        }
+
+        if (!phoneNumberNormalizer.TryNormalize(conversation.ChannelIdentity, out var normalizedRecipient))
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation channel identity is not a valid WhatsApp destination.");
+        }
+
+        await subscriptionEntitlementService.ConsumeQuotaAsync(
+            companyId,
+            UsageMetric.WhatsAppMessages,
+            1,
+            $"whatsapp:lifecycle-template-send:{idempotencyKey}",
+            cancellationToken);
+
+        var credentials = await credentialResolver.ResolveAsync(integration, cancellationToken);
+        if (!credentials.Success || string.IsNullOrWhiteSpace(credentials.AccessToken))
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail(credentials.FailureSummary ?? "WhatsApp sending is unavailable.");
+        }
+
+        var rendered = RenderTemplateText(template.BodyText, validation.SanitizedVariables, includeMissingMarker: false, out _);
+
+        var message = new ConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            ConversationId = conversation.Id,
+            SenderType = ConversationSenderType.System,
+            MessageType = ConversationMessageType.LifecycleAutomation,
+            Content = rendered,
+            ExternalMessageId = idempotencyKey,
+            Provider = ConversationMessageProvider.WhatsAppCloud,
+            DeliveryStatus = ConversationMessageDeliveryStatus.Pending,
+            IsTemplateMessage = true,
+            WhatsAppTemplateId = template.Id,
+            TemplateName = template.Name,
+            TemplateLanguageCode = template.LanguageCode,
+            TemplateRenderedPreview = rendered,
+            SentAt = DateTimeOffset.UtcNow,
+            IsInternal = false
+        };
+
+        conversation.LastActivityAt = message.SentAt;
+
+        await conversationRepository.AddMessageAsync(message, cancellationToken);
+        await conversationRepository.AddAuditLogAsync(new AuditLog
+        {
+            Id = Guid.NewGuid(),
+            EntityName = nameof(Conversation),
+            EntityId = conversation.Id,
+            Action = "LifecycleAutomationTemplateMessageStored",
+            Details = JsonSerializer.Serialize(new
+            {
+                template = template.Name,
+                language = template.LanguageCode
+            }),
+            CreatedAt = DateTimeOffset.UtcNow
+        }, cancellationToken);
+        await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        await realtimePublisher.PublishMessageCreatedAsync(companyId, conversation.Id, new
+        {
+            conversationId = conversation.Id,
+            message = MapMessage(message),
+            isInternal = false,
+            timestamp = DateTimeOffset.UtcNow
+        }, false, cancellationToken);
+
+        var sendResult = await whatsAppCloudClient.SendTemplateMessageAsync(new WhatsAppTemplateSendRequest
+        {
+            CompanyId = integration.CompanyId,
+            IntegrationId = integration.Id,
+            AccessToken = credentials.AccessToken,
+            GraphApiVersion = integration.GraphApiVersion,
+            PhoneNumberId = integration.PhoneNumberId,
+            To = normalizedRecipient,
+            TemplateName = template.Name,
+            LanguageCode = template.LanguageCode,
+            Variables = validation.SanitizedVariables,
+            ClientMessageId = idempotencyKey
+        }, cancellationToken);
+
+        if (sendResult.Success)
+        {
+            message.ExternalMessageId = sendResult.ExternalMessageId ?? idempotencyKey;
+            message.ProviderRequestId = sendResult.ProviderRequestId;
+            message.DeliveryStatus = ConversationMessageDeliveryStatus.Sent;
+            message.FailedAt = null;
+            message.FailureCode = null;
+            message.FailureReason = null;
+            message.FailureCategory = null;
+        }
+        else
+        {
+            message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
+            message.FailedAt = DateTimeOffset.UtcNow;
+            message.FailureCode = sendResult.FailureCode;
+            var mapped = WhatsAppFailureMapper.Map(sendResult.FailureCode, sendResult.FailureReason, sendResult.HttpStatusCode, null, null, sendResult.IsTransientFailure, null);
+            message.FailureCategory = mapped.Category;
+            message.FailureReason = mapped.Summary;
+            message.ProviderRequestId = sendResult.ProviderRequestId;
+        }
+
+        await conversationRepository.SaveChangesAsync(cancellationToken);
+
+        await realtimePublisher.PublishMessageUpdatedAsync(companyId, conversation.Id, new
+        {
+            conversationId = conversation.Id,
+            message = MapMessage(message),
+            timestamp = DateTimeOffset.UtcNow
+        }, cancellationToken);
+
+        return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Lifecycle automation template message processed.");
+    }
+
     public async Task<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>> GetCustomerServiceWindowStatusAsync(Guid conversationId, CancellationToken cancellationToken)
     {
         if (!TryGetCompanyId(out var companyId, out var error))

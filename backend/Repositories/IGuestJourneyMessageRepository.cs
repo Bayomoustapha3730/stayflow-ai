@@ -14,6 +14,7 @@ public interface IGuestJourneyMessageRepository
     Task<int> RecoverStaleProcessingAsync(DateTimeOffset staleBeforeUtc, DateTimeOffset nowUtc, CancellationToken cancellationToken);
     Task<int> RecoverRetryableFailedAsync(DateTimeOffset nowUtc, int maxAttempts, CancellationToken cancellationToken);
     Task<ReservationLifecycleEvent?> GetLifecycleEventForDeliveryAsync(GuestJourneyMessage message, CancellationToken cancellationToken);
+    Task<GuestJourneyMessage?> FindByConversationMessageAsync(Guid companyId, Guid conversationMessageId, CancellationToken cancellationToken);
     Task<WhatsAppIntegration?> GetActiveWhatsAppIntegrationAsync(Guid companyId, CancellationToken cancellationToken);
     Task MarkAcceptedAsync(GuestJourneyMessage message, Guid conversationMessageId, string? providerMessageId, DateTimeOffset nowUtc, CancellationToken cancellationToken);
     Task MarkFailedAsync(GuestJourneyMessage message, string error, DateTimeOffset nextAttemptAtUtc, DateTimeOffset nowUtc, CancellationToken cancellationToken);

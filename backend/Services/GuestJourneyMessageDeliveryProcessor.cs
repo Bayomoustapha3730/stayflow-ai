@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Options;
+using StayFlow.Api.Common;
+using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 
@@ -14,6 +16,9 @@ public sealed class GuestJourneyMessageDeliveryProcessor(
     IGuestJourneyMessageRepository repository,
     IConversationService conversationService,
     Repositories.IConversationRepository conversationRepository,
+    IWhatsAppCustomerServiceWindowEvaluator windowEvaluator,
+    IReservationLifecycleWhatsAppTemplateResolver templateResolver,
+    IWhatsAppTemplateService whatsAppTemplateService,
     IReservationLifecycleEventIdempotencyKeyBuilder idempotencyKeyBuilder,
     TimeProvider timeProvider,
     IOptions<GuestJourneyDeliveryOptions> deliveryOptions,
@@ -76,12 +81,52 @@ public sealed class GuestJourneyMessageDeliveryProcessor(
                     continue;
                 }
 
-                var sendResult = await conversationService.AddLifecycleAutomationMessageAsync(
-                    message.CompanyId,
-                    message.ConversationId.Value,
-                    message.RenderedContent,
-                    message.IdempotencyKey,
-                    cancellationToken);
+                // The evaluator returns IsOpen=false whenever it cannot establish a recent inbound
+                // message, so an indeterminate window already fails closed here (never free-form).
+                var window = await windowEvaluator.EvaluateAsync(message.CompanyId, message.ConversationId.Value, cancellationToken);
+
+                ApiResponse<ConversationMessageResponse>? sendResult;
+                if (window.IsOpen)
+                {
+                    sendResult = await conversationService.AddLifecycleAutomationMessageAsync(
+                        message.CompanyId,
+                        message.ConversationId.Value,
+                        message.RenderedContent,
+                        message.IdempotencyKey,
+                        cancellationToken);
+                }
+                else
+                {
+                    var reservation = lifecycleEvent!.Reservation;
+                    var property = lifecycleEvent.Property;
+                    var guest = lifecycleEvent.Guest;
+
+                    var resolution = await templateResolver.ResolveAsync(
+                        message.CompanyId,
+                        integration.Id,
+                        message.JourneyEventType,
+                        guest.PreferredLanguage,
+                        reservation,
+                        property,
+                        guest,
+                        cancellationToken);
+
+                    if (!resolution.Resolved)
+                    {
+                        await repository.MarkBlockedAsync(message, resolution.BlockedReason ?? "No configured approved lifecycle WhatsApp template is available.", nowUtc, cancellationToken);
+                        blocked++;
+                        continue;
+                    }
+
+                    sendResult = await whatsAppTemplateService.SendLifecycleAutomationTemplateMessageAsync(
+                        message.CompanyId,
+                        message.ConversationId.Value,
+                        integration.Id,
+                        resolution.Template!.Id,
+                        resolution.Variables,
+                        message.IdempotencyKey,
+                        cancellationToken);
+                }
 
                 if (!sendResult.Success || sendResult.Data is null)
                 {
