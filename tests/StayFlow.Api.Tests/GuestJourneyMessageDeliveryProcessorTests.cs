@@ -568,6 +568,11 @@ public sealed class GuestJourneyMessageDeliveryProcessorTests
 
     private sealed class BlockingWhatsAppTemplateService : IWhatsAppTemplateService
     {
+        public Task<ApiResponse<WhatsAppIntegrationDetailResponse>> GetIntegrationDetailAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationDetailResponse>> CreateIntegrationAsync(WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationDetailResponse>> UpdateIntegrationAsync(Guid integrationId, WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppProductionEnableResponse>> EnableProductionAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppProductionEnableResponse>> DisableProductionAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(Guid companyId, Guid conversationId, Guid integrationId, Guid templateId, IReadOnlyCollection<string> variables, string idempotencyKey, CancellationToken cancellationToken)
         {
             return Task.FromResult(ApiResponse<ConversationMessageResponse>.Fail("not used"));
@@ -586,6 +591,12 @@ public sealed class GuestJourneyMessageDeliveryProcessorTests
     private sealed class RecordingWhatsAppTemplateService(ApiResponse<ConversationMessageResponse> result) : IWhatsAppTemplateService
     {
         public int CallCount { get; private set; }
+
+        public Task<ApiResponse<WhatsAppIntegrationDetailResponse>> GetIntegrationDetailAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationDetailResponse>> CreateIntegrationAsync(WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationDetailResponse>> UpdateIntegrationAsync(Guid integrationId, WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppProductionEnableResponse>> EnableProductionAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppProductionEnableResponse>> DisableProductionAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
 
         public Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(Guid companyId, Guid conversationId, Guid integrationId, Guid templateId, IReadOnlyCollection<string> variables, string idempotencyKey, CancellationToken cancellationToken)
         {

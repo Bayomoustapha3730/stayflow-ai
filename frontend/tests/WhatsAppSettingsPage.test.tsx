@@ -44,6 +44,14 @@ const integration = {
   lastErrorSummary: "Configuration is incomplete."
 };
 
+const integrationDetail = {
+  ...integration,
+  phoneNumberId: "phone-number-id",
+  whatsAppBusinessAccountId: "business-account-id",
+  credentialReference: "production-credential",
+  graphApiVersion: "v23.0"
+};
+
 const templates = [
   {
     id: "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
@@ -171,6 +179,38 @@ function createFetchMock(options?: {
       ]);
     }
 
+    if (url.pathname === "/whatsapp/integrations" && init?.method === "POST") {
+      return apiSuccess({ ...integrationDetail, id: "22222222-2222-4222-8222-222222222222" });
+    }
+
+    if (url.pathname === `/whatsapp/integrations/${integration.id}` && (init?.method ?? "GET") === "GET") {
+      return apiSuccess(integrationDetail);
+    }
+
+    if (url.pathname === `/whatsapp/integrations/${integration.id}` && init?.method === "PUT") {
+      return apiSuccess(integrationDetail);
+    }
+
+    if (url.pathname === `/whatsapp/integrations/${integration.id}/production/enable` && init?.method === "POST") {
+      return apiSuccess({
+        integrationId: integration.id,
+        isProductionEnabled: true,
+        status: "Enabled",
+        message: "Production enabled.",
+        checkedAt: "2026-07-25T10:00:00Z"
+      });
+    }
+
+    if (url.pathname === `/whatsapp/integrations/${integration.id}/production/disable` && init?.method === "POST") {
+      return apiSuccess({
+        integrationId: integration.id,
+        isProductionEnabled: false,
+        status: "Disabled",
+        message: "Production disabled.",
+        checkedAt: "2026-07-25T10:00:00Z"
+      });
+    }
+
     if (url.pathname === `/whatsapp/integrations/${integration.id}/health` && (init?.method ?? "GET") === "GET") {
       if (options?.healthFails) {
         return apiFailure("Health check unavailable", 503);
@@ -270,6 +310,63 @@ describe("WhatsAppSettingsPage", () => {
     expect(screen.queryByText(/credential-ref/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/demo-phone-number-id/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/demo-waba-id/i)).not.toBeInTheDocument();
+  });
+
+  it("creates an integration with metadata only", async () => {
+    sessionStorage.setItem("stayflow.host.accessToken", "token");
+    const fetchMock = createFetchMock();
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "WhatsApp Settings" });
+    await userEvent.click(screen.getByRole("button", { name: "Add Integration" }));
+    await userEvent.type(screen.getByLabelText("Display Name"), "Primary WhatsApp");
+    await userEvent.type(screen.getByLabelText("Phone Number ID"), "new-phone-id");
+    await userEvent.type(screen.getByLabelText("Business Account ID"), "new-business-id");
+    await userEvent.type(screen.getByLabelText("Masked Business Number"), "+1******9999");
+    await userEvent.click(screen.getByRole("button", { name: "Save Integration" }));
+
+    expect(await screen.findByText("Integration configuration created.")).toBeInTheDocument();
+    const createCall = fetchMock.mock.calls.find(([input, init]) =>
+      new URL(typeof input === "string" ? input : input.toString()).pathname === "/whatsapp/integrations"
+      && init?.method === "POST");
+    expect(createCall).toBeDefined();
+    const requestBody = JSON.parse((createCall?.[1] as RequestInit).body as string);
+    expect(requestBody).toMatchObject({
+      displayName: "Primary WhatsApp",
+      phoneNumberId: "new-phone-id",
+      whatsAppBusinessAccountId: "new-business-id",
+      businessPhoneNumberMasked: "+1******9999"
+    });
+    expect(requestBody).not.toHaveProperty("accessToken");
+    expect(requestBody).not.toHaveProperty("appSecret");
+    expect(requestBody).not.toHaveProperty("webhookVerifyToken");
+  });
+
+  it("edits integration metadata and uses dedicated production actions", async () => {
+    sessionStorage.setItem("stayflow.host.accessToken", "token");
+    const fetchMock = createFetchMock();
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "WhatsApp Settings" });
+    await userEvent.click(screen.getByRole("button", { name: "Edit Configuration" }));
+    expect(await screen.findByDisplayValue("phone-number-id")).toBeInTheDocument();
+    await userEvent.clear(screen.getByLabelText("Display Name"));
+    await userEvent.type(screen.getByLabelText("Display Name"), "Updated WhatsApp");
+    await userEvent.click(screen.getByRole("button", { name: "Save Integration" }));
+    expect(await screen.findByText("Integration configuration updated.")).toBeInTheDocument();
+
+    const updateCall = fetchMock.mock.calls.find(([input, init]) =>
+      new URL(typeof input === "string" ? input : input.toString()).pathname === `/whatsapp/integrations/${integration.id}`
+      && init?.method === "PUT");
+    expect(updateCall).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "Enable Production" }));
+    expect(await screen.findByText("Production enabled.")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      new URL(typeof input === "string" ? input : input.toString()).pathname === `/whatsapp/integrations/${integration.id}/production/enable`
+      && init?.method === "POST")).toBe(true);
   });
 
   it("runs health check and updates success feedback", async () => {

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { HostLoginPanel } from "../components/host";
 import { HostConsoleNav } from "../components/host/HostConsoleNav";
 import { useHostAuth } from "../hooks/useHostAuth";
@@ -6,6 +6,16 @@ import { useWhatsAppSettings } from "../hooks/useWhatsAppSettings";
 import "../styles/host-inbox.css";
 import "../styles/property-knowledge.css";
 import "../styles/whatsapp-settings.css";
+
+const emptyConfiguration = {
+  displayName: "",
+  phoneNumberId: "",
+  whatsAppBusinessAccountId: "",
+  businessPhoneNumberMasked: "",
+  credentialReference: "",
+  graphApiVersion: "v23.0",
+  isActive: true
+};
 
 function formatDateTime(value?: string | null): string {
   if (!value) {
@@ -28,6 +38,9 @@ export function WhatsAppSettingsPage() {
   });
 
   const templates = settings.templatesResponse?.items ?? [];
+  const [configuration, setConfiguration] = useState(emptyConfiguration);
+  const [editingIntegrationId, setEditingIntegrationId] = useState<string | null>(null);
+  const [isConfigurationOpen, setIsConfigurationOpen] = useState(false);
 
   const filterOptions = useMemo(() => {
     const statuses = new Set<string>();
@@ -68,6 +81,35 @@ export function WhatsAppSettingsPage() {
     );
   }
 
+  function openCreateConfiguration() {
+    setEditingIntegrationId(null);
+    setConfiguration(emptyConfiguration);
+    setIsConfigurationOpen(true);
+  }
+
+  async function openEditConfiguration() {
+    if (!settings.selectedIntegrationId) {
+      return;
+    }
+
+    const detail = await settings.getIntegrationConfiguration(settings.selectedIntegrationId);
+    if (!detail) {
+      return;
+    }
+
+    setEditingIntegrationId(detail.id);
+    setConfiguration({
+      displayName: detail.displayName,
+      phoneNumberId: detail.phoneNumberId,
+      whatsAppBusinessAccountId: detail.whatsAppBusinessAccountId,
+      businessPhoneNumberMasked: detail.businessPhoneNumberMasked,
+      credentialReference: detail.credentialReference ?? "",
+      graphApiVersion: detail.graphApiVersion,
+      isActive: detail.isActive
+    });
+    setIsConfigurationOpen(true);
+  }
+
   return (
     <div className="sf-host-page sf-whatsapp-settings-page">
       <div className="sf-host-page-top">
@@ -79,6 +121,14 @@ export function WhatsAppSettingsPage() {
           </div>
 
           <div className="sf-whatsapp-header-actions">
+            <button type="button" onClick={openCreateConfiguration}>Add Integration</button>
+            <button
+              type="button"
+              onClick={() => void openEditConfiguration()}
+              disabled={!settings.selectedIntegration || settings.isLoadingIntegrations}
+            >
+              Edit Configuration
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -134,6 +184,38 @@ export function WhatsAppSettingsPage() {
           <div className="sf-whatsapp-status" role="status" aria-live="polite">
             {settings.actionMessage}
           </div>
+        ) : null}
+
+        {isConfigurationOpen ? (
+          <section className="sf-whatsapp-configuration" aria-label="Integration configuration">
+            <div className="sf-whatsapp-configuration-heading">
+              <div>
+                <h2>{editingIntegrationId ? "Edit Integration" : "Add Integration"}</h2>
+                <p>Routing metadata only. Credentials remain in the server-side credential store.</p>
+              </div>
+              <button type="button" onClick={() => setIsConfigurationOpen(false)} disabled={settings.isSavingConfiguration}>Cancel</button>
+            </div>
+            <form
+              className="sf-whatsapp-configuration-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void settings.saveIntegrationConfiguration(configuration, editingIntegrationId ?? undefined).then((saved) => {
+                  if (saved) {
+                    setIsConfigurationOpen(false);
+                  }
+                });
+              }}
+            >
+              <label>Display Name<input required value={configuration.displayName} onChange={(event) => setConfiguration({ ...configuration, displayName: event.target.value })} /></label>
+              <label>Phone Number ID<input required value={configuration.phoneNumberId} onChange={(event) => setConfiguration({ ...configuration, phoneNumberId: event.target.value })} /></label>
+              <label>Business Account ID<input required value={configuration.whatsAppBusinessAccountId} onChange={(event) => setConfiguration({ ...configuration, whatsAppBusinessAccountId: event.target.value })} /></label>
+              <label>Masked Business Number<input required value={configuration.businessPhoneNumberMasked} onChange={(event) => setConfiguration({ ...configuration, businessPhoneNumberMasked: event.target.value })} /></label>
+              <label>Credential Reference<input value={configuration.credentialReference} onChange={(event) => setConfiguration({ ...configuration, credentialReference: event.target.value })} /></label>
+              <label>Graph API Version<input required value={configuration.graphApiVersion} onChange={(event) => setConfiguration({ ...configuration, graphApiVersion: event.target.value })} /></label>
+              <label className="sf-host-checkbox-row"><input type="checkbox" checked={configuration.isActive} onChange={(event) => setConfiguration({ ...configuration, isActive: event.target.checked })} /> Active</label>
+              <button type="submit" disabled={settings.isSavingConfiguration}>{settings.isSavingConfiguration ? "Saving..." : "Save Integration"}</button>
+            </form>
+          </section>
         ) : null}
 
         <section className="sf-whatsapp-integration-grid" aria-label="WhatsApp integration status">
@@ -199,6 +281,19 @@ export function WhatsAppSettingsPage() {
                   <dd>{settings.selectedIntegration.lastErrorSummary || "None"}</dd>
                 </div>
               </dl>
+            ) : null}
+            {settings.selectedIntegration ? (
+              <div className="sf-whatsapp-production-action">
+                <button
+                  type="button"
+                  onClick={() => void settings.setProductionEnabled(!settings.selectedIntegration?.isProductionEnabled)}
+                  disabled={settings.isChangingProduction}
+                >
+                  {settings.isChangingProduction
+                    ? "Updating..."
+                    : settings.selectedIntegration.isProductionEnabled ? "Disable Production" : "Enable Production"}
+                </button>
+              </div>
             ) : null}
           </article>
 

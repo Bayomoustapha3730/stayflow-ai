@@ -12,6 +12,35 @@ export interface WhatsAppIntegrationSummary {
   lastErrorSummary?: string | null;
 }
 
+export interface WhatsAppIntegrationConfiguration {
+  displayName: string;
+  phoneNumberId: string;
+  whatsAppBusinessAccountId: string;
+  businessPhoneNumberMasked: string;
+  credentialReference?: string | null;
+  graphApiVersion: string;
+  isActive: boolean;
+}
+
+export interface WhatsAppIntegrationDetail extends WhatsAppIntegrationConfiguration {
+  id: string;
+  isProductionEnabled: boolean;
+  mode: string;
+  healthStatus: string;
+  lastHealthCheckAt?: string | null;
+  lastSuccessfulHealthCheckAt?: string | null;
+  lastTemplateSyncAt?: string | null;
+  lastErrorSummary?: string | null;
+}
+
+export interface WhatsAppProductionEnableResult {
+  integrationId: string;
+  isProductionEnabled: boolean;
+  status: string;
+  message: string;
+  checkedAt: string;
+}
+
 export interface WhatsAppIntegrationHealth {
   integrationId: string;
   status: string;

@@ -611,18 +611,26 @@ public sealed class DevelopmentSeedService(
         var integration = await dbContext.WhatsAppIntegrations
             .FirstOrDefaultAsync(item => item.Id == DemoWhatsAppIntegrationId, cancellationToken);
 
+        var isNew = integration is null;
         if (integration is null)
         {
-            integration = new WhatsAppIntegration { Id = DemoWhatsAppIntegrationId };
+            integration = new WhatsAppIntegration { Id = DemoWhatsAppIntegrationId, IsDemoSeeded = true };
             dbContext.WhatsAppIntegrations.Add(integration);
         }
 
         integration.CompanyId = SeedData.DemoCompanyId;
-        integration.DisplayName = "Demo WhatsApp Concierge";
-        integration.PhoneNumberId = "demo-phone-number-id";
-        integration.WhatsAppBusinessAccountId = "demo-waba-id";
-        integration.BusinessPhoneNumberMasked = "+1******0002";
-        integration.IsActive = true;
+
+        // Once an operator deliberately configures this integration (IsDemoSeeded=false), the seed
+        // must never overwrite their routing metadata on subsequent startups.
+        if (isNew || integration.IsDemoSeeded)
+        {
+            integration.DisplayName = "Demo WhatsApp Concierge";
+            integration.PhoneNumberId = "demo-phone-number-id";
+            integration.WhatsAppBusinessAccountId = "demo-waba-id";
+            integration.BusinessPhoneNumberMasked = "+1******0002";
+            integration.IsActive = true;
+            integration.IsDemoSeeded = true;
+        }
     }
 
     private async Task EnsureDemoWhatsAppTemplatesAsync(CancellationToken cancellationToken)
@@ -645,9 +653,9 @@ public sealed class DevelopmentSeedService(
                 LanguageCode = "en",
                 Category = "UTILITY",
                 Status = "APPROVED",
-                HeaderType = "TEXT",
+                HeaderType = (string?)"TEXT",
                 BodyText = "Hello {{1}}, welcome to StayFlow. Your stay starts on {{2}}.",
-                FooterText = "StayFlow Concierge",
+                FooterText = (string?)"StayFlow Concierge",
                 VariableCount = 2
             },
             new
@@ -657,9 +665,9 @@ public sealed class DevelopmentSeedService(
                 LanguageCode = "fr",
                 Category = "UTILITY",
                 Status = "APPROVED",
-                HeaderType = "TEXT",
+                HeaderType = (string?)"TEXT",
                 BodyText = "Bonjour {{1}}, votre reservation {{2}} est confirmee.",
-                FooterText = "StayFlow Concierge",
+                FooterText = (string?)"StayFlow Concierge",
                 VariableCount = 2
             },
             new
@@ -681,9 +689,9 @@ public sealed class DevelopmentSeedService(
                 LanguageCode = "es",
                 Category = "AUTHENTICATION",
                 Status = "APPROVED",
-                HeaderType = "TEXT",
+                HeaderType = (string?)"TEXT",
                 BodyText = "Hola {{1}}, usa el codigo {{2}} para el check-in.",
-                FooterText = "StayFlow Concierge",
+                FooterText = (string?)"StayFlow Concierge",
                 VariableCount = 2
             },
             new

@@ -23,6 +23,46 @@ public sealed class WhatsAppIntegrationsController(IWhatsAppTemplateService what
         return response.Success ? Ok(response) : BadRequest(response);
     }
 
+    [HttpGet("{integrationId:guid}")]
+    [RequiresPermission("conversations.manage")]
+    public async Task<ActionResult<ApiResponse<WhatsAppIntegrationDetailResponse>>> GetIntegration(Guid integrationId, CancellationToken cancellationToken)
+    {
+        var response = await whatsAppTemplateService.GetIntegrationDetailAsync(integrationId, cancellationToken);
+        return response.Success ? Ok(response) : NotFound(response);
+    }
+
+    [HttpPost]
+    [RequiresPermission("conversations.manage")]
+    public async Task<ActionResult<ApiResponse<WhatsAppIntegrationDetailResponse>>> CreateIntegration(WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken)
+    {
+        var response = await whatsAppTemplateService.CreateIntegrationAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPut("{integrationId:guid}")]
+    [RequiresPermission("conversations.manage")]
+    public async Task<ActionResult<ApiResponse<WhatsAppIntegrationDetailResponse>>> UpdateIntegration(Guid integrationId, WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken)
+    {
+        var response = await whatsAppTemplateService.UpdateIntegrationAsync(integrationId, request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("{integrationId:guid}/production/enable")]
+    [RequiresPermission("conversations.manage")]
+    public async Task<ActionResult<ApiResponse<WhatsAppProductionEnableResponse>>> EnableProduction(Guid integrationId, CancellationToken cancellationToken)
+    {
+        var response = await whatsAppTemplateService.EnableProductionAsync(integrationId, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    [HttpPost("{integrationId:guid}/production/disable")]
+    [RequiresPermission("conversations.manage")]
+    public async Task<ActionResult<ApiResponse<WhatsAppProductionEnableResponse>>> DisableProduction(Guid integrationId, CancellationToken cancellationToken)
+    {
+        var response = await whatsAppTemplateService.DisableProductionAsync(integrationId, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
     [HttpGet("{integrationId:guid}/health")]
     [RequiresPermission("conversations.manage")]
     public async Task<ActionResult<ApiResponse<WhatsAppIntegrationHealthResponse>>> CheckHealth(Guid integrationId, CancellationToken cancellationToken)

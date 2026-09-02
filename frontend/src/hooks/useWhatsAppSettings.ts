@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { createWhatsAppSettingsApi } from "../api/whatsAppSettingsApi";
 import type {
+  WhatsAppIntegrationConfiguration,
+  WhatsAppIntegrationDetail,
   WhatsAppIntegrationHealth,
   WhatsAppIntegrationSummary,
   WhatsAppTemplateDetail,
@@ -27,6 +29,8 @@ export interface UseWhatsAppSettingsResult {
   isLoadingTemplateDetail: boolean;
   isCheckingHealth: boolean;
   isSyncingTemplates: boolean;
+  isSavingConfiguration: boolean;
+  isChangingProduction: boolean;
   error: string | null;
   templatesError: string | null;
   actionMessage: string | null;
@@ -49,6 +53,9 @@ export interface UseWhatsAppSettingsResult {
   selectTemplate: (templateId: string) => Promise<void>;
   checkHealth: () => Promise<void>;
   syncTemplates: () => Promise<void>;
+  getIntegrationConfiguration: (integrationId: string) => Promise<WhatsAppIntegrationDetail | null>;
+  saveIntegrationConfiguration: (request: WhatsAppIntegrationConfiguration, integrationId?: string) => Promise<WhatsAppIntegrationDetail | null>;
+  setProductionEnabled: (enabled: boolean) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -67,6 +74,8 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
   const [isLoadingTemplateDetail, setIsLoadingTemplateDetail] = useState(false);
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
   const [isSyncingTemplates, setIsSyncingTemplates] = useState(false);
+  const [isSavingConfiguration, setIsSavingConfiguration] = useState(false);
+  const [isChangingProduction, setIsChangingProduction] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -382,6 +391,67 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
     }
   }, [accessToken, api, handleFailure, loadIntegrations, loadTemplates, selectedIntegrationId]);
 
+  const getIntegrationConfiguration = useCallback(async (integrationId: string) => {
+    if (!accessToken) {
+      return null;
+    }
+
+    setActionMessage(null);
+    try {
+      return await api.getIntegration(integrationId);
+    } catch (failure) {
+      setActionMessage(handleFailure(failure, "Unable to load integration configuration."));
+      return null;
+    }
+  }, [accessToken, api, handleFailure]);
+
+  const saveIntegrationConfiguration = useCallback(async (request: WhatsAppIntegrationConfiguration, integrationId?: string) => {
+    if (!accessToken) {
+      return null;
+    }
+
+    setIsSavingConfiguration(true);
+    setActionMessage(null);
+    try {
+      const integration = integrationId
+        ? await api.updateIntegration(integrationId, request)
+        : await api.createIntegration(request);
+      setSelectedIntegrationId(integration.id);
+      setActionMessage(integrationId ? "Integration configuration updated." : "Integration configuration created.");
+      await loadIntegrations();
+      return integration;
+    } catch (failure) {
+      setActionMessage(handleFailure(failure, "Unable to save integration configuration."));
+      return null;
+    } finally {
+      if (isMountedRef.current) {
+        setIsSavingConfiguration(false);
+      }
+    }
+  }, [accessToken, api, handleFailure, loadIntegrations]);
+
+  const setProductionEnabled = useCallback(async (enabled: boolean) => {
+    if (!selectedIntegrationId || !accessToken) {
+      return;
+    }
+
+    setIsChangingProduction(true);
+    setActionMessage(null);
+    try {
+      const result = enabled
+        ? await api.enableProduction(selectedIntegrationId)
+        : await api.disableProduction(selectedIntegrationId);
+      setActionMessage(result.message || (enabled ? "Production enabled." : "Production disabled."));
+      await loadIntegrations();
+    } catch (failure) {
+      setActionMessage(handleFailure(failure, enabled ? "Unable to enable production." : "Unable to disable production."));
+    } finally {
+      if (isMountedRef.current) {
+        setIsChangingProduction(false);
+      }
+    }
+  }, [accessToken, api, handleFailure, loadIntegrations, selectedIntegrationId]);
+
   const refresh = useCallback(async () => {
     await Promise.all([loadIntegrations(), loadTemplates()]);
   }, [loadIntegrations, loadTemplates]);
@@ -398,6 +468,8 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
     isLoadingTemplateDetail,
     isCheckingHealth,
     isSyncingTemplates,
+    isSavingConfiguration,
+    isChangingProduction,
     error,
     templatesError,
     actionMessage,
@@ -420,6 +492,9 @@ export function useWhatsAppSettings({ accessToken, onUnauthorized }: UseWhatsApp
     selectTemplate,
     checkHealth,
     syncTemplates,
+    getIntegrationConfiguration,
+    saveIntegrationConfiguration,
+    setProductionEnabled,
     refresh
   };
 }

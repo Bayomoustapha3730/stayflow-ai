@@ -48,6 +48,56 @@
   margin-top: 16px;
 }
 
+.sf-whatsapp-configuration {
+  background: var(--sf-host-card);
+  border: 1px solid var(--sf-host-line);
+  border-radius: 8px;
+  margin-top: 16px;
+  padding: 16px;
+}
+
+.sf-whatsapp-configuration-heading {
+  align-items: start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.sf-whatsapp-configuration-heading h2,
+.sf-whatsapp-configuration-heading p {
+  margin: 0;
+}
+
+.sf-whatsapp-configuration-heading p {
+  color: var(--sf-host-muted);
+  margin-top: 6px;
+}
+
+.sf-whatsapp-configuration-form {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.sf-whatsapp-configuration-form label {
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  gap: 8px;
+}
+
+.sf-whatsapp-configuration-form input {
+  border: 1px solid var(--sf-host-line);
+  border-radius: 8px;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.sf-whatsapp-production-action {
+  margin-top: 14px;
+}
+
 .sf-whatsapp-card,
 .sf-whatsapp-empty,
 .sf-whatsapp-preview-card {
@@ -222,6 +272,10 @@
 
   .sf-whatsapp-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sf-whatsapp-configuration-form {
+    grid-template-columns: 1fr;
   }
 
   .sf-whatsapp-grid {

@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Npgsql;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.WhatsApp;
@@ -22,8 +25,15 @@ public sealed class WhatsAppTemplateService(
     IWhatsAppCustomerServiceWindowEvaluator windowEvaluator,
     IPhoneNumberNormalizer phoneNumberNormalizer,
     IHostEnvironment hostEnvironment,
+    IOptions<WhatsAppCloudOptions> cloudOptions,
     ILogger<WhatsAppTemplateService> logger) : IWhatsAppTemplateService
 {
+    // Fixed by the AddWhatsAppMessagingFoundation migration; a violation here means a caller tried
+    // to configure a PhoneNumberId already claimed by another integration.
+    private const string PhoneNumberIdUniqueIndexName = "IX_WhatsAppIntegrations_PhoneNumberId";
+    private static readonly Regex GraphApiVersionPattern = new(@"^v[0-9]{1,3}(\.[0-9]{1,2})?$", RegexOptions.Compiled);
+    private static readonly Regex CredentialReferencePattern = new(@"^[A-Za-z0-9_-]{1,64}$", RegexOptions.Compiled);
+
     public async Task<ApiResponse<IReadOnlyCollection<WhatsAppIntegrationSummaryResponse>>> GetIntegrationsAsync(CancellationToken cancellationToken)
     {
         if (!TryGetCompanyId(out var companyId, out var error))
@@ -48,6 +58,184 @@ public sealed class WhatsAppTemplateService(
         }).ToList();
 
         return ApiResponse<IReadOnlyCollection<WhatsAppIntegrationSummaryResponse>>.Ok(items);
+    }
+
+    public async Task<ApiResponse<WhatsAppIntegrationDetailResponse>> GetIntegrationDetailAsync(Guid integrationId, CancellationToken cancellationToken)
+    {
+        var integrationResult = await GetIntegrationAsync(integrationId, cancellationToken);
+        if (!integrationResult.Success || integrationResult.Integration is null)
+        {
+            return ApiResponse<WhatsAppIntegrationDetailResponse>.Fail(integrationResult.ErrorMessage);
+        }
+
+        return ApiResponse<WhatsAppIntegrationDetailResponse>.Ok(MapDetail(integrationResult.Integration));
+    }
+
+    public async Task<ApiResponse<WhatsAppIntegrationDetailResponse>> CreateIntegrationAsync(WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken)
+    {
+        if (!TryGetCompanyId(out var companyId, out var tenantError))
+        {
+            return ApiResponse<WhatsAppIntegrationDetailResponse>.Fail(tenantError, [tenantError]);
+        }
+
+        if (!TryValidateConfiguration(request, out var values, out var validationErrors))
+        {
+            return ApiResponse<WhatsAppIntegrationDetailResponse>.Fail("WhatsApp integration configuration is invalid.", validationErrors);
+        }
+
+        var integration = new WhatsAppIntegration
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            DisplayName = values.DisplayName,
+            PhoneNumberId = values.PhoneNumberId,
+            WhatsAppBusinessAccountId = values.WhatsAppBusinessAccountId,
+            BusinessPhoneNumberMasked = values.BusinessPhoneNumberMasked,
+            CredentialReference = values.CredentialReference,
+            GraphApiVersion = values.GraphApiVersion,
+            IsActive = request.IsActive,
+            IsProductionEnabled = false,
+            WebhookConfigurationStatus = "Unknown",
+            TemplateSyncStatus = "NotStarted",
+            IsDemoSeeded = false
+        };
+
+        await whatsAppRepository.AddIntegrationAsync(integration, cancellationToken);
+
+        try
+        {
+            await whatsAppRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsPhoneNumberIdUniqueViolation(exception))
+        {
+            return ApiResponse<WhatsAppIntegrationDetailResponse>.Fail("Phone number ID is already used by another integration.");
+        }
+
+        return ApiResponse<WhatsAppIntegrationDetailResponse>.Ok(MapDetail(integration), "WhatsApp integration created.");
+    }
+
+    public async Task<ApiResponse<WhatsAppIntegrationDetailResponse>> UpdateIntegrationAsync(Guid integrationId, WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken)
+    {
+        var integrationResult = await GetIntegrationAsync(integrationId, cancellationToken);
+        if (!integrationResult.Success || integrationResult.Integration is null)
+        {
+            return ApiResponse<WhatsAppIntegrationDetailResponse>.Fail(integrationResult.ErrorMessage);
+        }
+
+        if (!TryValidateConfiguration(request, out var values, out var validationErrors))
+        {
+            return ApiResponse<WhatsAppIntegrationDetailResponse>.Fail("WhatsApp integration configuration is invalid.", validationErrors);
+        }
+
+        var integration = integrationResult.Integration;
+        integration.DisplayName = values.DisplayName;
+        integration.PhoneNumberId = values.PhoneNumberId;
+        integration.WhatsAppBusinessAccountId = values.WhatsAppBusinessAccountId;
+        integration.BusinessPhoneNumberMasked = values.BusinessPhoneNumberMasked;
+        integration.CredentialReference = values.CredentialReference;
+        integration.GraphApiVersion = values.GraphApiVersion;
+        integration.IsActive = request.IsActive;
+        // A deliberate configuration edit permanently opts this integration out of demo reseeding.
+        integration.IsDemoSeeded = false;
+
+        try
+        {
+            await whatsAppRepository.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsPhoneNumberIdUniqueViolation(exception))
+        {
+            return ApiResponse<WhatsAppIntegrationDetailResponse>.Fail("Phone number ID is already used by another integration.");
+        }
+
+        return ApiResponse<WhatsAppIntegrationDetailResponse>.Ok(MapDetail(integration), "WhatsApp integration updated.");
+    }
+
+    public async Task<ApiResponse<WhatsAppProductionEnableResponse>> EnableProductionAsync(Guid integrationId, CancellationToken cancellationToken)
+    {
+        var integrationResult = await GetIntegrationAsync(integrationId, cancellationToken);
+        if (!integrationResult.Success || integrationResult.Integration is null)
+        {
+            return ApiResponse<WhatsAppProductionEnableResponse>.Fail(integrationResult.ErrorMessage);
+        }
+
+        var integration = integrationResult.Integration;
+
+        if (!cloudOptions.Value.Enabled)
+        {
+            return ApiResponse<WhatsAppProductionEnableResponse>.Fail("WhatsApp Cloud integration is not enabled. Contact an administrator.");
+        }
+
+        if (!integration.IsActive)
+        {
+            return ApiResponse<WhatsAppProductionEnableResponse>.Fail("Integration must be active before enabling production sending.");
+        }
+
+        if (string.IsNullOrWhiteSpace(integration.PhoneNumberId)
+            || string.IsNullOrWhiteSpace(integration.WhatsAppBusinessAccountId)
+            || string.IsNullOrWhiteSpace(integration.GraphApiVersion))
+        {
+            return ApiResponse<WhatsAppProductionEnableResponse>.Fail("Phone number ID, WhatsApp Business Account ID, and Graph API version must be configured before enabling production sending.");
+        }
+
+        if (string.IsNullOrWhiteSpace(integration.CredentialReference))
+        {
+            return ApiResponse<WhatsAppProductionEnableResponse>.Fail("A credential reference must be configured before enabling production sending.");
+        }
+
+        var credentials = await credentialResolver.ResolveAsync(integration, cancellationToken);
+        if (!credentials.Success || string.IsNullOrWhiteSpace(credentials.AccessToken))
+        {
+            return ApiResponse<WhatsAppProductionEnableResponse>.Fail(credentials.FailureSummary ?? "WhatsApp credentials could not be resolved.");
+        }
+
+        // Reuses the existing health infrastructure (non-message provider validation call) instead
+        // of duplicating connectivity checks here.
+        var health = await healthService.CheckAsync(integration, cancellationToken);
+        integration.LastHealthCheckAt = health.CheckedAt;
+        integration.WebhookConfigurationStatus = health.Status;
+
+        if (health.Status is not ("Healthy" or "ProductionPending"))
+        {
+            integration.LastErrorSummary = health.Message;
+            await whatsAppRepository.SaveChangesAsync(cancellationToken);
+            return ApiResponse<WhatsAppProductionEnableResponse>.Fail($"Integration is not ready for production sending: {health.Message}");
+        }
+
+        integration.LastSuccessfulHealthCheckAt = health.CheckedAt;
+        integration.LastErrorSummary = null;
+        integration.IsProductionEnabled = true;
+        await whatsAppRepository.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<WhatsAppProductionEnableResponse>.Ok(new WhatsAppProductionEnableResponse
+        {
+            IntegrationId = integration.Id,
+            IsProductionEnabled = true,
+            Status = "Enabled",
+            Message = "Production sending enabled.",
+            CheckedAt = health.CheckedAt
+        }, "WhatsApp production sending enabled.");
+    }
+
+    public async Task<ApiResponse<WhatsAppProductionEnableResponse>> DisableProductionAsync(Guid integrationId, CancellationToken cancellationToken)
+    {
+        var integrationResult = await GetIntegrationAsync(integrationId, cancellationToken);
+        if (!integrationResult.Success || integrationResult.Integration is null)
+        {
+            return ApiResponse<WhatsAppProductionEnableResponse>.Fail(integrationResult.ErrorMessage);
+        }
+
+        var integration = integrationResult.Integration;
+        integration.IsProductionEnabled = false;
+        await whatsAppRepository.SaveChangesAsync(cancellationToken);
+
+        return ApiResponse<WhatsAppProductionEnableResponse>.Ok(new WhatsAppProductionEnableResponse
+        {
+            IntegrationId = integration.Id,
+            IsProductionEnabled = false,
+            Status = "Disabled",
+            Message = "Production sending disabled.",
+            CheckedAt = DateTimeOffset.UtcNow
+        }, "WhatsApp production sending disabled.");
     }
 
     public async Task<ApiResponse<WhatsAppIntegrationHealthResponse>> CheckHealthAsync(Guid integrationId, CancellationToken cancellationToken)
@@ -637,6 +825,94 @@ public sealed class WhatsAppTemplateService(
         return (true, string.Empty, integration);
     }
 
+    private static WhatsAppIntegrationDetailResponse MapDetail(WhatsAppIntegration integration)
+    {
+        return new WhatsAppIntegrationDetailResponse
+        {
+            Id = integration.Id,
+            DisplayName = integration.DisplayName,
+            PhoneNumberId = integration.PhoneNumberId,
+            WhatsAppBusinessAccountId = integration.WhatsAppBusinessAccountId,
+            BusinessPhoneNumberMasked = integration.BusinessPhoneNumberMasked,
+            CredentialReference = integration.CredentialReference,
+            GraphApiVersion = integration.GraphApiVersion,
+            IsActive = integration.IsActive,
+            IsProductionEnabled = integration.IsProductionEnabled,
+            Mode = integration.IsProductionEnabled ? "Production" : "Development",
+            HealthStatus = string.IsNullOrWhiteSpace(integration.WebhookConfigurationStatus) ? "Unknown" : integration.WebhookConfigurationStatus,
+            LastHealthCheckAt = integration.LastHealthCheckAt,
+            LastSuccessfulHealthCheckAt = integration.LastSuccessfulHealthCheckAt,
+            LastTemplateSyncAt = integration.LastTemplateSyncAt,
+            LastErrorSummary = integration.LastErrorSummary
+        };
+    }
+
+    private sealed record WhatsAppIntegrationConfigurationValues(
+        string DisplayName,
+        string PhoneNumberId,
+        string WhatsAppBusinessAccountId,
+        string BusinessPhoneNumberMasked,
+        string? CredentialReference,
+        string GraphApiVersion);
+
+    private static bool TryValidateConfiguration(
+        WhatsAppIntegrationConfigurationRequest request,
+        out WhatsAppIntegrationConfigurationValues values,
+        out IReadOnlyCollection<string> errors)
+    {
+        var errorList = new List<string>();
+
+        var displayName = (request.DisplayName ?? string.Empty).Trim();
+        var phoneNumberId = (request.PhoneNumberId ?? string.Empty).Trim();
+        var wabaId = (request.WhatsAppBusinessAccountId ?? string.Empty).Trim();
+        var maskedNumber = (request.BusinessPhoneNumberMasked ?? string.Empty).Trim();
+        var graphApiVersion = (request.GraphApiVersion ?? string.Empty).Trim();
+        var credentialReference = string.IsNullOrWhiteSpace(request.CredentialReference)
+            ? null
+            : request.CredentialReference.Trim();
+
+        if (string.IsNullOrWhiteSpace(displayName) || displayName.Length > 120)
+        {
+            errorList.Add("Display name is required and must be 120 characters or fewer.");
+        }
+
+        if (string.IsNullOrWhiteSpace(phoneNumberId) || phoneNumberId.Length > 160)
+        {
+            errorList.Add("Phone number ID is required and must be 160 characters or fewer.");
+        }
+
+        if (string.IsNullOrWhiteSpace(wabaId) || wabaId.Length > 160)
+        {
+            errorList.Add("WhatsApp Business Account ID is required and must be 160 characters or fewer.");
+        }
+
+        if (string.IsNullOrWhiteSpace(maskedNumber) || maskedNumber.Length > 32)
+        {
+            errorList.Add("A masked business phone number display value is required and must be 32 characters or fewer.");
+        }
+
+        if (string.IsNullOrWhiteSpace(graphApiVersion) || !GraphApiVersionPattern.IsMatch(graphApiVersion))
+        {
+            errorList.Add("Graph API version must match the expected format, for example 'v23.0'.");
+        }
+
+        if (credentialReference is not null && !CredentialReferencePattern.IsMatch(credentialReference))
+        {
+            errorList.Add("Credential reference must contain only letters, digits, underscores, or hyphens (max 64 characters).");
+        }
+
+        values = new WhatsAppIntegrationConfigurationValues(displayName, phoneNumberId, wabaId, maskedNumber, credentialReference, graphApiVersion);
+        errors = errorList;
+        return errorList.Count == 0;
+    }
+
+    private static bool IsPhoneNumberIdUniqueViolation(DbUpdateException dbUpdateException)
+    {
+        return dbUpdateException.GetBaseException() is PostgresException postgresException
+            && postgresException.SqlState == PostgresErrorCodes.UniqueViolation
+            && string.Equals(postgresException.ConstraintName, PhoneNumberIdUniqueIndexName, StringComparison.Ordinal);
+    }
+
     private async Task<(bool Success, string ErrorMessage, WhatsAppTemplate? Template)> GetTemplateForTenantAsync(Guid integrationId, Guid templateId, CancellationToken cancellationToken)
     {
         var integrationResult = await GetIntegrationAsync(integrationId, cancellationToken);
@@ -686,9 +962,9 @@ public sealed class WhatsAppTemplateService(
                 LanguageCode = "en",
                 Category = "UTILITY",
                 Status = "APPROVED",
-                HeaderType = "TEXT",
+                HeaderType = (string?)"TEXT",
                 BodyText = "Hello {{1}}, welcome to StayFlow. Your stay starts on {{2}}.",
-                FooterText = "StayFlow Concierge",
+                FooterText = (string?)"StayFlow Concierge",
                 VariableCount = 2
             },
             new
@@ -697,9 +973,9 @@ public sealed class WhatsAppTemplateService(
                 LanguageCode = "fr",
                 Category = "UTILITY",
                 Status = "APPROVED",
-                HeaderType = "TEXT",
+                HeaderType = (string?)"TEXT",
                 BodyText = "Bonjour {{1}}, votre reservation {{2}} est confirmee.",
-                FooterText = "StayFlow Concierge",
+                FooterText = (string?)"StayFlow Concierge",
                 VariableCount = 2
             },
             new
@@ -719,9 +995,9 @@ public sealed class WhatsAppTemplateService(
                 LanguageCode = "es",
                 Category = "AUTHENTICATION",
                 Status = "APPROVED",
-                HeaderType = "TEXT",
+                HeaderType = (string?)"TEXT",
                 BodyText = "Hola {{1}}, usa el codigo {{2}} para el check-in.",
-                FooterText = "StayFlow Concierge",
+                FooterText = (string?)"StayFlow Concierge",
                 VariableCount = 2
             },
             new

@@ -44,6 +44,11 @@ public sealed class WhatsAppRepository(ApplicationDbContext dbContext) : IWhatsA
             .ToListAsync(cancellationToken);
     }
 
+    public async Task AddIntegrationAsync(WhatsAppIntegration integration, CancellationToken cancellationToken)
+    {
+        await dbContext.WhatsAppIntegrations.AddAsync(integration, cancellationToken);
+    }
+
     public async Task<PagedResult<WhatsAppTemplate>> ListTemplatesAsync(Guid companyId, Guid integrationId, WhatsAppTemplateListQuery query, CancellationToken cancellationToken)
     {
         var page = query.NormalizedPageNumber;

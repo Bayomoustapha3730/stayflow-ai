@@ -21,6 +21,7 @@ public sealed class WhatsAppIntegrationConfiguration : IEntityTypeConfiguration<
         builder.Property(integration => integration.WebhookConfigurationStatus).HasMaxLength(60).IsRequired();
         builder.Property(integration => integration.TemplateSyncStatus).HasMaxLength(60).IsRequired();
         builder.Property(integration => integration.LastErrorSummary).HasMaxLength(280);
+        builder.Property(integration => integration.IsDemoSeeded).IsRequired().HasDefaultValue(false);
 
         builder.HasOne(integration => integration.Company)
             .WithMany(company => company.WhatsAppIntegrations)

@@ -346,6 +346,12 @@ public sealed class WhatsAppWebhookProcessorTests
             }
         }
 
+        public Task AddIntegrationAsync(WhatsAppIntegration integration, CancellationToken cancellationToken)
+        {
+            Integrations.Add(integration);
+            return Task.CompletedTask;
+        }
+
         public Task<WhatsAppIntegration?> GetActiveIntegrationByPhoneNumberIdAsync(string phoneNumberId, CancellationToken cancellationToken)
             => Task.FromResult(ScopedIntegrations.FirstOrDefault(item => item.IsActive && item.PhoneNumberId == phoneNumberId));
 

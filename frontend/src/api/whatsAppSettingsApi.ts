@@ -1,7 +1,10 @@
 import type { HttpClient } from "./httpClient";
 import type {
+  WhatsAppIntegrationConfiguration,
+  WhatsAppIntegrationDetail,
   WhatsAppIntegrationHealth,
   WhatsAppIntegrationSummary,
+  WhatsAppProductionEnableResult,
   WhatsAppTemplateDetail,
   WhatsAppTemplateListQuery,
   WhatsAppTemplateListResponse,
@@ -18,6 +21,26 @@ export function createWhatsAppSettingsApi(http: HttpClient) {
   return {
     listIntegrations(options?: RequestOptions) {
       return http.get<WhatsAppIntegrationSummary[]>("/whatsapp/integrations", options);
+    },
+
+    getIntegration(integrationId: string, options?: RequestOptions) {
+      return http.get<WhatsAppIntegrationDetail>(`/whatsapp/integrations/${integrationId}`, options);
+    },
+
+    createIntegration(request: WhatsAppIntegrationConfiguration, options?: RequestOptions) {
+      return http.post<WhatsAppIntegrationDetail>("/whatsapp/integrations", request, options);
+    },
+
+    updateIntegration(integrationId: string, request: WhatsAppIntegrationConfiguration, options?: RequestOptions) {
+      return http.put<WhatsAppIntegrationDetail>(`/whatsapp/integrations/${integrationId}`, request, options);
+    },
+
+    enableProduction(integrationId: string, options?: RequestOptions) {
+      return http.post<WhatsAppProductionEnableResult>(`/whatsapp/integrations/${integrationId}/production/enable`, undefined, options);
+    },
+
+    disableProduction(integrationId: string, options?: RequestOptions) {
+      return http.post<WhatsAppProductionEnableResult>(`/whatsapp/integrations/${integrationId}/production/disable`, undefined, options);
     },
 
     checkIntegrationHealth(integrationId: string, options?: RequestOptions) {
