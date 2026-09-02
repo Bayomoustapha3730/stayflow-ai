@@ -18,6 +18,14 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(Services.ReservationContextOptions.SectionName))
             .Validate(options => options.PreArrivalWindowDays >= 0 && options.PreArrivalWindowDays <= 365, "Reservation context pre-arrival window must be between 0 and 365 days.")
             .ValidateOnStart();
+        services.AddOptions<Services.GuestJourneyDeliveryOptions>()
+            .Bind(configuration.GetSection(Services.GuestJourneyDeliveryOptions.SectionName))
+            .Validate(options => options.PollingIntervalSeconds is >= 1 and <= 3600, "Guest journey delivery polling interval must be between 1 and 3600 seconds.")
+            .Validate(options => options.BatchSize is >= 1 and <= 500, "Guest journey delivery batch size must be between 1 and 500.")
+            .Validate(options => options.ProcessingLeaseTimeoutMinutes is >= 1 and <= 1440, "Guest journey delivery processing lease timeout must be between 1 and 1440 minutes.")
+            .Validate(options => options.RetryDelayMinutes is >= 1 and <= 1440, "Guest journey delivery retry delay must be between 1 and 1440 minutes.")
+            .Validate(options => options.MaxAttempts is >= 1 and <= 20, "Guest journey delivery max attempts must be between 1 and 20.")
+            .ValidateOnStart();
         services.AddOptions<Services.ReservationLifecycleEventOptions>()
             .Bind(configuration.GetSection(Services.ReservationLifecycleEventOptions.SectionName))
             .Validate(options => options.PollingIntervalSeconds is >= 1 and <= 3600, "Reservation lifecycle polling interval must be between 1 and 3600 seconds.")
@@ -218,9 +226,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IReservationLifecycleEventIdempotencyKeyBuilder, Services.ReservationLifecycleEventIdempotencyKeyBuilder>();
         services.AddScoped<Services.IReservationLifecycleEventService, Services.ReservationLifecycleEventService>();
         services.AddScoped<Services.IReservationLifecycleEventGenerator, Services.ReservationLifecycleEventGenerator>();
-        services.AddScoped<Services.IReservationLifecycleEventHandler, Services.NoOpReservationLifecycleEventHandler>();
+        services.AddScoped<Services.IReservationLifecycleEventHandler, Services.ReservationLifecycleGuestJourneyHandler>();
         services.AddScoped<Services.IReservationLifecycleEventProcessor, Services.ReservationLifecycleEventProcessor>();
         services.AddHostedService<Services.ReservationLifecycleWorker>();
+        services.AddSingleton<Services.IReservationLifecycleMessageComposer, Services.ReservationLifecycleMessageComposer>();
+        services.AddScoped<Repositories.IGuestJourneyMessageRepository, Repositories.GuestJourneyMessageRepository>();
+        services.AddScoped<Services.IGuestJourneyMessageService, Services.GuestJourneyMessageService>();
+        services.AddScoped<Services.IGuestJourneyMessageDeliveryProcessor, Services.GuestJourneyMessageDeliveryProcessor>();
+        services.AddHostedService<Services.GuestJourneyDeliveryWorker>();
         services.AddScoped<Repositories.IConversationRepository, Repositories.ConversationRepository>();
         services.AddSingleton<Services.IConversationStatusTransitionPolicy, Services.ConversationStatusTransitionPolicy>();
         services.AddScoped<Services.IConversationService, Services.ConversationService>();

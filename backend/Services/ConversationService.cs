@@ -647,6 +647,35 @@ public sealed class ConversationService(
             cancellationToken);
     }
 
+    public async Task<ApiResponse<ConversationMessageResponse>> AddLifecycleAutomationMessageAsync(
+        Guid companyId,
+        Guid conversationId,
+        string content,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var duplicate = await conversationRepository.FindByExternalMessageIdAsync(companyId, idempotencyKey, null, cancellationToken);
+        if (duplicate is not null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(duplicate), "Lifecycle automation message already exists.");
+        }
+
+        return await AddMessageAsync(
+            companyId,
+            conversationId,
+            ConversationSenderType.System,
+            ConversationMessageType.LifecycleAutomation,
+            content,
+            DateTimeOffset.UtcNow,
+            idempotencyKey,
+            ConversationMessageProvider.None,
+            null,
+            null,
+            false,
+            "LifecycleAutomationMessageStored",
+            cancellationToken);
+    }
+
     private async Task<ApiResponse<ConversationMessageResponse>> AddMessageAsync(
         Guid conversationId,
         ConversationSenderType senderType,

@@ -5,5 +5,6 @@ public enum ConversationMessageType
     Text,
     SystemEvent,
     Escalation,
-    InternalNote
+    InternalNote,
+    LifecycleAutomation
 }
