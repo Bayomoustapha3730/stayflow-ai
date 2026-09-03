@@ -8,6 +8,8 @@ public sealed class Conversation : AuditableEntity
     public Guid GuestId { get; set; }
     public Guid? ReservationId { get; set; }
     public Guid? PropertyId { get; set; }
+    // Deterministic outbound-sender binding for WhatsApp conversations; null for legacy/Web conversations.
+    public Guid? WhatsAppIntegrationId { get; set; }
     public GuestChannel Channel { get; set; } = GuestChannel.Web;
     public string? ChannelIdentity { get; set; }
     public string? ExternalThreadId { get; set; }
@@ -29,6 +31,7 @@ public sealed class Conversation : AuditableEntity
     public Property? Property { get; set; }
     public Guest Guest { get; set; } = null!;
     public Reservation? Reservation { get; set; }
+    public WhatsAppIntegration? WhatsAppIntegration { get; set; }
     public User? AssignedUser { get; set; }
     public ICollection<ConversationMessage> Messages { get; set; } = [];
     public ICollection<ConversationMessageKnowledgeSource> MessageKnowledgeSources { get; set; } = [];

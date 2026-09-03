@@ -13,6 +13,7 @@ namespace StayFlow.Api.Services;
 public sealed class WhatsAppCloudClient(
     IHttpClientFactory httpClientFactory,
     IOptions<WhatsAppCloudOptions> options,
+    IWhatsAppOutboundSendGate outboundSendGate,
     IWhatsAppProviderTelemetry telemetry,
     ILogger<WhatsAppCloudClient> logger) : IWhatsAppCloudClient
 {
@@ -20,6 +21,12 @@ public sealed class WhatsAppCloudClient(
 
     public async Task<WhatsAppSendTextMessageResult> SendTextMessageAsync(WhatsAppSendTextMessageRequest request, CancellationToken cancellationToken)
     {
+        var gate = outboundSendGate.EvaluateRealProviderSend(request.IsIntegrationProductionEnabled);
+        if (!gate.Success)
+        {
+            return CreateSendFailure(gate.FailureCode!, gate.FailureSummary!, "AuthenticationOrConfigurationIssue", null, null, null, false);
+        }
+
         var context = CreateSendContext(request.CompanyId, request.IntegrationId, request.PhoneNumberId, request.GraphApiVersion, request.AccessToken);
         if (context is null)
         {
@@ -77,6 +84,12 @@ public sealed class WhatsAppCloudClient(
 
     public async Task<WhatsAppSendTemplateMessageResult> SendTemplateMessageAsync(WhatsAppTemplateSendRequest request, CancellationToken cancellationToken)
     {
+        var gate = outboundSendGate.EvaluateRealProviderSend(request.IsIntegrationProductionEnabled);
+        if (!gate.Success)
+        {
+            return CreateTemplateFailure(gate.FailureCode!, gate.FailureSummary!, "AuthenticationOrConfigurationIssue", null, null, null, false);
+        }
+
         var context = CreateSendContext(request.CompanyId, request.IntegrationId, request.PhoneNumberId, request.GraphApiVersion, request.AccessToken);
         if (context is null)
         {

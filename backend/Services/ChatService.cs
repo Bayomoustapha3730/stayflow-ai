@@ -32,7 +32,7 @@ public sealed class ChatService(
     private readonly ILogger<ChatService> logger = logger ?? NullLogger<ChatService>.Instance;
     private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService ?? NoOpSubscriptionEntitlementService.Instance;
 
-    public async Task<ApiResponse<ChatMessageResponse>> SendGuestMessageAsync(SendChatMessageRequest request, CancellationToken cancellationToken)
+    public async Task<ApiResponse<ChatMessageResponse>> SendGuestMessageAsync(SendChatMessageRequest request, CancellationToken cancellationToken, Guid? whatsAppIntegrationId = null)
     {
         if (!TryGetCompanyId(out var companyId, out var tenantError))
         {
@@ -89,7 +89,8 @@ public sealed class ChatService(
                 ReservationId = request.ReservationId,
                 PropertyId = request.PropertyId,
                 Channel = request.Channel,
-                ChannelIdentity = NormalizeIdentity(request.ChannelIdentity)
+                ChannelIdentity = NormalizeIdentity(request.ChannelIdentity),
+                WhatsAppIntegrationId = request.Channel == GuestChannel.WhatsApp ? whatsAppIntegrationId : null
             }, cancellationToken);
 
         if (!conversationResponse.Success || conversationResponse.Data is null)

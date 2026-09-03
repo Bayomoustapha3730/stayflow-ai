@@ -23,10 +23,14 @@ public sealed class WhatsAppRepository(ApplicationDbContext dbContext) : IWhatsA
             .FirstOrDefaultAsync(integration => integration.PhoneNumberId == phoneNumberId && integration.IsActive && integration.Company.IsActive, cancellationToken);
     }
 
-    public Task<WhatsAppIntegration?> GetActiveIntegrationByCompanyIdAsync(Guid companyId, CancellationToken cancellationToken)
+    public async Task<WhatsAppIntegration?> GetSoleActiveIntegrationForCompanyAsync(Guid companyId, CancellationToken cancellationToken)
     {
-        return dbContext.WhatsAppIntegrations
-            .FirstOrDefaultAsync(integration => integration.CompanyId == companyId && integration.IsActive, cancellationToken);
+        var candidates = await dbContext.WhatsAppIntegrations
+            .Where(integration => integration.CompanyId == companyId && integration.IsActive)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+
+        return candidates.Count == 1 ? candidates[0] : null;
     }
 
     public Task<WhatsAppIntegration?> GetIntegrationForCompanyAsync(Guid companyId, Guid integrationId, CancellationToken cancellationToken)
@@ -118,6 +122,13 @@ public sealed class WhatsAppRepository(ApplicationDbContext dbContext) : IWhatsA
             .FirstOrDefaultAsync(template => template.CompanyId == companyId
                 && template.WhatsAppIntegrationId == integrationId
                 && template.Id == templateId, cancellationToken);
+    }
+
+    public Task<WhatsAppTemplate?> GetTemplateForCompanyAsync(Guid companyId, Guid templateId, CancellationToken cancellationToken)
+    {
+        return dbContext.WhatsAppTemplates
+            .AsNoTracking()
+            .FirstOrDefaultAsync(template => template.CompanyId == companyId && template.Id == templateId, cancellationToken);
     }
 
     public Task<WhatsAppTemplate?> GetTemplateByNameAsync(Guid companyId, Guid integrationId, string name, string languageCode, CancellationToken cancellationToken)

@@ -282,6 +282,7 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<Services.WhatsAppCloudClient>();
         services.AddScoped<Services.DevelopmentWhatsAppCloudClient>();
+        services.AddScoped<Services.IWhatsAppOutboundSendGate, Services.WhatsAppOutboundSendGate>();
         services.AddSingleton<Services.IWhatsAppProviderTelemetry, Services.WhatsAppProviderTelemetry>();
         services.AddScoped<Services.IWhatsAppCloudClient>(serviceProvider =>
         {

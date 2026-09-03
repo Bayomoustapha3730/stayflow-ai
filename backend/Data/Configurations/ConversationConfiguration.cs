@@ -44,6 +44,11 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
             .HasForeignKey(conversation => conversation.ReservationId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.HasOne(conversation => conversation.WhatsAppIntegration)
+            .WithMany()
+            .HasForeignKey(conversation => conversation.WhatsAppIntegrationId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.HasOne(conversation => conversation.AssignedUser)
             .WithMany(user => user.AssignedConversations)
             .HasForeignKey(conversation => conversation.AssignedUserId)
@@ -53,6 +58,7 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
         builder.HasIndex(conversation => conversation.GuestId);
         builder.HasIndex(conversation => conversation.ReservationId);
         builder.HasIndex(conversation => conversation.PropertyId);
+        builder.HasIndex(conversation => conversation.WhatsAppIntegrationId);
         builder.HasIndex(conversation => conversation.Status);
         builder.HasIndex(conversation => conversation.LastActivityAt);
         builder.HasIndex(conversation => conversation.CreatedAt);

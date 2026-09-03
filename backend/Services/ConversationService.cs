@@ -4,6 +4,7 @@ using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIOrchestration;
 using StayFlow.Api.DTOs.Chat;
 using StayFlow.Api.DTOs.Conversations;
+using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 
@@ -16,7 +17,8 @@ public sealed class ConversationService(
     IConversationRealtimePublisher realtimePublisher,
     IConversationChannelDispatcher conversationChannelDispatcher,
     IOptions<ConversationOptions> options,
-    IReservationLifecycleService reservationLifecycleService) : IConversationService
+    IReservationLifecycleService reservationLifecycleService,
+    IWhatsAppRepository? whatsAppRepository = null) : IConversationService
 {
     public async Task<ApiResponse<ConversationListResponse>> GetConversationsAsync(ConversationListQueryParameters query, CancellationToken cancellationToken)
     {
@@ -108,6 +110,7 @@ public sealed class ConversationService(
             GuestId = request.GuestId,
             ReservationId = request.ReservationId,
             PropertyId = request.ReservationId.HasValue ? validation.Data!.ReservationPropertyId : request.PropertyId,
+            WhatsAppIntegrationId = validation.Data!.WhatsAppIntegrationId,
             Channel = request.Channel,
             ChannelIdentity = normalizedIdentity,
             Subject = string.IsNullOrWhiteSpace(request.Subject) ? null : request.Subject.Trim(),
@@ -1045,7 +1048,26 @@ public sealed class ConversationService(
             return ApiResponse<AssociationValidationResult>.Fail("Assigned user was not found.");
         }
 
-        return ApiResponse<AssociationValidationResult>.Ok(new AssociationValidationResult(reservationPropertyId));
+        Guid? whatsAppIntegrationId = null;
+        if (request.WhatsAppIntegrationId is { } requestedIntegrationId)
+        {
+            if (request.Channel != GuestChannel.WhatsApp)
+            {
+                return ApiResponse<AssociationValidationResult>.Fail("WhatsApp integration binding is only valid for WhatsApp conversations.");
+            }
+
+            var integration = whatsAppRepository is null
+                ? null
+                : await whatsAppRepository.GetIntegrationForCompanyAsync(companyId, requestedIntegrationId, cancellationToken);
+            if (integration is null || !integration.IsActive)
+            {
+                return ApiResponse<AssociationValidationResult>.Fail("WhatsApp integration was not found or is not active.");
+            }
+
+            whatsAppIntegrationId = integration.Id;
+        }
+
+        return ApiResponse<AssociationValidationResult>.Ok(new AssociationValidationResult(reservationPropertyId, whatsAppIntegrationId));
     }
 
     private async Task<Conversation?> GetConversationForTenantAsync(Guid conversationId, CancellationToken cancellationToken)
@@ -1512,5 +1534,5 @@ public sealed class ConversationService(
         };
     }
 
-    private sealed record AssociationValidationResult(Guid? ReservationPropertyId);
+    private sealed record AssociationValidationResult(Guid? ReservationPropertyId, Guid? WhatsAppIntegrationId = null);
 }

@@ -10,7 +10,7 @@ public sealed class WhatsAppConversationChannelSender(
     IWhatsAppRepository whatsAppRepository,
     IWhatsAppCredentialResolver credentialResolver,
     IWhatsAppCustomerServiceWindowEvaluator customerServiceWindowEvaluator,
-    IHostEnvironment environment,
+    IWhatsAppOutboundSendGate outboundSendGate,
     IPhoneNumberNormalizer phoneNumberNormalizer,
     ILogger<WhatsAppConversationChannelSender> logger) : IConversationChannelSender
 {
@@ -18,23 +18,44 @@ public sealed class WhatsAppConversationChannelSender(
 
     public async Task SendAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken)
     {
-        var integration = await whatsAppRepository.GetActiveIntegrationByCompanyIdAsync(conversation.CompanyId, cancellationToken);
-        if (integration is null)
+        WhatsAppIntegration? integration;
+        if (conversation.WhatsAppIntegrationId is { } boundIntegrationId)
         {
-            message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
-            message.FailedAt = DateTimeOffset.UtcNow;
-            message.FailureCode = "MissingIntegration";
-            message.FailureReason = "WhatsApp integration is not configured for this company.";
-            message.FailureCategory = "AuthenticationOrConfigurationIssue";
-            return;
+            integration = await whatsAppRepository.GetIntegrationForCompanyAsync(conversation.CompanyId, boundIntegrationId, cancellationToken);
+            if (integration is null || !integration.IsActive)
+            {
+                message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
+                message.FailedAt = DateTimeOffset.UtcNow;
+                message.FailureCode = "IntegrationNotBoundOrInactive";
+                message.FailureReason = "The WhatsApp integration bound to this conversation is missing or inactive.";
+                message.FailureCategory = "AuthenticationOrConfigurationIssue";
+                return;
+            }
+        }
+        else
+        {
+            // No explicit binding (e.g. a conversation created before this field existed). Only
+            // proceed when the company has exactly one active integration; never guess among many.
+            integration = await whatsAppRepository.GetSoleActiveIntegrationForCompanyAsync(conversation.CompanyId, cancellationToken);
+            if (integration is null)
+            {
+                message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
+                message.FailedAt = DateTimeOffset.UtcNow;
+                message.FailureCode = "AmbiguousIntegration";
+                message.FailureReason = "This conversation is not bound to a specific WhatsApp integration and the company has zero or multiple active integrations.";
+                message.FailureCategory = "AuthenticationOrConfigurationIssue";
+                return;
+            }
         }
 
-        if (!integration.IsProductionEnabled && !environment.IsDevelopment())
+        var gate = outboundSendGate.EvaluateConfiguredSend(integration.IsProductionEnabled);
+        if (!gate.Success)
         {
             message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
             message.FailedAt = DateTimeOffset.UtcNow;
-            message.FailureCode = "ProductionDisabled";
-            message.FailureReason = "WhatsApp sending is unavailable. Contact an administrator.";
+            message.FailureCode = gate.FailureCode;
+            message.FailureReason = gate.FailureSummary;
+            message.FailureCategory = "AuthenticationOrConfigurationIssue";
             return;
         }
 
@@ -75,6 +96,7 @@ public sealed class WhatsAppConversationChannelSender(
         {
             CompanyId = conversation.CompanyId,
             IntegrationId = integration.Id,
+            IsIntegrationProductionEnabled = integration.IsProductionEnabled,
             AccessToken = credentials.AccessToken,
             GraphApiVersion = integration.GraphApiVersion,
             PhoneNumberId = integration.PhoneNumberId,

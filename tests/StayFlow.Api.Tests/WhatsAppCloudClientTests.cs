@@ -30,6 +30,7 @@ public sealed class WhatsAppCloudClientTests
         var client = CreateClient(handler, new WhatsAppCloudOptions
         {
             GraphApiBaseUrl = "https://graph.facebook.com",
+            ProductionSendingEnabled = true,
             RequestTimeoutSeconds = 10,
             MaxPostRetryAttempts = 0
         });
@@ -38,6 +39,7 @@ public sealed class WhatsAppCloudClientTests
         {
             CompanyId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
             IntegrationId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            IsIntegrationProductionEnabled = true,
             AccessToken = "access-token",
             GraphApiVersion = "v23.0",
             PhoneNumberId = "999999",
@@ -74,6 +76,7 @@ public sealed class WhatsAppCloudClientTests
         var client = CreateClient(handler, new WhatsAppCloudOptions
         {
             GraphApiBaseUrl = "https://graph.facebook.com",
+            ProductionSendingEnabled = true,
             RequestTimeoutSeconds = 10,
             MaxPostRetryAttempts = 0
         });
@@ -82,6 +85,7 @@ public sealed class WhatsAppCloudClientTests
         {
             CompanyId = Guid.NewGuid(),
             IntegrationId = Guid.NewGuid(),
+            IsIntegrationProductionEnabled = true,
             AccessToken = "access-token-should-not-leak",
             GraphApiVersion = "v23.0",
             PhoneNumberId = "999999",
@@ -94,6 +98,72 @@ public sealed class WhatsAppCloudClientTests
         Assert.Equal("RateLimited", result.FailureCategory);
         Assert.Equal("WhatsApp is temporarily rate limited. Try again shortly.", result.FailureReason);
         Assert.DoesNotContain("access-token-should-not-leak", result.FailureReason ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SendTemplateMessageAsync_GlobalProductionFlagDisabled_DoesNotInvokeProvider()
+    {
+        var calls = 0;
+        var client = CreateClient(new DelegatingHandlerStub((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }), new WhatsAppCloudOptions
+        {
+            GraphApiBaseUrl = "https://graph.facebook.com",
+            ProductionSendingEnabled = false
+        });
+
+        var result = await client.SendTemplateMessageAsync(new WhatsAppTemplateSendRequest
+        {
+            CompanyId = Guid.NewGuid(),
+            IntegrationId = Guid.NewGuid(),
+            IsIntegrationProductionEnabled = true,
+            AccessToken = "token",
+            GraphApiVersion = "v23.0",
+            PhoneNumberId = "999999",
+            To = "+14155550123",
+            TemplateName = "approved_template",
+            LanguageCode = "en_US",
+            ClientMessageId = "abc"
+        }, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("ProductionSendingDisabled", result.FailureCode);
+        Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public async Task SendTextMessageAsync_IntegrationProductionFlagDisabled_DoesNotInvokeProviderInDevelopment()
+    {
+        var calls = 0;
+        var client = CreateClient(new DelegatingHandlerStub((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }), new WhatsAppCloudOptions
+        {
+            GraphApiBaseUrl = "https://graph.facebook.com",
+            ProductionSendingEnabled = true,
+            DevelopmentMode = false
+        });
+
+        var result = await client.SendTextMessageAsync(new WhatsAppSendTextMessageRequest
+        {
+            CompanyId = Guid.NewGuid(),
+            IntegrationId = Guid.NewGuid(),
+            IsIntegrationProductionEnabled = false,
+            AccessToken = "token",
+            GraphApiVersion = "v23.0",
+            PhoneNumberId = "999999",
+            To = "+14155550123",
+            Body = "Hello",
+            ClientMessageId = "abc"
+        }, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("ProductionSendingDisabled", result.FailureCode);
+        Assert.Equal(0, calls);
     }
 
     [Fact]
@@ -158,6 +228,7 @@ public sealed class WhatsAppCloudClientTests
         return new WhatsAppCloudClient(
             new SingleClientFactory(httpClient),
             Options.Create(cloudOptions),
+            new WhatsAppOutboundSendGate(Options.Create(cloudOptions)),
             new NullTelemetry(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<WhatsAppCloudClient>.Instance);
     }

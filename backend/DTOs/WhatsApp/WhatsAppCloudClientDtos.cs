@@ -4,6 +4,7 @@ public sealed class WhatsAppSendTextMessageRequest
 {
     public Guid CompanyId { get; init; }
     public Guid IntegrationId { get; init; }
+    public bool IsIntegrationProductionEnabled { get; init; }
     public string AccessToken { get; init; } = string.Empty;
     public string GraphApiVersion { get; init; } = string.Empty;
     public string PhoneNumberId { get; init; } = string.Empty;
@@ -16,6 +17,7 @@ public sealed class WhatsAppTemplateSendRequest
 {
     public Guid CompanyId { get; init; }
     public Guid IntegrationId { get; init; }
+    public bool IsIntegrationProductionEnabled { get; init; }
     public string AccessToken { get; init; } = string.Empty;
     public string GraphApiVersion { get; init; } = string.Empty;
     public string PhoneNumberId { get; init; } = string.Empty;

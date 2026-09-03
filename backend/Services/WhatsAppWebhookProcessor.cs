@@ -139,7 +139,8 @@ public sealed class WhatsAppWebhookProcessor(
                     PropertyId = resolution.Reservation?.PropertyId,
                     Channel = GuestChannel.WhatsApp,
                     ChannelIdentity = normalizedPhone,
-                    Subject = "WhatsApp guest support"
+                    Subject = "WhatsApp guest support",
+                    WhatsAppIntegrationId = integration.Id
                 }, cancellationToken);
 
                 if (!conversation.Success || conversation.Data is null)
@@ -172,7 +173,7 @@ public sealed class WhatsAppWebhookProcessor(
                 ChannelIdentity = normalizedPhone,
                 ExternalMessageId = message.Id.Trim(),
                 CurrentTimestamp = sentAt
-            }, cancellationToken);
+            }, cancellationToken, integration.Id);
         });
     }
 

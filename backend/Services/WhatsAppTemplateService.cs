@@ -21,6 +21,7 @@ public sealed class WhatsAppTemplateService(
     IWhatsAppCredentialResolver credentialResolver,
     IWhatsAppIntegrationHealthService healthService,
     IWhatsAppTemplateVariableValidator variableValidator,
+    IWhatsAppOutboundSendGate outboundSendGate,
     ISubscriptionEntitlementService subscriptionEntitlementService,
     IWhatsAppCustomerServiceWindowEvaluator windowEvaluator,
     IPhoneNumberNormalizer phoneNumberNormalizer,
@@ -482,17 +483,25 @@ public sealed class WhatsAppTemplateService(
             return ApiResponse<ConversationMessageResponse>.Fail("Enable human takeover before sending a host reply.");
         }
 
-        var integration = await whatsAppRepository.GetActiveIntegrationByCompanyIdAsync(companyId, cancellationToken);
+        var template = await whatsAppRepository.GetTemplateForCompanyAsync(companyId, templateId, cancellationToken);
+        if (template is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Template was not found.");
+        }
+
+        var integration = await whatsAppRepository.GetIntegrationForCompanyAsync(companyId, template.WhatsAppIntegrationId, cancellationToken);
         if (integration is null || !integration.IsActive)
         {
             return ApiResponse<ConversationMessageResponse>.Fail("WhatsApp integration is not configured for this company.");
         }
 
-        var template = await whatsAppRepository.GetTemplateForCompanyAsync(companyId, integration.Id, templateId, cancellationToken);
-        if (template is null)
+        if (conversation.WhatsAppIntegrationId is { } boundIntegrationId
+            && boundIntegrationId != integration.Id)
         {
-            return ApiResponse<ConversationMessageResponse>.Fail("Template was not found.");
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation is bound to a different WhatsApp integration.");
         }
+
+        conversation.WhatsAppIntegrationId ??= integration.Id;
 
         if (!template.IsActive || !string.Equals(template.Status, "APPROVED", StringComparison.OrdinalIgnoreCase))
         {
@@ -508,6 +517,12 @@ public sealed class WhatsAppTemplateService(
         if (!phoneNumberNormalizer.TryNormalize(conversation.ChannelIdentity, out var normalizedRecipient))
         {
             return ApiResponse<ConversationMessageResponse>.Fail("Conversation channel identity is not a valid WhatsApp destination.");
+        }
+
+        var gate = outboundSendGate.EvaluateConfiguredSend(integration.IsProductionEnabled);
+        if (!gate.Success)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail(gate.FailureSummary ?? "WhatsApp sending is unavailable.", [gate.FailureCode ?? "ProductionSendingDisabled"]);
         }
 
         await subscriptionEntitlementService.ConsumeQuotaAsync(
@@ -574,6 +589,7 @@ public sealed class WhatsAppTemplateService(
         {
             CompanyId = integration.CompanyId,
             IntegrationId = integration.Id,
+            IsIntegrationProductionEnabled = integration.IsProductionEnabled,
             AccessToken = credentials.AccessToken,
             GraphApiVersion = integration.GraphApiVersion,
             PhoneNumberId = integration.PhoneNumberId,
@@ -648,11 +664,19 @@ public sealed class WhatsAppTemplateService(
             return ApiResponse<ConversationMessageResponse>.Fail("Conversation state does not allow this message.");
         }
 
-        var integration = await whatsAppRepository.GetActiveIntegrationByCompanyIdAsync(companyId, cancellationToken);
-        if (integration is null || integration.Id != integrationId)
+        var integration = await whatsAppRepository.GetIntegrationForCompanyAsync(companyId, integrationId, cancellationToken);
+        if (integration is null || !integration.IsActive)
         {
             return ApiResponse<ConversationMessageResponse>.Fail("WhatsApp integration is not configured for this company.");
         }
+
+        if (conversation.WhatsAppIntegrationId is { } boundIntegrationId
+            && boundIntegrationId != integration.Id)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation is bound to a different WhatsApp integration.");
+        }
+
+        conversation.WhatsAppIntegrationId ??= integration.Id;
 
         // Ownership (company + integration + template) is enforced by this same lookup used
         // elsewhere; never trust a caller-supplied template without re-verifying it here.
@@ -676,6 +700,12 @@ public sealed class WhatsAppTemplateService(
         if (!phoneNumberNormalizer.TryNormalize(conversation.ChannelIdentity, out var normalizedRecipient))
         {
             return ApiResponse<ConversationMessageResponse>.Fail("Conversation channel identity is not a valid WhatsApp destination.");
+        }
+
+        var gate = outboundSendGate.EvaluateConfiguredSend(integration.IsProductionEnabled);
+        if (!gate.Success)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail(gate.FailureSummary ?? "WhatsApp sending is unavailable.", [gate.FailureCode ?? "ProductionSendingDisabled"]);
         }
 
         await subscriptionEntitlementService.ConsumeQuotaAsync(
@@ -743,6 +773,7 @@ public sealed class WhatsAppTemplateService(
         {
             CompanyId = integration.CompanyId,
             IntegrationId = integration.Id,
+            IsIntegrationProductionEnabled = integration.IsProductionEnabled,
             AccessToken = credentials.AccessToken,
             GraphApiVersion = integration.GraphApiVersion,
             PhoneNumberId = integration.PhoneNumberId,

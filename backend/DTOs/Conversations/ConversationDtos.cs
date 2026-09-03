@@ -13,6 +13,8 @@ public sealed class CreateConversationRequest
     public string? ChannelIdentity { get; init; }
     public string? Subject { get; init; }
     public Guid? AssignedUserId { get; init; }
+    // Only honored for Channel == WhatsApp; validated against the authenticated company before binding.
+    public Guid? WhatsAppIntegrationId { get; init; }
 }
 
 public sealed class AddGuestMessageRequest

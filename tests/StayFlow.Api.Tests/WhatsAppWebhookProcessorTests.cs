@@ -35,7 +35,40 @@ public sealed class WhatsAppWebhookProcessorTests
         Assert.NotNull(fixture.ChatService.Request);
         Assert.Equal(GuestChannel.WhatsApp, fixture.ChatService.Request!.Channel);
         Assert.Equal("wamid.1", fixture.ChatService.Request.ExternalMessageId);
+        Assert.Equal(fixture.Repository.Integration!.Id, fixture.ChatService.ObservedWhatsAppIntegrationId);
         Assert.Null(fixture.ConversationService.CreatedConversationRequest);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_TwoActiveIntegrations_RoutesByPhoneNumberIdAndBindsSelectedIntegration()
+    {
+        var fixture = new Fixture();
+        var selectedIntegration = new WhatsAppIntegration
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            DisplayName = "Meta Test",
+            PhoneNumberId = "meta-test-phone-number-id",
+            WhatsAppBusinessAccountId = "meta-test-waba-id",
+            BusinessPhoneNumberMasked = "+1******5325",
+            IsActive = true
+        };
+        fixture.Repository.Integrations.Add(selectedIntegration);
+        fixture.Repository.Reservations.Add(CreateReservation(
+            fixture.CompanyId,
+            fixture.PropertyId,
+            fixture.Guest.Id,
+            new DateOnly(2026, 7, 20),
+            new DateOnly(2026, 7, 28),
+            ReservationStatus.CheckedIn));
+
+        await fixture.Processor.ProcessAsync(
+            BuildInboundPayload("wamid.selected", "+14155551234", selectedIntegration.PhoneNumberId),
+            "cid-selected",
+            CancellationToken.None);
+
+        Assert.Equal(selectedIntegration.Id, fixture.ChatService.ObservedWhatsAppIntegrationId);
+        Assert.Equal(fixture.CompanyId, fixture.ChatService.ObservedTenantCompanyIds.Single());
     }
 
     [Fact]
@@ -208,7 +241,7 @@ public sealed class WhatsAppWebhookProcessorTests
         };
     }
 
-    private static WhatsAppWebhookPayload BuildInboundPayload(string messageId, string from)
+    private static WhatsAppWebhookPayload BuildInboundPayload(string messageId, string from, string phoneNumberId = "demo-phone-number-id")
     {
         return new WhatsAppWebhookPayload
         {
@@ -220,7 +253,7 @@ public sealed class WhatsAppWebhookProcessorTests
                     Field = "messages",
                     Value = new WhatsAppWebhookValue
                     {
-                        Metadata = new WhatsAppWebhookMetadata { PhoneNumberId = "demo-phone-number-id" },
+                        Metadata = new WhatsAppWebhookMetadata { PhoneNumberId = phoneNumberId },
                         Messages = [new WhatsAppWebhookMessage
                         {
                             Id = messageId,
@@ -358,8 +391,11 @@ public sealed class WhatsAppWebhookProcessorTests
         public Task<IReadOnlyCollection<WhatsAppIntegration>> ListActiveIntegrationsAsync(CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyCollection<WhatsAppIntegration>>(ScopedIntegrations.Where(item => item.IsActive).ToList());
 
-        public Task<WhatsAppIntegration?> GetActiveIntegrationByCompanyIdAsync(Guid companyId, CancellationToken cancellationToken)
-            => Task.FromResult(ScopedIntegrations.FirstOrDefault(item => item.IsActive && item.CompanyId == companyId));
+        public Task<WhatsAppIntegration?> GetSoleActiveIntegrationForCompanyAsync(Guid companyId, CancellationToken cancellationToken)
+        {
+            var candidates = ScopedIntegrations.Where(item => item.IsActive && item.CompanyId == companyId).ToList();
+            return Task.FromResult(candidates.Count == 1 ? candidates[0] : null);
+        }
 
         public Task<WhatsAppIntegration?> GetIntegrationForCompanyAsync(Guid companyId, Guid integrationId, CancellationToken cancellationToken)
             => Task.FromResult(ScopedIntegrations.FirstOrDefault(item => item.CompanyId == companyId && item.Id == integrationId));
@@ -442,6 +478,9 @@ public sealed class WhatsAppWebhookProcessorTests
                 item.CompanyId == companyId
                 && item.WhatsAppIntegrationId == integrationId
                 && item.Id == templateId));
+
+        public Task<WhatsAppTemplate?> GetTemplateForCompanyAsync(Guid companyId, Guid templateId, CancellationToken cancellationToken)
+            => Task.FromResult(Templates.FirstOrDefault(item => item.CompanyId == companyId && item.Id == templateId));
 
         public Task<WhatsAppTemplate?> GetTemplateByNameAsync(Guid companyId, Guid integrationId, string name, string languageCode, CancellationToken cancellationToken)
             => Task.FromResult(Templates.FirstOrDefault(item =>
@@ -528,13 +567,15 @@ public sealed class WhatsAppWebhookProcessorTests
     private sealed class FakeChatService : IChatService
     {
         public SendChatMessageRequest? Request { get; private set; }
+        public Guid? ObservedWhatsAppIntegrationId { get; private set; }
         public int SendCallCount { get; private set; }
         public List<Guid?> ObservedTenantCompanyIds { get; } = [];
         public ITenantExecutionContextAccessor? TenantAccessor { get; set; }
 
-        public Task<ApiResponse<ChatMessageResponse>> SendGuestMessageAsync(SendChatMessageRequest request, CancellationToken cancellationToken)
+        public Task<ApiResponse<ChatMessageResponse>> SendGuestMessageAsync(SendChatMessageRequest request, CancellationToken cancellationToken, Guid? whatsAppIntegrationId = null)
         {
             Request = request;
+            ObservedWhatsAppIntegrationId = whatsAppIntegrationId;
             SendCallCount++;
             ObservedTenantCompanyIds.Add(TenantAccessor?.CompanyId);
             return Task.FromResult(ApiResponse<ChatMessageResponse>.Ok(new ChatMessageResponse
