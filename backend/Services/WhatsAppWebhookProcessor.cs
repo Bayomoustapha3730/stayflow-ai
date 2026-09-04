@@ -90,7 +90,7 @@ public sealed class WhatsAppWebhookProcessor(
             return;
         }
 
-        if (!phoneNumberNormalizer.TryNormalize(message.From, out var normalizedPhone))
+        if (!phoneNumberNormalizer.TryNormalize(ToProviderSenderCandidate(message.From), out var normalizedPhone))
         {
             await RecordDiagnosticAsync(integration.CompanyId, "InvalidWhatsAppPhoneNumber", new
             {
@@ -261,6 +261,25 @@ public sealed class WhatsAppWebhookProcessor(
         return long.TryParse(raw, out var unixTime)
             ? DateTimeOffset.FromUnixTimeSeconds(unixTime)
             : null;
+    }
+
+    // Meta sends the inbound sender as bare E.164 digits, so restore the "+" the normalizer requires.
+    private static string? ToProviderSenderCandidate(string? from)
+    {
+        if (from is not { Length: >= 8 and <= 15 })
+        {
+            return from;
+        }
+
+        foreach (var character in from)
+        {
+            if (character is < '0' or > '9')
+            {
+                return from;
+            }
+        }
+
+        return from[0] == '0' ? from : $"+{from}";
     }
 
     private static ReservationResolution ResolveReservation(IReadOnlyCollection<Reservation> reservations, DateTimeOffset sentAt)

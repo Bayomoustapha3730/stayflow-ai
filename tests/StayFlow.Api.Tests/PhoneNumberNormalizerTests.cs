@@ -29,6 +29,20 @@ public sealed class PhoneNumberNormalizerTests
         Assert.False(success);
     }
 
+    [Theory]
+    [InlineData("14155551234")]
+    [InlineData("254700000002")]
+    [InlineData("01234567890")]
+    [InlineData("415 555 1234")]
+    [InlineData("(415) 555-1234")]
+    [InlineData("1415555123a")]
+    public void TryNormalize_RequiresExplicitInternationalPrefix(string input)
+    {
+        var success = normalizer.TryNormalize(input, out _);
+
+        Assert.False(success);
+    }
+
     [Fact]
     public void Mask_PreservesCountryPrefixAndFinalDigits()
     {

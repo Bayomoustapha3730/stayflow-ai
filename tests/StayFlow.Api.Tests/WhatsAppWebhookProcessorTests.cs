@@ -40,6 +40,55 @@ public sealed class WhatsAppWebhookProcessorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_MetaStyleDigitsOnlySender_MatchesGuestAndReusesChatPipeline()
+    {
+        var fixture = new Fixture();
+        fixture.Repository.Reservations.Add(CreateReservation(
+            fixture.CompanyId,
+            fixture.PropertyId,
+            fixture.Guest.Id,
+            new DateOnly(2026, 7, 20),
+            new DateOnly(2026, 7, 28),
+            ReservationStatus.CheckedIn));
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.meta", "14155551234"), "cid-meta", CancellationToken.None);
+
+        Assert.DoesNotContain(fixture.Repository.AuditLogs, log => log.Action == "InvalidWhatsAppPhoneNumber");
+        Assert.DoesNotContain(fixture.Repository.AuditLogs, log => log.Action == "WhatsAppGuestNotFound");
+        Assert.NotNull(fixture.ChatService.Request);
+        Assert.Equal(fixture.Guest.Id, fixture.ChatService.Request!.GuestId);
+        Assert.Equal(GuestChannel.WhatsApp, fixture.ChatService.Request.Channel);
+        Assert.Equal("wamid.meta", fixture.ChatService.Request.ExternalMessageId);
+        Assert.Equal(fixture.Repository.Integration!.Id, fixture.ChatService.ObservedWhatsAppIntegrationId);
+    }
+
+    [Theory]
+    [InlineData("0700000002")]
+    [InlineData("1415555")]
+    [InlineData("1415555123456789")]
+    [InlineData("abc")]
+    [InlineData("1415555123a")]
+    [InlineData("1 415 555 1234")]
+    [InlineData("")]
+    public async Task ProcessAsync_MalformedProviderSender_IsRejectedWithoutChatProcessing(string from)
+    {
+        var fixture = new Fixture();
+        fixture.Repository.Reservations.Add(CreateReservation(
+            fixture.CompanyId,
+            fixture.PropertyId,
+            fixture.Guest.Id,
+            new DateOnly(2026, 7, 20),
+            new DateOnly(2026, 7, 28),
+            ReservationStatus.CheckedIn));
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.malformed", from), "cid-malformed", CancellationToken.None);
+
+        Assert.Contains(fixture.Repository.AuditLogs, log => log.Action == "InvalidWhatsAppPhoneNumber");
+        Assert.Null(fixture.ChatService.Request);
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest);
+    }
+
+    [Fact]
     public async Task ProcessAsync_TwoActiveIntegrations_RoutesByPhoneNumberIdAndBindsSelectedIntegration()
     {
         var fixture = new Fixture();
