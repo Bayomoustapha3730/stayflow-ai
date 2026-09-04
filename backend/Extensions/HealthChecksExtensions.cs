@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using StayFlow.Api.Data;
+using StayFlow.Api.DTOs.WhatsApp;
 using StayFlow.Api.Services;
 using StayFlow.Api.Services.Payments;
 
@@ -50,21 +51,47 @@ internal sealed class WhatsAppDependencyHealthCheck(
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutSource.CancelAfter(TimeSpan.FromSeconds(2));
 
-            var integration = await dbContext.WhatsAppIntegrations
+            var integrations = await dbContext.WhatsAppIntegrations
                 .AsNoTracking()
-                .Where(item => item.IsActive)
+                .Where(item => item.IsActive && !item.IsDemoSeeded)
                 .OrderBy(item => item.CreatedAt)
-                .FirstOrDefaultAsync(timeoutSource.Token);
+                .ThenBy(item => item.Id)
+                .ToListAsync(timeoutSource.Token);
 
-            if (integration is null)
+            if (integrations.Count == 0)
             {
-                return HealthCheckResult.Degraded();
+                return HealthCheckResult.Degraded("No configured WhatsApp integration is available for provider readiness evaluation.");
             }
 
-            var result = await integrationHealthService.CheckAsync(integration, timeoutSource.Token);
-            return result.IsSendCapable
-                ? HealthCheckResult.Healthy()
-                : HealthCheckResult.Degraded();
+            var hasProductionPending = false;
+
+            foreach (var integration in integrations)
+            {
+                WhatsAppIntegrationHealthResponse result;
+                try
+                {
+                    result = await integrationHealthService.CheckAsync(integration, timeoutSource.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (result.IsSendCapable)
+                {
+                    return HealthCheckResult.Healthy(result.Message);
+                }
+
+                hasProductionPending |= string.Equals(result.Status, "ProductionPending", StringComparison.Ordinal);
+            }
+
+            return hasProductionPending
+                ? HealthCheckResult.Healthy("WhatsApp provider validation succeeded; production sending remains disabled pending activation.")
+                : HealthCheckResult.Degraded("No configured WhatsApp integration is ready for provider use.");
         }
         catch (OperationCanceledException)
         {
