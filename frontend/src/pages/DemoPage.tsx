@@ -1,5 +1,7 @@
 import { getRuntimeApiUrl } from "../runtimeConfig";
 import { StayFlowChatWidget } from "../components";
+import { DATA_DELETION_ROUTE, PRIVACY_POLICY_ROUTE, TERMS_OF_SERVICE_ROUTE } from "../config/legal";
+import "../styles/legal-pages.css";
 
 const demoGuestId =
   import.meta.env.VITE_DEMO_GUEST_ID ??
@@ -102,6 +104,10 @@ export function DemoPage() {
           assistantBubbleColor: "#F6F8F7"
         }}
       />
-    </div>
+      <footer className="sf-public-footer">
+        <a href={PRIVACY_POLICY_ROUTE}>Privacy Policy</a>
+        <a href={TERMS_OF_SERVICE_ROUTE}>Terms of Service</a>
+        <a href={DATA_DELETION_ROUTE}>Data Deletion Instructions</a>
+      </footer>    </div>
   );
 }

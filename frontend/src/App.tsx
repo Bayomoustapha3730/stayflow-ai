@@ -3,6 +3,7 @@ import { DemoPage } from "./pages/DemoPage";
 import { AccountSettingsPage } from "./pages/AccountSettingsPage";
 import { BillingDashboardPage } from "./pages/BillingDashboardPage";
 import { CurrentSubscriptionPage } from "./pages/CurrentSubscriptionPage";
+import { DataDeletionPage } from "./pages/DataDeletionPage";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 import { HostCopilotWorkspacePage } from "./pages/HostCopilotWorkspacePage";
 import { HostInboxPage } from "./pages/HostInboxPage";
@@ -12,8 +13,10 @@ import { OnboardingPage } from "./pages/OnboardingPage";
 import { OrganizationSettingsPage } from "./pages/OrganizationSettingsPage";
 import { PlanComparisonPage } from "./pages/PlanComparisonPage";
 import { PlatformAdminPage } from "./pages/PlatformAdminPage";
+import { PrivacyPolicyPage } from "./pages/PrivacyPolicyPage";
 import { PropertyKnowledgePage } from "./pages/PropertyKnowledgePage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
+import { TermsOfServicePage } from "./pages/TermsOfServicePage";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage";
 import { WhatsAppSettingsPage } from "./pages/WhatsAppSettingsPage";
 import { normalizePropertyId, resolvePropertyKnowledgePropertyId } from "./utils/propertyRouting";
@@ -28,6 +31,18 @@ export default function App() {
     window.addEventListener("popstate", updatePath);
     return () => window.removeEventListener("popstate", updatePath);
   }, []);
+
+  if (/^\/privacy\/?$/.test(path)) {
+    return <PrivacyPolicyPage />;
+  }
+
+  if (/^\/terms\/?$/.test(path)) {
+    return <TermsOfServicePage />;
+  }
+
+  if (/^\/data-deletion\/?$/.test(path)) {
+    return <DataDeletionPage />;
+  }
 
   if (/^\/auth\/forgot-password\/?$/.test(path)) {
     return <ForgotPasswordPage />;

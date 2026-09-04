@@ -17,6 +17,18 @@ vi.mock("../src/pages/ForgotPasswordPage", () => ({
   ForgotPasswordPage: () => <div data-testid="forgot-password-page">forgot</div>
 }));
 
+vi.mock("../src/pages/PrivacyPolicyPage", () => ({
+  PrivacyPolicyPage: () => <div data-testid="privacy-policy-page">privacy</div>
+}));
+
+vi.mock("../src/pages/TermsOfServicePage", () => ({
+  TermsOfServicePage: () => <div data-testid="terms-of-service-page">terms</div>
+}));
+
+vi.mock("../src/pages/DataDeletionPage", () => ({
+  DataDeletionPage: () => <div data-testid="data-deletion-page">data-deletion</div>
+}));
+
 vi.mock("../src/pages/HostInboxPage", () => ({
   HostInboxPage: () => <div data-testid="host-inbox-page">host</div>
 }));
@@ -218,5 +230,46 @@ describe("App routing", () => {
     render(<App />);
 
     expect(screen.getByTestId("onboarding-page")).toHaveTextContent("root");
+  });
+
+  it("renders the public privacy policy route without any authentication state", () => {
+    window.history.pushState({}, "", "/privacy");
+
+    render(<App />);
+
+    expect(screen.getByTestId("privacy-policy-page")).toBeInTheDocument();
+  });
+
+  it("renders the public terms of service route without any authentication state", () => {
+    window.history.pushState({}, "", "/terms");
+
+    render(<App />);
+
+    expect(screen.getByTestId("terms-of-service-page")).toBeInTheDocument();
+  });
+
+  it("renders the public data deletion route without any authentication state", () => {
+    window.history.pushState({}, "", "/data-deletion");
+
+    render(<App />);
+
+    expect(screen.getByTestId("data-deletion-page")).toBeInTheDocument();
+  });
+
+  it("renders the public privacy policy route with a trailing slash", () => {
+    window.history.pushState({}, "", "/privacy/");
+
+    render(<App />);
+
+    expect(screen.getByTestId("privacy-policy-page")).toBeInTheDocument();
+  });
+
+  it("still renders the host inbox for protected routes, leaving existing route behavior unchanged", () => {
+    window.history.pushState({}, "", "/host/conversations");
+
+    render(<App />);
+
+    expect(screen.getByTestId("host-inbox-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("privacy-policy-page")).not.toBeInTheDocument();
   });
 });
