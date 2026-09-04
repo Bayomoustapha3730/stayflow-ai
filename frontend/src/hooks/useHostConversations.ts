@@ -14,6 +14,7 @@ interface UseHostConversationsOptions {
 export interface UseHostConversationsResult {
   response: ConversationListResponse | null;
   isLoading: boolean;
+  isRefreshing: boolean;
   error: string | null;
   sessionExpired: boolean;
   selectedConversationId: string | null;
@@ -37,6 +38,7 @@ export interface UseHostConversationsResult {
 export function useHostConversations({ accessToken, onUnauthorized }: UseHostConversationsOptions): UseHostConversationsResult {
   const [response, setResponse] = useState<ConversationListResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
@@ -51,6 +53,7 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
 
   const requestVersion = useRef(0);
   const refreshTimerRef = useRef<number | null>(null);
+  const hasLoadedRef = useRef(false);
 
   const parseRealtimeStatus = useCallback((value?: string): ConversationStatus | undefined => {
     if (!value) {
@@ -110,14 +113,23 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
 
   const loadConversations = useCallback(async () => {
     if (!accessToken) {
+      requestVersion.current += 1;
+      hasLoadedRef.current = false;
       setResponse(null);
       setError(null);
       setSessionExpired(false);
+      setIsLoading(false);
+      setIsRefreshing(false);
       return;
     }
 
     const version = ++requestVersion.current;
-    setIsLoading(true);
+    // Realtime events reload the list constantly; only the first load may replace it with a loading state.
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
     setError(null);
 
     const query: ConversationListQuery = {
@@ -135,6 +147,7 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
         return;
       }
 
+      hasLoadedRef.current = true;
       setResponse(nextResponse);
       setSelectedConversationId((current) => {
         const hasSelectedConversation = nextResponse.items.some(
@@ -159,6 +172,7 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
     } finally {
       if (version === requestVersion.current) {
         setIsLoading(false);
+        setIsRefreshing(false);
       }
     }
   }, [accessToken, api, debouncedSearch, onUnauthorized, page, pageSize, requiresHostAttention, status]);
@@ -410,6 +424,7 @@ export function useHostConversations({ accessToken, onUnauthorized }: UseHostCon
   return {
     response,
     isLoading,
+    isRefreshing,
     error,
     sessionExpired,
     selectedConversationId,

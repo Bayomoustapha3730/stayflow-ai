@@ -144,12 +144,13 @@ export function HostInboxPage() {
 
   const response = conversations.response;
   const items = response?.items ?? [];
+  const isConversationListBusy = conversations.isLoading || conversations.isRefreshing;
 
   return (
     <div className="sf-host-page">
       <div className="sf-host-page-top">
         <HostInboxHeader
-          isRefreshing={conversations.isLoading}
+          isRefreshing={isConversationListBusy}
           realtimeState={conversations.realtimeState}
           totalUnreadCount={conversations.totalUnreadCount}
           notificationsEnabled={notificationsEnabled}
@@ -179,7 +180,7 @@ export function HostInboxPage() {
         />
 
         {!resolvedKnowledgePropertyId ? (
-          <p className="sf-host-muted-note">Select a conversation with a property first.</p>
+          <p className="sf-host-muted-note">Property knowledge is unavailable for this conversation.</p>
         ) : null}
 
         {conversations.sessionExpired ? (
@@ -216,6 +217,7 @@ export function HostInboxPage() {
 
           <HostConversationList
             isLoading={conversations.isLoading}
+            isRefreshing={conversations.isRefreshing}
             error={conversations.error}
             items={items}
             selectedConversationId={selectedConversationId}
@@ -229,7 +231,7 @@ export function HostInboxPage() {
             <button
               type="button"
               onClick={() => conversations.setPage(conversations.page - 1)}
-              disabled={conversations.page <= 1 || conversations.isLoading}
+              disabled={conversations.page <= 1 || isConversationListBusy}
             >
               Previous
             </button>
@@ -241,7 +243,7 @@ export function HostInboxPage() {
             <button
               type="button"
               onClick={() => conversations.setPage((response?.page ?? 1) + 1)}
-              disabled={!response || response.page >= response.totalPages || conversations.isLoading}
+              disabled={!response || response.page >= response.totalPages || isConversationListBusy}
             >
               Next
             </button>

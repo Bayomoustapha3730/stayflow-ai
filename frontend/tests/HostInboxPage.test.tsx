@@ -473,7 +473,7 @@ describe("HostInboxPage via App route", () => {
     render(<App />);
     await signIn();
 
-    await waitFor(() => expect(screen.getByText(/select a conversation with a property first\./i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/property knowledge is unavailable for this conversation\./i)).toBeInTheDocument());
     expect(screen.queryByRole("link", { name: /property knowledge/i })).not.toBeInTheDocument();
     expect(screen.getByText(/^property knowledge$/i, { selector: "span" })).toHaveAttribute("aria-disabled", "true");
   });
