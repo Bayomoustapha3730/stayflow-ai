@@ -69,11 +69,10 @@ public sealed class WhatsAppDependencyHealthCheckTests
     [Fact]
     public async Task CheckHealthAsync_MultipleRealIntegrations_EvaluatesAllAndHealthyWins()
     {
-        var unhealthy = CreateIntegration();
-        var healthy = CreateIntegration();
-        unhealthy.CreatedAt = new DateTimeOffset(2026, 9, 4, 10, 0, 0, TimeSpan.Zero);
-        healthy.CreatedAt = new DateTimeOffset(2026, 9, 4, 11, 0, 0, TimeSpan.Zero);
-        var health = await CheckAsync([unhealthy, healthy],
+        // The audit hook stamps CreatedAt for every row inserted in one save, so Id is the deciding tiebreaker.
+        var unhealthy = CreateIntegration(id: Guid.Parse("11111111-1111-4111-8111-111111111111"));
+        var healthy = CreateIntegration(id: Guid.Parse("22222222-2222-4222-8222-222222222222"));
+        var health = await CheckAsync([healthy, unhealthy],
             (unhealthy.Id, new WhatsAppIntegrationHealthResponse { Status = "ConfigurationIncomplete", IsSendCapable = false }),
             (healthy.Id, new WhatsAppIntegrationHealthResponse { Status = "Healthy", IsSendCapable = true }));
 
@@ -97,20 +96,7 @@ public sealed class WhatsAppDependencyHealthCheckTests
         await using (var seedScope = provider.CreateAsyncScope())
         {
             var dbContext = seedScope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            var explicitCreatedAt = integrations
-                .Where(item => item.CreatedAt != default)
-                .ToDictionary(item => item.Id, item => item.CreatedAt);
             await dbContext.WhatsAppIntegrations.AddRangeAsync(integrations);
-            await dbContext.SaveChangesAsync();
-
-            foreach (var integration in integrations)
-            {
-                if (explicitCreatedAt.TryGetValue(integration.Id, out var createdAt))
-                {
-                    integration.CreatedAt = createdAt;
-                }
-            }
-
             await dbContext.SaveChangesAsync();
             await dbContext.WhatsAppIntegrations.CountAsync();
         }
@@ -126,9 +112,9 @@ public sealed class WhatsAppDependencyHealthCheckTests
         }
     }
 
-    private static WhatsAppIntegration CreateIntegration(bool isDemoSeeded = false) => new()
+    private static WhatsAppIntegration CreateIntegration(bool isDemoSeeded = false, Guid? id = null) => new()
     {
-        Id = Guid.NewGuid(),
+        Id = id ?? Guid.NewGuid(),
         CompanyId = Guid.NewGuid(),
         DisplayName = isDemoSeeded ? "Demo WhatsApp Concierge" : "Configured integration",
         IsActive = true,
