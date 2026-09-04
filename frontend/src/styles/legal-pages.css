@@ -58,14 +58,6 @@
   color: var(--sf-host-brand, #0f3d3e);
 }
 
-.sf-legal-placeholder-notice {
-  background: #fef3c7;
-  border: 1px solid #f2c94c;
-  border-radius: 0.75rem;
-  color: #7a5b00;
-  padding: 0.85rem 1rem;
-}
-
 .sf-public-footer {
   border-top: 1px solid rgba(15, 61, 62, 0.15);
   color: #4e6256;

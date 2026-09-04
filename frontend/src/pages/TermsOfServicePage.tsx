@@ -18,12 +18,6 @@ export function TermsOfServicePage() {
           <p className="sf-legal-updated">Last updated: September 2026</p>
         </header>
 
-        <div className="sf-legal-placeholder-notice" role="note">
-          This page is a template Terms of Service and must be reviewed by a qualified legal advisor before
-          production publication. It intentionally does not state a specific legal jurisdiction or
-          corporate-registration details.
-        </div>
-
         <section aria-labelledby="sf-terms-use">
           <h2 id="sf-terms-use">Use of StayFlow</h2>
           <p>

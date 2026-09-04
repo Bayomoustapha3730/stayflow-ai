@@ -18,12 +18,6 @@ export function PrivacyPolicyPage() {
           <p className="sf-legal-updated">Last updated: September 2026</p>
         </header>
 
-        <div className="sf-legal-placeholder-notice" role="note">
-          This page is a template drafted from StayFlow&apos;s current product functionality. It must be
-          reviewed by a qualified legal advisor and updated with real contact details, retention periods,
-          and any applicable regulatory commitments before production publication.
-        </div>
-
         <section aria-labelledby="sf-privacy-overview">
           <h2 id="sf-privacy-overview">Overview</h2>
           <p>
