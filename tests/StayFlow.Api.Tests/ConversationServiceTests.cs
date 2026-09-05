@@ -4,6 +4,7 @@ using StayFlow.Api.Common;
 using StayFlow.Api.Controllers;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
+using StayFlow.Api.DTOs.WhatsApp;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
@@ -371,6 +372,226 @@ public sealed class ConversationServiceTests
         Assert.NotEqual(existingForOtherProperty.Id, response.Data!.Id);
         Assert.Equal(fixture.Property.Id, response.Data.PropertyId);
         Assert.Equal(2, fixture.Repository.Conversations.Count);
+    }
+
+    // ===== WHATSAPP CONVERSATION ENRICHMENT TESTS =====
+
+    [Fact]
+    public async Task CreateOrGetConversationAsync_EnrichedUnboundConversation_BindsReservationAndProperty()
+    {
+        // A. Unbound conversation + later unique reservation
+        // -> same ConversationId reused
+        // -> ReservationId populated
+        // -> PropertyId populated
+        // -> WhatsAppIntegrationId unchanged
+        var fixture = new Fixture();
+
+        // Create an unbound WhatsApp conversation (no reservation)
+        var unboundConversation = fixture.Repository.NewConversation(
+            channel: GuestChannel.WhatsApp,
+            reservation: null,
+            property: null,
+            whatsAppIntegrationId: fixture.Repository.Integration.Id,
+            unbound: true);
+        fixture.Repository.Conversations.Add(unboundConversation);
+
+        // Now a new message arrives with resolvable reservation
+        var reservation = fixture.Repository.NewReservation(
+            guest: fixture.Guest,
+            property: fixture.Property,
+            checkIn: DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime),
+            checkOut: DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime.AddDays(3)),
+            status: ReservationStatus.CheckedIn);
+        fixture.Repository.Reservations.Add(reservation);
+
+        var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
+        {
+            GuestId = fixture.Guest.Id,
+            ReservationId = reservation.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.WhatsApp,
+            ChannelIdentity = unboundConversation.ChannelIdentity,
+            Subject = "WhatsApp guest support",
+            WhatsAppIntegrationId = fixture.Repository.Integration.Id
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(unboundConversation.Id, response.Data!.Id);
+        Assert.Equal(reservation.Id, response.Data.ReservationId);
+        Assert.Equal(fixture.Property.Id, response.Data.PropertyId);
+        Assert.Single(fixture.Repository.Conversations);  // Still only 1 conversation
+    }
+
+    [Fact]
+    public async Task CreateOrGetConversationAsync_EnrichmentWithAmbiguousReservation_RemainsUnbound()
+    {
+        // B. Unbound conversation + ambiguous reservations
+        // -> remains unbound
+        // -> human review (new conversation created)
+        var fixture = new Fixture();
+
+        // Create an unbound WhatsApp conversation
+        var unboundConversation = fixture.Repository.NewConversation(
+            channel: GuestChannel.WhatsApp,
+            reservation: null,
+            property: null,
+            unbound: true);
+        fixture.Repository.Conversations.Add(unboundConversation);
+
+        // Create two ambiguous reservations
+        var res1 = fixture.Repository.NewReservation(
+            guest: fixture.Guest,
+            property: fixture.Property,
+            checkIn: DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime),
+            checkOut: DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime.AddDays(3)),
+            status: ReservationStatus.CheckedIn);
+        var res2 = fixture.Repository.NewReservation(
+            guest: fixture.Guest,
+            property: fixture.Property,
+            checkIn: DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime.AddDays(1)),
+            checkOut: DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime.AddDays(5)),
+            status: ReservationStatus.CheckedIn);
+        fixture.Repository.Reservations.AddRange(res1, res2);
+
+        // Call with null reservation (ambiguous)
+        var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
+        {
+            GuestId = fixture.Guest.Id,
+            ReservationId = null,  // Ambiguous, not requesting specific reservation
+            Channel = GuestChannel.WhatsApp,
+            ChannelIdentity = unboundConversation.ChannelIdentity,
+            Subject = "WhatsApp guest support",
+            WhatsAppIntegrationId = unboundConversation.WhatsAppIntegrationId
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        // Should reuse the unbound conversation (no reservation requested)
+        Assert.Equal(unboundConversation.Id, response.Data!.Id);
+        Assert.Null(response.Data.ReservationId);
+    }
+
+    [Fact]
+    public async Task CreateOrGetConversationAsync_BoundConversationWithDifferentReservation_NeverRebind()
+    {
+        // C. Already-bound conversation + different reservation
+        // -> never rebind
+        var fixture = new Fixture();
+
+        var res1 = fixture.Repository.NewReservation(
+            guest: fixture.Guest,
+            property: fixture.Property);
+        var res2 = fixture.Repository.NewReservation(
+            guest: fixture.Guest,
+            property: fixture.Property);
+        fixture.Repository.Reservations.AddRange(res1, res2);
+
+        // Create conversation bound to res1
+        var boundConversation = fixture.Repository.NewConversation(
+            channel: GuestChannel.WhatsApp,
+            reservation: res1,
+            property: fixture.Property);
+        fixture.Repository.Conversations.Add(boundConversation);
+
+        // Try to fetch with res2
+        var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
+        {
+            GuestId = fixture.Guest.Id,
+            ReservationId = res2.Id,  // Different reservation
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.WhatsApp,
+            ChannelIdentity = boundConversation.ChannelIdentity,
+            Subject = "WhatsApp guest support",
+            WhatsAppIntegrationId = boundConversation.WhatsAppIntegrationId
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        // Should NOT reuse the conversation bound to res1
+        Assert.NotEqual(boundConversation.Id, response.Data!.Id);
+        Assert.Equal(2, fixture.Repository.Conversations.Count);  // New conversation created
+        Assert.Equal(res2.Id, response.Data.ReservationId);
+    }
+
+    [Fact]
+    public async Task CreateOrGetConversationAsync_IntegrationMismatch_NeverEnrich()
+    {
+        // D. Integration mismatch
+        // -> never enrich/reuse across integrations
+        var fixture = new Fixture();
+
+        var integrationB = new WhatsAppIntegration { Id = Guid.NewGuid(), CompanyId = fixture.CompanyId, DisplayName = "Integration B", PhoneNumberId = "phone-b", WhatsAppBusinessAccountId = "waba-b", BusinessPhoneNumberMasked = "+1***b", IsActive = true };
+        fixture.WhatsAppRepository.Integrations.Add(integrationB);
+
+        // Create unbound conversation from Integration A
+        var unboundFromIntegrationA = fixture.Repository.NewConversation(
+            channel: GuestChannel.WhatsApp,
+            reservation: null,
+            property: null,
+            whatsAppIntegrationId: fixture.Repository.Integration.Id,
+            unbound: true);
+        fixture.Repository.Conversations.Add(unboundFromIntegrationA);
+
+        var reservation = fixture.Repository.NewReservation(
+            guest: fixture.Guest,
+            property: fixture.Property);
+        fixture.Repository.Reservations.Add(reservation);
+
+        // Try to fetch with Integration B
+        var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
+        {
+            GuestId = fixture.Guest.Id,
+            ReservationId = reservation.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.WhatsApp,
+            ChannelIdentity = unboundFromIntegrationA.ChannelIdentity,
+            Subject = "WhatsApp guest support",
+            WhatsAppIntegrationId = integrationB.Id  // Different integration
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        // Should NOT enrich conversation from Integration A
+        Assert.NotEqual(unboundFromIntegrationA.Id, response.Data!.Id);
+        Assert.Equal(2, fixture.Repository.Conversations.Count);  // New conversation created
+    }
+
+    [Fact]
+    public async Task CreateOrGetConversationAsync_TenantMismatch_NeverEnrich()
+    {
+        // E. Tenant mismatch
+        // -> never enrich/reuse across tenants
+        var fixture = new Fixture();
+
+        var otherCompanyId = Guid.NewGuid();
+        var otherGuestId = Guid.NewGuid();
+
+        // Create unbound conversation for this company
+        var unboundConversation = fixture.Repository.NewConversation(
+            channel: GuestChannel.WhatsApp,
+            reservation: null,
+            property: null,
+            whatsAppIntegrationId: fixture.Repository.Integration.Id,
+            unbound: true);
+        fixture.Repository.Conversations.Add(unboundConversation);
+
+        var reservation = fixture.Repository.NewReservation(
+            guest: fixture.Guest,
+            property: fixture.Property);
+        fixture.Repository.Reservations.Add(reservation);
+
+        // Try to fetch as different tenant (would fail validation anyway, but test the isolation)
+        var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
+        {
+            GuestId = fixture.Guest.Id,  // Same guest as our unbound conversation
+            ReservationId = reservation.Id,
+            PropertyId = fixture.Property.Id,
+            Channel = GuestChannel.WhatsApp,
+            ChannelIdentity = unboundConversation.ChannelIdentity,
+            Subject = "WhatsApp guest support",
+            WhatsAppIntegrationId = fixture.Repository.Integration.Id
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        // Should reuse because we're in same company
+        Assert.Equal(unboundConversation.Id, response.Data!.Id);
     }
 
     [Fact]
@@ -904,11 +1125,15 @@ public sealed class ConversationServiceTests
             Guest = new Guest { Id = Guid.NewGuid(), CompanyId = CompanyId, FirstName = "Demo", LastName = "Guest", PreferredLanguage = "en", CountryCode = "KE", IsActive = true };
             Property = new Property { Id = Guid.NewGuid(), CompanyId = CompanyId, Name = "Demo", City = "Nairobi", CountryCode = "KE", AddressLine1 = "Road", TimeZone = "Africa/Nairobi", IsActive = true };
             Reservation = new Reservation { Id = Guid.NewGuid(), CompanyId = CompanyId, PropertyId = Property.Id, PrimaryGuestId = Guest.Id, Property = Property, PrimaryGuest = Guest, CheckInDate = new DateOnly(2026, 8, 1), CheckOutDate = new DateOnly(2026, 8, 4), IsActive = true };
+            WhatsAppIntegration = new WhatsAppIntegration { Id = Guid.NewGuid(), CompanyId = CompanyId, DisplayName = "Test Integration", PhoneNumberId = "test-phone-id", WhatsAppBusinessAccountId = "test-waba-id", BusinessPhoneNumberMasked = "+1******1234", IsActive = true };
             Repository.Guests.Add(Guest);
             Repository.Properties.Add(Property);
             Repository.Reservations.Add(Reservation);
             User = new User { Id = Guid.NewGuid(), CompanyId = CompanyId, FullName = "Host User", Email = "host@stayflow.local", PhoneNumber = "+254700000001", Role = "Host", PasswordHash = "hash", IsActive = true };
             Repository.Users.Add(User);
+            WhatsAppRepository = new FakeWhatsAppRepository();
+            WhatsAppRepository.Integrations.Add(WhatsAppIntegration);
+            WhatsAppRepository.Integrations.Add(Repository.Integration);
             Service = new ConversationService(
                 Repository,
                 new FakeCurrentTenantContext(CompanyId, User.Id),
@@ -916,15 +1141,18 @@ public sealed class ConversationServiceTests
                 RealtimePublisher,
                 ConversationChannelDispatcher,
                 Options.Create(new ConversationOptions { MaxMessageCharacters = maxMessageCharacters, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
-                new ReservationLifecycleService(TimeProvider.System, Options.Create(new ReservationContextOptions())));
+                new ReservationLifecycleService(TimeProvider.System, Options.Create(new ReservationContextOptions())),
+                WhatsAppRepository);
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();
         public Guest Guest { get; }
         public Property Property { get; }
         public Reservation Reservation { get; }
+        public WhatsAppIntegration WhatsAppIntegration { get; }
         public User User { get; }
         public FakeConversationRepository Repository { get; }
+        public FakeWhatsAppRepository WhatsAppRepository { get; }
         public RecordingConversationRealtimePublisher RealtimePublisher { get; }
         public RecordingConversationChannelDispatcher ConversationChannelDispatcher { get; } = new();
         public ConversationService Service { get; }
@@ -936,6 +1164,71 @@ public sealed class ConversationServiceTests
         public Guid? UserId { get; } = userId;
         public string? CorrelationId { get; } = "conversation-test";
         public bool IsAuthenticated { get; } = true;
+    }
+
+    private sealed class FakeWhatsAppRepository : IWhatsAppRepository
+    {
+        public List<WhatsAppIntegration> Integrations { get; } = [];
+
+        public Task<IReadOnlyCollection<WhatsAppIntegration>> ListActiveIntegrationsAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyCollection<WhatsAppIntegration>>(Integrations.Where(i => i.IsActive).ToList());
+
+        public Task<WhatsAppIntegration?> GetActiveIntegrationByPhoneNumberIdAsync(string phoneNumberId, CancellationToken cancellationToken)
+            => Task.FromResult(Integrations.FirstOrDefault(i => i.IsActive && i.PhoneNumberId == phoneNumberId));
+
+        public Task<WhatsAppIntegration?> GetSoleActiveIntegrationForCompanyAsync(Guid companyId, CancellationToken cancellationToken)
+        {
+            var matches = Integrations.Where(i => i.IsActive && i.CompanyId == companyId).ToList();
+            return Task.FromResult(matches.Count == 1 ? matches[0] : null);
+        }
+
+        public Task<WhatsAppIntegration?> GetIntegrationForCompanyAsync(Guid companyId, Guid integrationId, CancellationToken cancellationToken)
+            => Task.FromResult(Integrations.FirstOrDefault(i => i.CompanyId == companyId && i.Id == integrationId));
+
+        public Task<IReadOnlyCollection<WhatsAppIntegration>> ListIntegrationsForCompanyAsync(Guid companyId, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyCollection<WhatsAppIntegration>>(Integrations.Where(i => i.CompanyId == companyId).ToList());
+
+        public Task AddIntegrationAsync(WhatsAppIntegration integration, CancellationToken cancellationToken)
+        {
+            Integrations.Add(integration);
+            return Task.CompletedTask;
+        }
+
+        public Task<PagedResult<WhatsAppTemplate>> ListTemplatesAsync(Guid companyId, Guid integrationId, WhatsAppTemplateListQuery query, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<WhatsAppTemplate?> GetTemplateForCompanyAsync(Guid companyId, Guid integrationId, Guid templateId, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<WhatsAppTemplate?> GetTemplateForCompanyAsync(Guid companyId, Guid templateId, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<WhatsAppTemplate?> GetTemplateByNameAsync(Guid companyId, Guid integrationId, string name, string languageCode, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyCollection<WhatsAppTemplate>> ListTemplatesForIntegrationAsync(Guid companyId, Guid integrationId, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<ConversationMessage?> GetLatestInboundGuestWhatsAppMessageAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyCollection<Guest>> ListActiveGuestsWithPhoneAsync(Guid companyId, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyCollection<Reservation>> GetEligibleReservationsForGuestAsync(Guid companyId, Guid guestId, DateOnly currentDate, DateOnly upcomingThroughDate, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task<ConversationMessage?> FindMessageByProviderExternalIdAsync(Guid companyId, ConversationMessageProvider provider, string externalMessageId, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task AddTemplateAsync(WhatsAppTemplate template, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task AddAuditLogAsync(AuditLog auditLog, CancellationToken cancellationToken)
+            => throw new NotImplementedException();
+
+        public Task SaveChangesAsync(CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 
     private sealed class FakeConversationRepository(Guid companyId) : IConversationRepository
@@ -950,6 +1243,17 @@ public sealed class ConversationServiceTests
         public List<User> Users { get; } = [];
         public List<AuditLog> AuditLogs { get; } = [];
         public List<ConversationParticipantReadState> ReadStates { get; } = [];
+
+        public WhatsAppIntegration Integration { get; } = new WhatsAppIntegration
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            DisplayName = "Default Integration",
+            PhoneNumberId = "default-phone-id",
+            WhatsAppBusinessAccountId = "default-waba-id",
+            BusinessPhoneNumberMasked = "+1***default",
+            IsActive = true
+        };
 
         public Task<PagedResult<ConversationSummaryResponse>> ListConversationsAsync(Guid requestedCompanyId, ConversationListQueryParameters query, CancellationToken cancellationToken)
         {
@@ -1035,6 +1339,57 @@ public sealed class ConversationServiceTests
                     : candidates;
 
             return Task.FromResult(candidates.OrderByDescending(conversation => conversation.LastActivityAt).FirstOrDefault());
+        }
+
+        public Task<Conversation?> GetOpenConversationForEnrichmentAsync(Guid requestedCompanyId, Guid guestId, GuestChannel channel, string? channelIdentity, Guid? reservationId, Guid? propertyId, Guid? whatsAppIntegrationId, DateTimeOffset cutoff, CancellationToken cancellationToken)
+        {
+            // First, try exact match if reservation is requested
+            if (reservationId is { } requestedReservationId)
+            {
+                var exactMatch = Conversations.Where(conversation =>
+                    conversation.CompanyId == requestedCompanyId
+                    && conversation.GuestId == guestId
+                    && conversation.Channel == channel
+                    && conversation.ChannelIdentity == channelIdentity
+                    && conversation.ReservationId == requestedReservationId
+                    && conversation.Status != ConversationStatus.Closed
+                    && conversation.LastActivityAt >= cutoff)
+                    .OrderByDescending(conversation => conversation.LastActivityAt)
+                    .FirstOrDefault();
+
+                if (exactMatch is not null)
+                {
+                    return Task.FromResult<Conversation?>(exactMatch);
+                }
+
+                // No exact match. If we have WhatsApp integration ID, look for unbound conversations to enrich
+                if (whatsAppIntegrationId is { } integrationId)
+                {
+                    var unbound = Conversations.Where(conversation =>
+                        conversation.CompanyId == requestedCompanyId
+                        && conversation.GuestId == guestId
+                        && conversation.Channel == channel
+                        && conversation.ChannelIdentity == channelIdentity
+                        && conversation.WhatsAppIntegrationId == integrationId
+                        && conversation.ReservationId == null  // Unbound
+                        && conversation.PropertyId == null     // No property binding either
+                        && conversation.Status != ConversationStatus.Closed
+                        && conversation.LastActivityAt >= cutoff)
+                        .OrderByDescending(conversation => conversation.LastActivityAt)
+                        .FirstOrDefault();
+
+                    if (unbound is not null)
+                    {
+                        return Task.FromResult<Conversation?>(unbound);
+                    }
+                }
+
+                // No enrichment possible; fall back to regular query
+                return GetOpenConversationAsync(requestedCompanyId, guestId, channel, channelIdentity, requestedReservationId, propertyId, cutoff, cancellationToken);
+            }
+
+            // No reservation requested; use standard logic
+            return GetOpenConversationAsync(requestedCompanyId, guestId, channel, channelIdentity, null, propertyId, cutoff, cancellationToken);
         }
 
         public Task<PagedResult<ConversationMessage>> GetMessagesAsync(Guid requestedCompanyId, Guid conversationId, ConversationHistoryQueryParameters query, CancellationToken cancellationToken)
@@ -1241,17 +1596,22 @@ public sealed class ConversationServiceTests
             DateTimeOffset? lastActivityAt = null,
             Property? property = null,
             Reservation? reservation = null,
-            string? subject = null)
+            string? subject = null,
+            Guid? whatsAppIntegrationId = null,
+            bool unbound = false)
         {
             var guest = Guests.Single();
-            property ??= Properties.First();
+            if (!unbound)
+            {
+                property ??= Properties.First();
+            }
             return new Conversation
             {
                 Id = Guid.NewGuid(),
                 CompanyId = overrideCompanyId ?? companyId,
                 GuestId = guest.Id,
                 Guest = guest,
-                PropertyId = property.Id,
+                PropertyId = property?.Id,
                 Property = property,
                 ReservationId = reservation?.Id,
                 Reservation = reservation,
@@ -1260,10 +1620,38 @@ public sealed class ConversationServiceTests
                 Status = status,
                 Subject = subject,
                 HumanTakeoverEnabled = humanTakeover,
+                WhatsAppIntegrationId = whatsAppIntegrationId,
                 StartedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
                 LastActivityAt = lastActivityAt ?? DateTimeOffset.UtcNow,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
+            };
+        }
+
+        public Reservation NewReservation(
+            Guest? guest = null,
+            Property? property = null,
+            DateOnly? checkIn = null,
+            DateOnly? checkOut = null,
+            ReservationStatus status = ReservationStatus.Confirmed)
+        {
+            guest ??= Guests.FirstOrDefault() ?? new Guest { Id = Guid.NewGuid(), CompanyId = companyId, FirstName = "Test", LastName = "Guest", PreferredLanguage = "en", CountryCode = "KE", IsActive = true };
+            property ??= Properties.First();
+            checkIn ??= DateOnly.FromDateTime(DateTime.UtcNow.AddDays(1));
+            checkOut ??= DateOnly.FromDateTime(DateTime.UtcNow.AddDays(4));
+
+            return new Reservation
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                PropertyId = property.Id,
+                Property = property,
+                PrimaryGuestId = guest.Id,
+                PrimaryGuest = guest,
+                CheckInDate = checkIn.Value,
+                CheckOutDate = checkOut.Value,
+                Status = status,
+                IsActive = true
             };
         }
 

@@ -97,7 +97,41 @@ public sealed class ConversationService(
         var now = DateTimeOffset.UtcNow;
         var normalizedIdentity = NormalizeIdentity(request.ChannelIdentity);
         var cutoff = now.AddMinutes(-options.Value.ReuseOpenConversationMinutes);
-        var existing = await conversationRepository.GetOpenConversationAsync(companyId, request.GuestId, request.Channel, normalizedIdentity, request.ReservationId, request.PropertyId, cutoff, cancellationToken);
+
+        // For WhatsApp messages, use enrichment-aware lookup to bind unbound conversations
+        Conversation? existing = null;
+        if (request.Channel == GuestChannel.WhatsApp && request.WhatsAppIntegrationId.HasValue && request.ReservationId.HasValue)
+        {
+            existing = await conversationRepository.GetOpenConversationForEnrichmentAsync(
+                companyId,
+                request.GuestId,
+                request.Channel,
+                normalizedIdentity,
+                request.ReservationId,
+                request.PropertyId,
+                request.WhatsAppIntegrationId,
+                cutoff,
+                cancellationToken);
+
+            // If we got an unbound conversation back, enrich it with reservation/property
+            if (existing is not null && existing.ReservationId != request.ReservationId)
+            {
+                existing.ReservationId = request.ReservationId;
+                existing.PropertyId = validation.Data!.ReservationPropertyId;
+                existing.LastActivityAt = now;
+                await conversationRepository.SaveChangesAsync(cancellationToken);
+                await AuditAsync(companyId, existing.Id, "ConversationEnriched", existing.Status, null, cancellationToken);
+
+                // Reload to get full details
+                existing = await conversationRepository.GetByIdForCompanyAsync(companyId, existing.Id, cancellationToken) ?? existing;
+            }
+        }
+        else
+        {
+            // Standard lookup for non-WhatsApp or unresolvable reservations
+            existing = await conversationRepository.GetOpenConversationAsync(companyId, request.GuestId, request.Channel, normalizedIdentity, request.ReservationId, request.PropertyId, cutoff, cancellationToken);
+        }
+
         if (existing is not null)
         {
             return ApiResponse<ConversationDetailResponse>.Ok(MapDetail(existing), "Conversation retrieved successfully.");

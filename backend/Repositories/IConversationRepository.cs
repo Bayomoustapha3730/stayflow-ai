@@ -14,6 +14,13 @@ public interface IConversationRepository
     Task<Conversation?> GetByIdForCompanyAsync(Guid companyId, Guid conversationId, CancellationToken cancellationToken);
     Task<ConversationMessage?> GetMessageForConversationAsync(Guid companyId, Guid conversationId, Guid messageId, CancellationToken cancellationToken);
     Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, Guid? reservationId, Guid? propertyId, DateTimeOffset cutoff, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Find an open conversation for enrichment. Used by WhatsApp inbound processor to bind/enrich unbound conversations.
+    /// First tries exact match (same reservationId), then falls back to unbound conversations from same integration.
+    /// </summary>
+    Task<Conversation?> GetOpenConversationForEnrichmentAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, Guid? reservationId, Guid? propertyId, Guid? whatsAppIntegrationId, DateTimeOffset cutoff, CancellationToken cancellationToken)
+        => GetOpenConversationAsync(companyId, guestId, channel, channelIdentity, reservationId, propertyId, cutoff, cancellationToken);
     // Used by post-payment notifications to find the conversation to post a confirmation into.
     // Defaults to null so existing test fakes don't need to implement it.
     Task<Conversation?> GetLatestConversationForReservationAsync(Guid companyId, Guid reservationId, CancellationToken cancellationToken)

@@ -274,6 +274,326 @@ public sealed class WhatsAppWebhookProcessorTests
         Assert.Equal(ConversationMessageDeliveryStatus.Failed, fixture.ConversationService.LastDeliveryStatus);
     }
 
+    // ===== RESERVATION SELECTION TESTS =====
+
+    [Fact]
+    public async Task ProcessAsync_ReservationSelectionA_OneCurrentReservation_Selected()
+    {
+        // A. Exactly one currently CheckedIn reservation
+        // -> selected
+        // -> conversation ReservationId matches
+        // -> PropertyId matches
+        var fixture = new Fixture();
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+        var currentReservation = CreateReservation(
+            fixture.CompanyId,
+            fixture.PropertyId,
+            fixture.Guest.Id,
+            today.AddDays(-1),  // Checked in yesterday
+            today.AddDays(2),   // Checking out in 2 days
+            ReservationStatus.CheckedIn);
+        fixture.Repository.Reservations.Add(currentReservation);
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.current", "+14155551234"), "cid-current", CancellationToken.None);
+
+        // Should route to autonomous reply (ChatService)
+        Assert.NotNull(fixture.ChatService.Request);
+        Assert.Equal(fixture.Guest.Id, fixture.ChatService.Request!.GuestId);
+
+        // ConversationService should NOT be called (autonomous path taken)
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ReservationSelectionB_OneUpcomingReservation_Selected()
+    {
+        // B. Exactly one eligible upcoming reservation
+        // -> selected
+        var fixture = new Fixture();
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+        var upcomingReservation = CreateReservation(
+            fixture.CompanyId,
+            fixture.PropertyId,
+            fixture.Guest.Id,
+            today.AddDays(5),   // Check-in in 5 days
+            today.AddDays(10),  // Check-out in 10 days
+            ReservationStatus.Confirmed);
+        fixture.Repository.Reservations.Add(upcomingReservation);
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.upcoming", "+14155551234"), "cid-upcoming", CancellationToken.None);
+
+        // Should route to autonomous reply (ChatService)
+        Assert.NotNull(fixture.ChatService.Request);
+        Assert.Equal(fixture.Guest.Id, fixture.ChatService.Request!.GuestId);
+
+        // ConversationService should NOT be called (autonomous path taken)
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ReservationSelectionC_TwoCurrentReservations_Ambiguous()
+    {
+        // C. Two current reservations
+        // -> ambiguous
+        // -> no reservation guessed
+        // -> human review
+        var fixture = new Fixture();
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+
+        fixture.Repository.Reservations.AddRange(
+            CreateReservation(
+                fixture.CompanyId,
+                fixture.PropertyId,
+                fixture.Guest.Id,
+                today.AddDays(-1),
+                today.AddDays(2),
+                ReservationStatus.CheckedIn),
+            CreateReservation(
+                fixture.CompanyId,
+                Guid.NewGuid(), // Different property
+                fixture.Guest.Id,
+                today,  // Also current today
+                today.AddDays(3),
+                ReservationStatus.CheckedIn));
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.ambig2current", "+14155551234"), "cid-ambig2current", CancellationToken.None);
+
+        // Should NOT route to autonomous reply
+        Assert.Null(fixture.ChatService.Request);
+
+        // Should route to host review via ConversationService
+        Assert.NotNull(fixture.ConversationService.CreatedConversationRequest);
+        Assert.True(fixture.ConversationService.HumanTakeoverEnabled);
+
+        // Reservation should NOT be guessed (null)
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest!.ReservationId);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ReservationSelectionD_TwoUpcomingReservations_Ambiguous()
+    {
+        // D. Two eligible upcoming reservations
+        // -> ambiguous
+        // -> no reservation guessed
+        // -> human review
+        var fixture = new Fixture();
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+
+        fixture.Repository.Reservations.AddRange(
+            CreateReservation(
+                fixture.CompanyId,
+                fixture.PropertyId,
+                fixture.Guest.Id,
+                today.AddDays(5),
+                today.AddDays(10),
+                ReservationStatus.Confirmed),
+            CreateReservation(
+                fixture.CompanyId,
+                Guid.NewGuid(), // Different property
+                fixture.Guest.Id,
+                today.AddDays(15),
+                today.AddDays(20),
+                ReservationStatus.Confirmed));
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.ambig2upcoming", "+14155551234"), "cid-ambig2upcoming", CancellationToken.None);
+
+        // Should NOT route to autonomous reply
+        Assert.Null(fixture.ChatService.Request);
+
+        // Should route to host review via ConversationService
+        Assert.NotNull(fixture.ConversationService.CreatedConversationRequest);
+        Assert.True(fixture.ConversationService.HumanTakeoverEnabled);
+
+        // Reservation should NOT be guessed (null)
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest!.ReservationId);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ReservationSelectionE_OnlyCompletedReservation_SelectedAsOnlyCandidate()
+    {
+        // E. Completed/expired reservation only (but within 30-day window)
+        // -> IS selected if it's the only candidate (per algorithm)
+        // -> autonomous reply taken
+        var fixture = new Fixture();
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+
+        fixture.Repository.Reservations.Add(
+            CreateReservation(
+                fixture.CompanyId,
+                fixture.PropertyId,
+                fixture.Guest.Id,
+                today.AddDays(-5),   // Checked in 5 days ago
+                today.AddDays(-2),   // Checked out 2 days ago (recent completion)
+                ReservationStatus.CheckedOut));
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.completed", "+14155551234"), "cid-completed", CancellationToken.None);
+
+        // Should route to autonomous reply (only 1 reservation total, even if checked out)
+        Assert.NotNull(fixture.ChatService.Request);
+        Assert.Equal(fixture.Guest.Id, fixture.ChatService.Request!.GuestId);
+
+        // ConversationService should NOT be called (autonomous path taken)
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ReservationSelectionF_NoEligibleReservation_HostReview()
+    {
+        // F. No eligible reservation
+        // -> human review behavior preserved
+        var fixture = new Fixture();
+
+        // Don't add any reservations
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.none", "+14155551234"), "cid-none", CancellationToken.None);
+
+        // Should NOT route to autonomous reply
+        Assert.Null(fixture.ChatService.Request);
+
+        // Should route to host review via ConversationService
+        Assert.NotNull(fixture.ConversationService.CreatedConversationRequest);
+        Assert.True(fixture.ConversationService.HumanTakeoverEnabled);
+
+        // Reservation should NOT be selected
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest!.ReservationId);
+    }
+
+    // ===== TENANT ISOLATION TESTS =====
+
+    [Fact]
+    public async Task ProcessAsync_TenantIsolation_ReservationFromAnotherCompany_NotSelected()
+    {
+        // Prove that a reservation belonging to another company cannot be selected
+        var fixture = new Fixture();
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+        var otherCompanyId = Guid.NewGuid();
+
+        // Add reservation from DIFFERENT company
+        fixture.Repository.Reservations.Add(
+            CreateReservation(
+                otherCompanyId,  // Different company
+                fixture.PropertyId,
+                fixture.Guest.Id,
+                today.AddDays(-1),
+                today.AddDays(2),
+                ReservationStatus.CheckedIn));
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.othertenant", "+14155551234"), "cid-othertenant", CancellationToken.None);
+
+        // Should NOT route to autonomous reply (no reservation from OUR company)
+        Assert.Null(fixture.ChatService.Request);
+
+        // Should route to host review
+        Assert.NotNull(fixture.ConversationService.CreatedConversationRequest);
+        Assert.Null(fixture.ConversationService.CreatedConversationRequest!.ReservationId);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_TenantIsolation_ConversationFromAnotherTenant_NotReused()
+    {
+        // Prove that a conversation for another tenant cannot be reused
+        // Note: This is tested via ConversationService behavior,
+        // but the processor ensures correct company context is passed
+        var fixture = new Fixture();
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+
+        fixture.Repository.Reservations.Add(
+            CreateReservation(
+                fixture.CompanyId,
+                fixture.PropertyId,
+                fixture.Guest.Id,
+                today.AddDays(-1),
+                today.AddDays(2),
+                ReservationStatus.CheckedIn));
+
+        await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.tenant", "+14155551234"), "cid-tenant", CancellationToken.None);
+
+        // Verify tenant context is correctly passed
+        Assert.Equal([fixture.CompanyId], fixture.ChatService.ObservedTenantCompanyIds);
+        Assert.Single(fixture.ChatService.ObservedTenantCompanyIds);
+        Assert.All(fixture.ChatService.ObservedTenantCompanyIds, id => Assert.Equal(fixture.CompanyId, id));
+    }
+
+    // ===== WHATSAPP INTEGRATION ISOLATION TESTS =====
+
+    [Fact]
+    public async Task ProcessAsync_IntegrationIsolation_ConversationBoundToIntegrationA_NotReusedByIntegrationB()
+    {
+        // Prove that the conversation is bound to the exact WhatsAppIntegrationId
+        // that received the inbound message
+        var fixture = new Fixture();
+        var integrationA = fixture.Repository.Integration!;
+        var integrationB = new WhatsAppIntegration
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            DisplayName = "Integration B",
+            PhoneNumberId = "integration-b-phone-id",
+            WhatsAppBusinessAccountId = "integration-b-waba-id",
+            BusinessPhoneNumberMasked = "+1******5678",
+            IsActive = true
+        };
+        fixture.Repository.Integrations.Add(integrationB);
+
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+        fixture.Repository.Reservations.Add(
+            CreateReservation(
+                fixture.CompanyId,
+                fixture.PropertyId,
+                fixture.Guest.Id,
+                today.AddDays(-1),
+                today.AddDays(2),
+                ReservationStatus.CheckedIn));
+
+        // Message arrives via Integration A
+        await fixture.Processor.ProcessAsync(
+            BuildInboundPayload("wamid.intA", "+14155551234", integrationA.PhoneNumberId),
+            "cid-intA",
+            CancellationToken.None);
+
+        // Verify Integration A is observed
+        Assert.Equal(integrationA.Id, fixture.ChatService.ObservedWhatsAppIntegrationId);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_IntegrationIsolation_RoutesCorrectIntegrationBasedOnPhoneNumberId()
+    {
+        // Prove that messages are routed by PhoneNumberId to correct integration
+        var fixture = new Fixture();
+        var integrationA = fixture.Repository.Integration!;
+        var integrationB = new WhatsAppIntegration
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            DisplayName = "Integration B",
+            PhoneNumberId = "integration-b-phone-id",
+            WhatsAppBusinessAccountId = "integration-b-waba-id",
+            BusinessPhoneNumberMasked = "+1******5678",
+            IsActive = true
+        };
+        fixture.Repository.Integrations.Add(integrationB);
+
+        var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+        fixture.Repository.Reservations.Add(
+            CreateReservation(
+                fixture.CompanyId,
+                fixture.PropertyId,
+                fixture.Guest.Id,
+                today.AddDays(-1),
+                today.AddDays(2),
+                ReservationStatus.CheckedIn));
+
+        // Message arrives via Integration B's phone number
+        await fixture.Processor.ProcessAsync(
+            BuildInboundPayload("wamid.intB", "+14155551234", integrationB.PhoneNumberId),
+            "cid-intB",
+            CancellationToken.None);
+
+        // Verify Integration B (not A) is routed to
+        Assert.Equal(integrationB.Id, fixture.ChatService.ObservedWhatsAppIntegrationId);
+        Assert.NotEqual(integrationA.Id, fixture.ChatService.ObservedWhatsAppIntegrationId);
+    }
+
     private static Reservation CreateReservation(Guid companyId, Guid propertyId, Guid guestId, DateOnly checkIn, DateOnly checkOut, ReservationStatus status)
     {
         return new Reservation

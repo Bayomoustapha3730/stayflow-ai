@@ -244,6 +244,58 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<Conversation?> GetOpenConversationForEnrichmentAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, Guid? reservationId, Guid? propertyId, Guid? whatsAppIntegrationId, DateTimeOffset cutoff, CancellationToken cancellationToken)
+    {
+        // First, try to find an exact match (conversation already bound to the requested reservation)
+        if (reservationId is { } requestedReservationId)
+        {
+            var exactMatch = await dbContext.Conversations
+                .Where(conversation => conversation.CompanyId == companyId
+                    && conversation.GuestId == guestId
+                    && conversation.Channel == channel
+                    && conversation.ChannelIdentity == channelIdentity
+                    && conversation.ReservationId == requestedReservationId
+                    && conversation.Status != ConversationStatus.Closed
+                    && conversation.LastActivityAt >= cutoff)
+                .OrderByDescending(conversation => conversation.LastActivityAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (exactMatch is not null)
+            {
+                return exactMatch;
+            }
+
+            // No exact match. If we have a WhatsApp integration ID, look for unbound conversations
+            // that can be enriched with the new reservation.
+            if (whatsAppIntegrationId is { } integrationId)
+            {
+                var unbound = await dbContext.Conversations
+                    .Where(conversation => conversation.CompanyId == companyId
+                        && conversation.GuestId == guestId
+                        && conversation.Channel == channel
+                        && conversation.ChannelIdentity == channelIdentity
+                        && conversation.WhatsAppIntegrationId == integrationId
+                        && conversation.ReservationId == null  // Unbound
+                        && conversation.PropertyId == null     // No property binding either
+                        && conversation.Status != ConversationStatus.Closed
+                        && conversation.LastActivityAt >= cutoff)
+                    .OrderByDescending(conversation => conversation.LastActivityAt)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (unbound is not null)
+                {
+                    return unbound;
+                }
+            }
+
+            // No enrichment possible or desired; fall back to regular query
+            return await GetOpenConversationAsync(companyId, guestId, channel, channelIdentity, requestedReservationId, propertyId, cutoff, cancellationToken);
+        }
+
+        // No reservation requested; use standard logic
+        return await GetOpenConversationAsync(companyId, guestId, channel, channelIdentity, null, propertyId, cutoff, cancellationToken);
+    }
+
     public Task<Conversation?> GetLatestConversationForReservationAsync(Guid companyId, Guid reservationId, CancellationToken cancellationToken)
     {
         return dbContext.Conversations
