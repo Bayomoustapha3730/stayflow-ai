@@ -355,7 +355,7 @@ public sealed class ChatServiceTests
         fixture.Repository.Conversations.Add(conversation);
         await fixture.ConversationService.AddGuestMessageAsync(conversation.Id, new AddGuestMessageRequest { Content = "Second", SentAt = DateTimeOffset.UtcNow.AddMinutes(2) }, CancellationToken.None);
         await fixture.ConversationService.AddInternalNoteAsync(conversation.Id, new AddInternalNoteRequest { Content = "Internal" }, CancellationToken.None);
-        await fixture.ConversationService.AddHostMessageAsync(conversation.Id, new AddHostMessageRequest { Content = "First", SentAt = DateTimeOffset.UtcNow.AddMinutes(1) }, CancellationToken.None);
+        await fixture.ConversationService.AddHostMessageAsync(conversation.Id, new AddHostMessageRequest { Content = "First", SentAt = DateTimeOffset.UtcNow.AddMinutes(1) }, WhatsAppSendOrigin.ManualHost, CancellationToken.None);
 
         var response = await fixture.ChatService.GetGuestHistoryAsync(conversation.Id, new ChatHistoryQueryParameters(), CancellationToken.None);
 
@@ -832,6 +832,6 @@ public sealed class ChatServiceTests
 
     private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher
     {
-        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, WhatsAppSendOrigin origin, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

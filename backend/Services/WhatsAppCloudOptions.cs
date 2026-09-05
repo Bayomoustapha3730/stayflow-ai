@@ -18,6 +18,8 @@ public sealed class WhatsAppCloudOptions
     public int MaxTemplateSyncPages { get; set; } = 10;
     public int MaxTemplateSyncItems { get; set; } = 500;
     public bool ProductionSendingEnabled { get; set; }
+    // Authorizes production sending for WhatsAppSendOrigin.ManualHost only; never unblocks autonomous origins.
+    public bool ManualHostProductionSendingEnabled { get; set; }
     public bool DevelopmentMode { get; set; }
     public int CustomerServiceWindowHours { get; set; } = 24;
 }

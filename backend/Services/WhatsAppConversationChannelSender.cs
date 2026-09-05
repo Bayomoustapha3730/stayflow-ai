@@ -16,7 +16,7 @@ public sealed class WhatsAppConversationChannelSender(
 {
     public GuestChannel Channel => GuestChannel.WhatsApp;
 
-    public async Task SendAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken)
+    public async Task SendAsync(Conversation conversation, ConversationMessage message, WhatsAppSendOrigin origin, CancellationToken cancellationToken)
     {
         WhatsAppIntegration? integration;
         if (conversation.WhatsAppIntegrationId is { } boundIntegrationId)
@@ -48,7 +48,7 @@ public sealed class WhatsAppConversationChannelSender(
             }
         }
 
-        var gate = outboundSendGate.EvaluateConfiguredSend(integration.IsProductionEnabled);
+        var gate = outboundSendGate.EvaluateConfiguredSend(origin, integration.IsProductionEnabled);
         if (!gate.Success)
         {
             message.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
@@ -97,6 +97,7 @@ public sealed class WhatsAppConversationChannelSender(
             CompanyId = conversation.CompanyId,
             IntegrationId = integration.Id,
             IsIntegrationProductionEnabled = integration.IsProductionEnabled,
+            Origin = origin,
             AccessToken = credentials.AccessToken,
             GraphApiVersion = integration.GraphApiVersion,
             PhoneNumberId = integration.PhoneNumberId,

@@ -189,6 +189,7 @@ public sealed class ConversationService(
             null,
             false,
             "GuestMessageStored",
+            WhatsAppSendOrigin.SystemOther,
             cancellationToken);
     }
 
@@ -206,10 +207,11 @@ public sealed class ConversationService(
             result,
             result.Outcome != AIOrchestrationOutcome.Responded,
             result.Outcome == AIOrchestrationOutcome.Responded ? "AIMessageStored" : "ConversationEscalated",
+            WhatsAppSendOrigin.AiConcierge,
             cancellationToken);
     }
 
-    public async Task<ApiResponse<ConversationMessageResponse>> AddHostMessageAsync(Guid conversationId, AddHostMessageRequest request, CancellationToken cancellationToken)
+    public async Task<ApiResponse<ConversationMessageResponse>> AddHostMessageAsync(Guid conversationId, AddHostMessageRequest request, WhatsAppSendOrigin origin, CancellationToken cancellationToken)
     {
         return await AddMessageAsync(
             conversationId,
@@ -223,6 +225,7 @@ public sealed class ConversationService(
             null,
             false,
             "HostMessageStored",
+            origin,
             cancellationToken);
     }
 
@@ -312,7 +315,7 @@ public sealed class ConversationService(
             timestamp = DateTimeOffset.UtcNow
         }, cancellationToken);
 
-        await conversationChannelDispatcher.DispatchOutboundMessageAsync(conversation, retryMessage, cancellationToken);
+        await conversationChannelDispatcher.DispatchOutboundMessageAsync(conversation, retryMessage, WhatsAppSendOrigin.Retry, cancellationToken);
 
         return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(retryMessage, conversation), "Conversation message retry sent successfully.");
     }
@@ -331,6 +334,7 @@ public sealed class ConversationService(
             null,
             true,
             "InternalNoteAdded",
+            WhatsAppSendOrigin.SystemOther,
             cancellationToken);
     }
 
@@ -647,6 +651,7 @@ public sealed class ConversationService(
             null,
             false,
             "PaymentConfirmationStored",
+            WhatsAppSendOrigin.SystemOther,
             cancellationToken);
     }
 
@@ -676,6 +681,7 @@ public sealed class ConversationService(
             null,
             false,
             "LifecycleAutomationMessageStored",
+            WhatsAppSendOrigin.GuestJourney,
             cancellationToken);
     }
 
@@ -691,6 +697,7 @@ public sealed class ConversationService(
         AIOrchestrationResult? aiResult,
         bool isInternal,
         string auditAction,
+        WhatsAppSendOrigin origin,
         CancellationToken cancellationToken)
     {
         if (!TryGetCompanyId(out var companyId, out var tenantError))
@@ -698,7 +705,7 @@ public sealed class ConversationService(
             return ApiResponse<ConversationMessageResponse>.Fail(tenantError, [tenantError]);
         }
 
-        return await AddMessageAsync(companyId, conversationId, senderType, messageType, content, sentAt, externalMessageId, provider, deliveryStatus, aiResult, isInternal, auditAction, cancellationToken);
+        return await AddMessageAsync(companyId, conversationId, senderType, messageType, content, sentAt, externalMessageId, provider, deliveryStatus, aiResult, isInternal, auditAction, origin, cancellationToken);
     }
 
     private async Task<ApiResponse<ConversationMessageResponse>> AddMessageAsync(
@@ -714,6 +721,7 @@ public sealed class ConversationService(
         AIOrchestrationResult? aiResult,
         bool isInternal,
         string auditAction,
+        WhatsAppSendOrigin origin,
         CancellationToken cancellationToken)
     {
         var errors = ValidateContent(content);
@@ -822,7 +830,7 @@ public sealed class ConversationService(
         if (!isInternal && senderType is ConversationSenderType.Host or ConversationSenderType.AI or ConversationSenderType.System)
         {
             // System covers e.g. payment confirmations: reuse the same outbound dispatch as Host/AI messages.
-            await conversationChannelDispatcher.DispatchOutboundMessageAsync(conversation, message, cancellationToken);
+            await conversationChannelDispatcher.DispatchOutboundMessageAsync(conversation, message, origin, cancellationToken);
         }
 
         if (auditAction == "ConversationEscalated")

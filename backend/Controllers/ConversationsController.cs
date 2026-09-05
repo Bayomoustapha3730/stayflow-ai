@@ -76,7 +76,8 @@ public sealed class ConversationsController(
         AddHostMessageRequest request,
         CancellationToken cancellationToken)
     {
-        var response = await conversationService.AddHostMessageAsync(conversationId, request, cancellationToken);
+        // A staff member submitted this reply directly from the Host Inbox composer.
+        var response = await conversationService.AddHostMessageAsync(conversationId, request, WhatsAppSendOrigin.ManualHost, cancellationToken);
         return response.Success ? Ok(response) : ToFailureResult(response);
     }
 

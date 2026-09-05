@@ -2,8 +2,8 @@ namespace StayFlow.Api.Services;
 
 public interface IWhatsAppOutboundSendGate
 {
-    WhatsAppOutboundSendGateResult EvaluateConfiguredSend(bool isIntegrationProductionEnabled);
-    WhatsAppOutboundSendGateResult EvaluateRealProviderSend(bool isIntegrationProductionEnabled);
+    WhatsAppOutboundSendGateResult EvaluateConfiguredSend(WhatsAppSendOrigin origin, bool isIntegrationProductionEnabled);
+    WhatsAppOutboundSendGateResult EvaluateRealProviderSend(WhatsAppSendOrigin origin, bool isIntegrationProductionEnabled);
 }
 
 public sealed record WhatsAppOutboundSendGateResult(bool Success, string? FailureCode = null, string? FailureSummary = null)

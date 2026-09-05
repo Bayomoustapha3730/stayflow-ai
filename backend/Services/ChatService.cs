@@ -143,11 +143,12 @@ public sealed class ChatService(
                 ? ConversationStatus.HumanManaged
                 : ConversationStatus.AwaitingHost;
             conversation.HumanTakeoverEnabled = true;
+            // Autonomous escalation notice, not a message a human typed, so it must not authorize as ManualHost.
             var assistant = await conversationService.AddHostMessageAsync(conversation.Id, new AddHostMessageRequest
             {
                 Content = HostWillRespondMessage,
                 SentAt = DateTimeOffset.UtcNow
-            }, cancellationToken);
+            }, WhatsAppSendOrigin.SystemOther, cancellationToken);
             await AuditAsync(companyId, conversation.Id, request.GuestId, "HumanManagedMessageReceived", request.Channel, AIOrchestrationOutcome.EscalationRequired, null, cancellationToken);
             return ApiResponse<ChatMessageResponse>.Ok(ToChatMessageResponse(conversation, guestMessage.Data, assistant.Data, null, [], [], null), "Chat message received.");
         }

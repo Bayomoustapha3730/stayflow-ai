@@ -519,7 +519,7 @@ public sealed class WhatsAppTemplateService(
             return ApiResponse<ConversationMessageResponse>.Fail("Conversation channel identity is not a valid WhatsApp destination.");
         }
 
-        var gate = outboundSendGate.EvaluateConfiguredSend(integration.IsProductionEnabled);
+        var gate = outboundSendGate.EvaluateConfiguredSend(WhatsAppSendOrigin.TemplateManual, integration.IsProductionEnabled);
         if (!gate.Success)
         {
             return ApiResponse<ConversationMessageResponse>.Fail(gate.FailureSummary ?? "WhatsApp sending is unavailable.", [gate.FailureCode ?? "ProductionSendingDisabled"]);
@@ -590,6 +590,7 @@ public sealed class WhatsAppTemplateService(
             CompanyId = integration.CompanyId,
             IntegrationId = integration.Id,
             IsIntegrationProductionEnabled = integration.IsProductionEnabled,
+            Origin = WhatsAppSendOrigin.TemplateManual,
             AccessToken = credentials.AccessToken,
             GraphApiVersion = integration.GraphApiVersion,
             PhoneNumberId = integration.PhoneNumberId,
@@ -702,7 +703,7 @@ public sealed class WhatsAppTemplateService(
             return ApiResponse<ConversationMessageResponse>.Fail("Conversation channel identity is not a valid WhatsApp destination.");
         }
 
-        var gate = outboundSendGate.EvaluateConfiguredSend(integration.IsProductionEnabled);
+        var gate = outboundSendGate.EvaluateConfiguredSend(WhatsAppSendOrigin.ReservationLifecycle, integration.IsProductionEnabled);
         if (!gate.Success)
         {
             return ApiResponse<ConversationMessageResponse>.Fail(gate.FailureSummary ?? "WhatsApp sending is unavailable.", [gate.FailureCode ?? "ProductionSendingDisabled"]);
@@ -774,6 +775,7 @@ public sealed class WhatsAppTemplateService(
             CompanyId = integration.CompanyId,
             IntegrationId = integration.Id,
             IsIntegrationProductionEnabled = integration.IsProductionEnabled,
+            Origin = WhatsAppSendOrigin.ReservationLifecycle,
             AccessToken = credentials.AccessToken,
             GraphApiVersion = integration.GraphApiVersion,
             PhoneNumberId = integration.PhoneNumberId,

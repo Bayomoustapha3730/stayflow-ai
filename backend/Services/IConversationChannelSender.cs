@@ -7,5 +7,5 @@ public interface IConversationChannelSender
 {
     GuestChannel Channel { get; }
 
-    Task SendAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken);
+    Task SendAsync(Conversation conversation, ConversationMessage message, WhatsAppSendOrigin origin, CancellationToken cancellationToken);
 }

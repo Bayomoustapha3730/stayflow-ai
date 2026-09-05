@@ -21,7 +21,7 @@ public sealed class WhatsAppCloudClient(
 
     public async Task<WhatsAppSendTextMessageResult> SendTextMessageAsync(WhatsAppSendTextMessageRequest request, CancellationToken cancellationToken)
     {
-        var gate = outboundSendGate.EvaluateRealProviderSend(request.IsIntegrationProductionEnabled);
+        var gate = outboundSendGate.EvaluateRealProviderSend(request.Origin, request.IsIntegrationProductionEnabled);
         if (!gate.Success)
         {
             return CreateSendFailure(gate.FailureCode!, gate.FailureSummary!, "AuthenticationOrConfigurationIssue", null, null, null, false);
@@ -84,7 +84,7 @@ public sealed class WhatsAppCloudClient(
 
     public async Task<WhatsAppSendTemplateMessageResult> SendTemplateMessageAsync(WhatsAppTemplateSendRequest request, CancellationToken cancellationToken)
     {
-        var gate = outboundSendGate.EvaluateRealProviderSend(request.IsIntegrationProductionEnabled);
+        var gate = outboundSendGate.EvaluateRealProviderSend(request.Origin, request.IsIntegrationProductionEnabled);
         if (!gate.Success)
         {
             return CreateTemplateFailure(gate.FailureCode!, gate.FailureSummary!, "AuthenticationOrConfigurationIssue", null, null, null, false);

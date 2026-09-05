@@ -16,14 +16,16 @@ public sealed class DevelopmentWhatsAppCloudClientTests
             PhoneNumberId = "demo-phone-number-id",
             To = "+14155551234",
             Body = "Welcome to StayFlow",
-            ClientMessageId = "abc123"
+            ClientMessageId = "abc123",
+            Origin = WhatsAppSendOrigin.ManualHost
         }, CancellationToken.None);
         var second = await client.SendTextMessageAsync(new WhatsAppSendTextMessageRequest
         {
             PhoneNumberId = "demo-phone-number-id",
             To = "+14155551234",
             Body = "Welcome to StayFlow",
-            ClientMessageId = "abc123"
+            ClientMessageId = "abc123",
+            Origin = WhatsAppSendOrigin.ManualHost
         }, CancellationToken.None);
 
         Assert.True(first.Success);

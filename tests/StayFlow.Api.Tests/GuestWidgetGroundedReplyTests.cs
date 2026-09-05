@@ -784,6 +784,6 @@ public sealed class GuestWidgetGroundedReplyTests
 
     private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher
     {
-        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, WhatsAppSendOrigin origin, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

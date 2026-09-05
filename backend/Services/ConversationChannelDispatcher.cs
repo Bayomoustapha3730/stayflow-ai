@@ -13,14 +13,14 @@ public sealed class ConversationChannelDispatcher(
         .GroupBy(sender => sender.Channel)
         .ToDictionary(group => group.Key, group => group.Last());
 
-    public async Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken)
+    public async Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, WhatsAppSendOrigin origin, CancellationToken cancellationToken)
     {
         if (!sendersByChannel.TryGetValue(conversation.Channel, out var sender))
         {
             return;
         }
 
-        await sender.SendAsync(conversation, message, cancellationToken);
+        await sender.SendAsync(conversation, message, origin, cancellationToken);
         await conversationRepository.SaveChangesAsync(cancellationToken);
         var safeFailureSummary = message.DeliveryStatus == ConversationMessageDeliveryStatus.Failed
             ? WhatsAppFailureMapper.Map(message.FailureCode, message.FailureReason).Summary

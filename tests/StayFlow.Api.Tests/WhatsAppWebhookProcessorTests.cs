@@ -716,7 +716,7 @@ public sealed class WhatsAppWebhookProcessorTests
         }
 
         public Task<ApiResponse<ConversationMessageResponse>> AddAIMessageAsync(Guid conversationId, string content, DTOs.AIOrchestration.AIOrchestrationResult result, CancellationToken cancellationToken) => throw new NotImplementedException();
-        public Task<ApiResponse<ConversationMessageResponse>> AddHostMessageAsync(Guid conversationId, AddHostMessageRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ConversationMessageResponse>> AddHostMessageAsync(Guid conversationId, AddHostMessageRequest request, WhatsAppSendOrigin origin, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<ConversationMessageResponse>> RetryFailedMessageAsync(Guid currentConversationId, Guid messageId, CancellationToken cancellationToken)
         {
             RetriedConversationId = currentConversationId;

@@ -4,5 +4,5 @@ namespace StayFlow.Api.Services;
 
 public interface IConversationChannelDispatcher
 {
-    Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken);
+    Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, WhatsAppSendOrigin origin, CancellationToken cancellationToken);
 }

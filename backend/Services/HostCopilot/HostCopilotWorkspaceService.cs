@@ -8,7 +8,6 @@ using StayFlow.Api.DTOs.Copilot;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services.AI.Orchestration;
 using StayFlow.Api.Services.ConciergeActions;
-
 namespace StayFlow.Api.Services.HostCopilot;
 
 public sealed class HostCopilotWorkspaceService(
@@ -314,12 +313,13 @@ public sealed class HostCopilotWorkspaceService(
             return ApiResponse<ConversationMessageResponse>.Fail("Draft validation failed.", validation.Errors.ToList());
         }
 
+        // The host reviewed the AI-drafted content and explicitly chose to send it.
         var response = await conversationService.AddHostMessageAsync(conversationId, new AddHostMessageRequest
         {
             Content = request.Draft,
             SentAt = DateTimeOffset.UtcNow,
             Provider = ConversationMessageProvider.None
-        }, cancellationToken);
+        }, StayFlow.Api.Services.WhatsAppSendOrigin.ManualHost, cancellationToken);
 
         if (!response.Success)
         {

@@ -429,6 +429,27 @@ public sealed class ConversationServiceTests
     }
 
     [Fact]
+    public async Task AddLifecycleAutomationMessageAsync_DispatchesGuestJourneyOrigin()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.AddLifecycleAutomationMessageAsync(
+            fixture.CompanyId,
+            conversation.Id,
+            "Your check-in details are ready.",
+            "guest-journey:11111111-1111-1111-1111-111111111111",
+            CancellationToken.None);
+
+        Assert.True(response.Success, response.Message + " " + string.Join(",", response.Errors));
+        var dispatch = Assert.Single(fixture.ConversationChannelDispatcher.Calls);
+        Assert.Equal(conversation.Id, dispatch.ConversationId);
+        Assert.Equal(response.Data!.Id, dispatch.MessageId);
+        Assert.Equal(WhatsAppSendOrigin.GuestJourney, dispatch.Origin);
+    }
+
+    [Fact]
     public async Task AddPaymentConfirmationMessageAsync_DuplicateIdempotencyKeyDoesNotCreateSecondMessage()
     {
         var fixture = new Fixture();
@@ -555,6 +576,50 @@ public sealed class ConversationServiceTests
 
         Assert.True(response.Success);
         Assert.Empty(fixture.Repository.MessageKnowledgeSources);
+    }
+
+    [Fact]
+    public async Task AddAIMessageAsync_Responded_DispatchesAiConciergeOrigin()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation();
+        fixture.Repository.Conversations.Add(conversation);
+
+        var response = await fixture.Service.AddAIMessageAsync(conversation.Id, "AI response", new DTOs.AIOrchestration.AIOrchestrationResult
+        {
+            Outcome = DTOs.AIOrchestration.AIOrchestrationOutcome.Responded
+        }, CancellationToken.None);
+
+        Assert.True(response.Success, response.Message + " " + string.Join(",", response.Errors));
+        var dispatch = Assert.Single(fixture.ConversationChannelDispatcher.Calls);
+        Assert.Equal(conversation.Id, dispatch.ConversationId);
+        Assert.Equal(response.Data!.Id, dispatch.MessageId);
+        Assert.Equal(WhatsAppSendOrigin.AiConcierge, dispatch.Origin);
+        Assert.NotEqual(WhatsAppSendOrigin.ManualHost, dispatch.Origin);
+    }
+
+    [Fact]
+    public async Task RetryFailedMessageAsync_DispatchesRetryOrigin()
+    {
+        var fixture = new Fixture();
+        var conversation = fixture.Repository.NewConversation(
+            channel: GuestChannel.WhatsApp,
+            channelIdentity: "+14155550123",
+            humanTakeover: true);
+        fixture.Repository.Conversations.Add(conversation);
+        var failedMessage = fixture.Repository.NewMessage(conversation, "Please try again", ConversationSenderType.Host);
+        failedMessage.Provider = ConversationMessageProvider.WhatsAppCloud;
+        failedMessage.DeliveryStatus = ConversationMessageDeliveryStatus.Failed;
+        failedMessage.SendAttemptNumber = 1;
+        fixture.Repository.Messages.Add(failedMessage);
+
+        var response = await fixture.Service.RetryFailedMessageAsync(conversation.Id, failedMessage.Id, CancellationToken.None);
+
+        Assert.True(response.Success, response.Message + " " + string.Join(",", response.Errors));
+        var dispatch = Assert.Single(fixture.ConversationChannelDispatcher.Calls);
+        Assert.Equal(conversation.Id, dispatch.ConversationId);
+        Assert.Equal(response.Data!.Id, dispatch.MessageId);
+        Assert.Equal(WhatsAppSendOrigin.Retry, dispatch.Origin);
     }
 
     [Fact]
@@ -849,7 +914,7 @@ public sealed class ConversationServiceTests
                 new FakeCurrentTenantContext(CompanyId, User.Id),
                 new ConversationStatusTransitionPolicy(),
                 RealtimePublisher,
-                new NoOpConversationChannelDispatcher(),
+                ConversationChannelDispatcher,
                 Options.Create(new ConversationOptions { MaxMessageCharacters = maxMessageCharacters, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
                 new ReservationLifecycleService(TimeProvider.System, Options.Create(new ReservationContextOptions())));
         }
@@ -861,6 +926,7 @@ public sealed class ConversationServiceTests
         public User User { get; }
         public FakeConversationRepository Repository { get; }
         public RecordingConversationRealtimePublisher RealtimePublisher { get; }
+        public RecordingConversationChannelDispatcher ConversationChannelDispatcher { get; } = new();
         public ConversationService Service { get; }
     }
 
@@ -1168,6 +1234,8 @@ public sealed class ConversationServiceTests
 
         public Conversation NewConversation(
             Guid? overrideCompanyId = null,
+            GuestChannel channel = GuestChannel.Web,
+            string? channelIdentity = null,
             ConversationStatus status = ConversationStatus.Open,
             bool humanTakeover = false,
             DateTimeOffset? lastActivityAt = null,
@@ -1187,8 +1255,8 @@ public sealed class ConversationServiceTests
                 Property = property,
                 ReservationId = reservation?.Id,
                 Reservation = reservation,
-                Channel = GuestChannel.Web,
-                ChannelIdentity = null,
+                Channel = channel,
+                ChannelIdentity = channelIdentity,
                 Status = status,
                 Subject = subject,
                 HumanTakeoverEnabled = humanTakeover,
@@ -1324,8 +1392,14 @@ public sealed class ConversationServiceTests
         }
     }
 
-    private sealed class NoOpConversationChannelDispatcher : IConversationChannelDispatcher
+    private sealed class RecordingConversationChannelDispatcher : IConversationChannelDispatcher
     {
-        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
+        public List<(Guid ConversationId, Guid MessageId, WhatsAppSendOrigin Origin)> Calls { get; } = [];
+
+        public Task DispatchOutboundMessageAsync(Conversation conversation, ConversationMessage message, WhatsAppSendOrigin origin, CancellationToken cancellationToken)
+        {
+            Calls.Add((conversation.Id, message.Id, origin));
+            return Task.CompletedTask;
+        }
     }
 }
