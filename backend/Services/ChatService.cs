@@ -114,7 +114,12 @@ public sealed class ChatService(
         {
             Content = request.Message,
             ExternalMessageId = request.ExternalMessageId,
-            SentAt = sentAt
+            SentAt = sentAt,
+            // The customer-service-window evaluator only counts Guest messages stored as WhatsAppCloud,
+            // so an inbound WhatsApp message must carry the provider to open the 24-hour window.
+            Provider = request.Channel == GuestChannel.WhatsApp
+                ? ConversationMessageProvider.WhatsAppCloud
+                : ConversationMessageProvider.None
         }, cancellationToken);
         if (!guestMessage.Success || guestMessage.Data is null)
         {

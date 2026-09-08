@@ -119,6 +119,37 @@ public sealed class ChatServiceTests
     }
 
     [Fact]
+    public async Task SendGuestMessageAsync_WhatsAppInboundPersistsGuestMessageWithWhatsAppCloudProvider()
+    {
+        var fixture = new Fixture();
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Hello") with
+        {
+            Channel = GuestChannel.WhatsApp,
+            ChannelIdentity = "+254 700 000002",
+            ExternalMessageId = "wamid.window-open"
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+
+        // The customer-service-window evaluator only counts Guest messages stored as WhatsAppCloud.
+        var inbound = Assert.Single(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest);
+        Assert.Equal(ConversationMessageProvider.WhatsAppCloud, inbound.Provider);
+    }
+
+    [Fact]
+    public async Task SendGuestMessageAsync_WebInboundKeepsGuestMessageProviderNone()
+    {
+        var fixture = new Fixture();
+
+        var response = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Hello"), CancellationToken.None);
+
+        Assert.True(response.Success);
+        var inbound = Assert.Single(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest);
+        Assert.Equal(ConversationMessageProvider.None, inbound.Provider);
+    }
+
+    [Fact]
     public async Task SendGuestMessageAsync_EmailMatchingAddressSucceedsCaseInsensitive()
     {
         var fixture = new Fixture();
