@@ -491,11 +491,32 @@ public sealed class WhatsAppWebhookProcessorTests
     [Fact]
     public async Task ProcessAsync_TenantIsolation_ConversationFromAnotherTenant_NotReused()
     {
-        // Prove that a conversation for another tenant cannot be reused
-        // Note: This is tested via ConversationService behavior,
-        // but the processor ensures correct company context is passed
+        // Prove that a decoy guest/reservation belonging to another company (sharing the
+        // same phone number) is never picked up when the inbound message resolves to our tenant.
         var fixture = new Fixture();
         var today = DateOnly.FromDateTime(DateTimeOffset.UtcNow.UtcDateTime);
+        var otherCompanyId = Guid.NewGuid();
+
+        var otherCompanyGuest = new Guest
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = otherCompanyId,
+            FirstName = "Decoy",
+            LastName = "Guest",
+            PhoneNumber = "+14155551234",
+            PreferredLanguage = "en",
+            CountryCode = "US",
+            IsActive = true
+        };
+        fixture.Repository.Guests.Add(otherCompanyGuest);
+        fixture.Repository.Reservations.Add(
+            CreateReservation(
+                otherCompanyId,
+                Guid.NewGuid(),
+                otherCompanyGuest.Id,
+                today.AddDays(-1),
+                today.AddDays(2),
+                ReservationStatus.CheckedIn));
 
         fixture.Repository.Reservations.Add(
             CreateReservation(
@@ -508,10 +529,14 @@ public sealed class WhatsAppWebhookProcessorTests
 
         await fixture.Processor.ProcessAsync(BuildInboundPayload("wamid.tenant", "+14155551234"), "cid-tenant", CancellationToken.None);
 
-        // Verify tenant context is correctly passed
+        // Only our tenant's context is ever observed, despite the decoy sharing a phone number
         Assert.Equal([fixture.CompanyId], fixture.ChatService.ObservedTenantCompanyIds);
         Assert.Single(fixture.ChatService.ObservedTenantCompanyIds);
         Assert.All(fixture.ChatService.ObservedTenantCompanyIds, id => Assert.Equal(fixture.CompanyId, id));
+
+        // Our tenant's own guest/reservation is resolved, not the decoy's
+        Assert.NotNull(fixture.ChatService.Request);
+        Assert.Equal(fixture.Guest.Id, fixture.ChatService.Request!.GuestId);
     }
 
     // ===== WHATSAPP INTEGRATION ISOLATION TESTS =====
@@ -553,6 +578,7 @@ public sealed class WhatsAppWebhookProcessorTests
 
         // Verify Integration A is observed
         Assert.Equal(integrationA.Id, fixture.ChatService.ObservedWhatsAppIntegrationId);
+        Assert.Equal(integrationA.CompanyId, Assert.Single(fixture.ChatService.ObservedTenantCompanyIds));
     }
 
     [Fact]
@@ -592,6 +618,7 @@ public sealed class WhatsAppWebhookProcessorTests
         // Verify Integration B (not A) is routed to
         Assert.Equal(integrationB.Id, fixture.ChatService.ObservedWhatsAppIntegrationId);
         Assert.NotEqual(integrationA.Id, fixture.ChatService.ObservedWhatsAppIntegrationId);
+        Assert.Equal(integrationB.CompanyId, Assert.Single(fixture.ChatService.ObservedTenantCompanyIds));
     }
 
     private static Reservation CreateReservation(Guid companyId, Guid propertyId, Guid guestId, DateOnly checkIn, DateOnly checkOut, ReservationStatus status)

@@ -561,37 +561,50 @@ public sealed class ConversationServiceTests
         var fixture = new Fixture();
 
         var otherCompanyId = Guid.NewGuid();
-        var otherGuestId = Guid.NewGuid();
 
-        // Create unbound conversation for this company
-        var unboundConversation = fixture.Repository.NewConversation(
+        // Unbound conversation belonging to a *different* company (Company A),
+        // sharing the same guest id, channel identity, and integration id as
+        // the requesting tenant (Company B) so the only distinguishing factor is CompanyId.
+        var crossTenantUnbound = fixture.Repository.NewConversation(
+            overrideCompanyId: otherCompanyId,
             channel: GuestChannel.WhatsApp,
             reservation: null,
             property: null,
             whatsAppIntegrationId: fixture.Repository.Integration.Id,
             unbound: true);
-        fixture.Repository.Conversations.Add(unboundConversation);
+        fixture.Repository.Conversations.Add(crossTenantUnbound);
 
         var reservation = fixture.Repository.NewReservation(
             guest: fixture.Guest,
             property: fixture.Property);
         fixture.Repository.Reservations.Add(reservation);
 
-        // Try to fetch as different tenant (would fail validation anyway, but test the isolation)
+        // Request runs under fixture's tenant context (Company B), not otherCompanyId.
         var response = await fixture.Service.CreateOrGetConversationAsync(new CreateConversationRequest
         {
-            GuestId = fixture.Guest.Id,  // Same guest as our unbound conversation
+            GuestId = fixture.Guest.Id,
             ReservationId = reservation.Id,
             PropertyId = fixture.Property.Id,
             Channel = GuestChannel.WhatsApp,
-            ChannelIdentity = unboundConversation.ChannelIdentity,
+            ChannelIdentity = crossTenantUnbound.ChannelIdentity,
             Subject = "WhatsApp guest support",
             WhatsAppIntegrationId = fixture.Repository.Integration.Id
         }, CancellationToken.None);
 
         Assert.True(response.Success);
-        // Should reuse because we're in same company
-        Assert.Equal(unboundConversation.Id, response.Data!.Id);
+        // Must NOT reuse or enrich the other company's conversation
+        Assert.NotEqual(crossTenantUnbound.Id, response.Data!.Id);
+        Assert.Equal(2, fixture.Repository.Conversations.Count);
+
+        var ownTenantConversation = fixture.Repository.Conversations.Single(c => c.Id != crossTenantUnbound.Id);
+        Assert.Equal(fixture.CompanyId, ownTenantConversation.CompanyId);
+        Assert.Equal(reservation.Id, ownTenantConversation.ReservationId);
+
+        // The other company's conversation must remain untouched/unbound
+        Assert.Null(crossTenantUnbound.ReservationId);
+        Assert.Null(crossTenantUnbound.PropertyId);
+        Assert.Equal(fixture.Repository.Integration.Id, crossTenantUnbound.WhatsAppIntegrationId);
+        Assert.Equal(otherCompanyId, crossTenantUnbound.CompanyId);
     }
 
     [Fact]
