@@ -14,7 +14,8 @@ public sealed class ConversationParticipantReadStateConfiguration : IEntityTypeC
         builder.HasQueryFilter(state =>
             !state.Conversation.IsDeleted
             && !state.Conversation.Guest.IsDeleted
-            && (state.Conversation.Property == null || !state.Conversation.Property.IsDeleted));
+            && (!state.Conversation.PropertyId.HasValue
+                || (state.Conversation.Property != null && !state.Conversation.Property.IsDeleted)));
 
         builder.Property(state => state.ParticipantKind)
             .HasConversion<string>()

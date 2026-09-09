@@ -11,6 +11,11 @@ public sealed class ExtraItemRequestConfiguration : IEntityTypeConfiguration<Ext
         builder.ToTable("ExtraItemRequests");
 
         builder.HasKey(item => item.Id);
+        builder.HasQueryFilter(item =>
+            !item.Conversation.IsDeleted
+            && !item.Conversation.Guest.IsDeleted
+            && !item.Property.IsDeleted);
+
         builder.Property(item => item.GuestNote).HasMaxLength(240);
 
         builder.HasIndex(item => new { item.CompanyId, item.PropertyId, item.Status });

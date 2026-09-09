@@ -11,6 +11,14 @@ public sealed class HostNotificationRecordConfiguration : IEntityTypeConfigurati
         builder.ToTable("HostNotificationRecords");
 
         builder.HasKey(item => item.Id);
+        // Property is checked via the entity's own required navigation (not Conversation.Property,
+        // which is nullable and would ambiguously LEFT JOIN a soft-deleted property to the same
+        // NULL result as "no property set", silently failing to hide the row).
+        builder.HasQueryFilter(item =>
+            !item.Conversation.IsDeleted
+            && !item.Conversation.Guest.IsDeleted
+            && !item.Property.IsDeleted);
+
         builder.Property(item => item.GuestNote).HasMaxLength(240);
 
         builder.HasIndex(item => new { item.CompanyId, item.PropertyId, item.CreatedAt });

@@ -11,6 +11,12 @@ public sealed class ConversationMessageFeedbackConfiguration : IEntityTypeConfig
         builder.ToTable("ConversationMessageFeedback");
 
         builder.HasKey(feedback => feedback.Id);
+        builder.HasQueryFilter(feedback =>
+            !feedback.Conversation.IsDeleted
+            && !feedback.Conversation.Guest.IsDeleted
+            && (!feedback.Conversation.PropertyId.HasValue
+                || (feedback.Conversation.Property != null && !feedback.Conversation.Property.IsDeleted)));
+
         builder.Property(feedback => feedback.FeedbackValue).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(feedback => feedback.Comment).HasMaxLength(500);
 

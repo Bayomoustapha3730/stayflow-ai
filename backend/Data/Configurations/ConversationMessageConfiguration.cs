@@ -15,7 +15,8 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
             !message.IsDeleted
             && !message.Conversation.IsDeleted
             && !message.Conversation.Guest.IsDeleted
-            && (message.Conversation.Property == null || !message.Conversation.Property.IsDeleted));
+            && (!message.Conversation.PropertyId.HasValue
+                || (message.Conversation.Property != null && !message.Conversation.Property.IsDeleted)));
 
         builder.Property(message => message.SenderType).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(message => message.Content).HasMaxLength(4000).IsRequired();

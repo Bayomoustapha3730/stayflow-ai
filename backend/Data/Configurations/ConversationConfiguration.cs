@@ -14,7 +14,8 @@ public sealed class ConversationConfiguration : IEntityTypeConfiguration<Convers
         builder.HasQueryFilter(conversation =>
             !conversation.IsDeleted
             && !conversation.Guest.IsDeleted
-            && (conversation.Property == null || !conversation.Property.IsDeleted));
+            && (!conversation.PropertyId.HasValue
+                || (conversation.Property != null && !conversation.Property.IsDeleted)));
 
         builder.Property(conversation => conversation.Channel).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(conversation => conversation.ChannelIdentity).HasMaxLength(160);

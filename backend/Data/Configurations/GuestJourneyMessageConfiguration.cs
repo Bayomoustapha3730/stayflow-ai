@@ -11,6 +11,9 @@ public sealed class GuestJourneyMessageConfiguration : IEntityTypeConfiguration<
         builder.ToTable("GuestJourneyMessages");
 
         builder.HasKey(item => item.Id);
+        // Conversation is optional on this entity; the required, filtered principal is Guest.
+        builder.HasQueryFilter(item => !item.Guest.IsDeleted);
+
         builder.Property(item => item.JourneyEventType).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(item => item.Channel).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(item => item.Language).HasMaxLength(20).IsRequired();

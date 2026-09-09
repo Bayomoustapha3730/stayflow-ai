@@ -11,6 +11,12 @@ public sealed class ConciergeActionAuditLogConfiguration : IEntityTypeConfigurat
         builder.ToTable("ConciergeActionAuditLogs");
 
         builder.HasKey(item => item.Id);
+        // Audit records intentionally remain visible regardless of Conversation/Guest/Property soft-delete state.
+        // The filter is explicit (not omitted) so EF knows this dependent has its own visibility policy and doesn't
+        // warn about the required, filtered Conversation navigation. Callers needing Conversation data for
+        // historical/admin audit reads must account for Conversation's own query filter (e.g. IgnoreQueryFilters()).
+        builder.HasQueryFilter(_ => true);
+
         builder.Property(item => item.ActorType).HasMaxLength(40).IsRequired();
         builder.Property(item => item.Channel).HasMaxLength(30).IsRequired();
         builder.Property(item => item.ResultCode).HasMaxLength(80).IsRequired();

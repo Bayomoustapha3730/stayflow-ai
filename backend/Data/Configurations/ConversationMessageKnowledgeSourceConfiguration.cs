@@ -11,6 +11,12 @@ public sealed class ConversationMessageKnowledgeSourceConfiguration : IEntityTyp
         builder.ToTable("ConversationMessageKnowledgeSources");
 
         builder.HasKey(source => source.Id);
+        builder.HasQueryFilter(source =>
+            !source.Conversation.IsDeleted
+            && !source.Conversation.Guest.IsDeleted
+            && (!source.Conversation.PropertyId.HasValue
+                || (source.Conversation.Property != null && !source.Conversation.Property.IsDeleted)));
+
         builder.Property(source => source.RelevanceReason).HasMaxLength(240);
 
         builder.HasOne(source => source.Company)

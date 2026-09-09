@@ -11,6 +11,11 @@ public sealed class MaintenanceTicketConfiguration : IEntityTypeConfiguration<Ma
         builder.ToTable("MaintenanceTickets");
 
         builder.HasKey(item => item.Id);
+        builder.HasQueryFilter(item =>
+            !item.Conversation.IsDeleted
+            && !item.Conversation.Guest.IsDeleted
+            && !item.Property.IsDeleted);
+
         builder.Property(item => item.DescriptionSummary).HasMaxLength(300).IsRequired();
         builder.Property(item => item.Location).HasMaxLength(120);
 

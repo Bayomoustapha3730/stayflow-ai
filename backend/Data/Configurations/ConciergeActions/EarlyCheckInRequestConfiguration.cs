@@ -11,6 +11,11 @@ public sealed class EarlyCheckInRequestConfiguration : IEntityTypeConfiguration<
         builder.ToTable("EarlyCheckInRequests");
 
         builder.HasKey(item => item.Id);
+        builder.HasQueryFilter(item =>
+            !item.Conversation.IsDeleted
+            && !item.Conversation.Guest.IsDeleted
+            && !item.Property.IsDeleted);
+
         builder.Property(item => item.GuestNote).HasMaxLength(240);
         builder.Property(item => item.DecisionNote).HasMaxLength(240);
 
