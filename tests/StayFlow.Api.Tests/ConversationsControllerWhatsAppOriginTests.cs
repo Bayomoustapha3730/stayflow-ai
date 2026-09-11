@@ -80,6 +80,7 @@ public sealed class ConversationsControllerWhatsAppOriginTests
         public Task<ApiResponse<WhatsAppTemplatePreviewResponse>> PreviewTemplateAsync(Guid integrationId, Guid templateId, WhatsAppTemplatePreviewRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApiResponse<ConversationMessageResponse>> SendTemplateMessageAsync(Guid conversationId, Guid templateId, SendWhatsAppTemplateMessageRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(Guid companyId, Guid conversationId, Guid integrationId, Guid templateId, IReadOnlyCollection<string> variables, string idempotencyKey, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<ApiResponse<ConversationMessageResponse>> SendHostActionTemplateMessageAsync(Guid companyId, Guid conversationId, ConciergeActionType actionType, string notificationType, string idempotencyKey, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>> GetCustomerServiceWindowStatusAsync(Guid conversationId, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

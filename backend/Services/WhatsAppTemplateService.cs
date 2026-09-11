@@ -8,6 +8,7 @@ using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.WhatsApp;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
+using StayFlow.Api.Services.ConciergeActions;
 
 namespace StayFlow.Api.Services;
 
@@ -862,6 +863,53 @@ public sealed class WhatsAppTemplateService(
         }, cancellationToken);
 
         return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(message), "Lifecycle automation template message processed.");
+    }
+
+    public async Task<ApiResponse<ConversationMessageResponse>> SendHostActionTemplateMessageAsync(
+        Guid companyId,
+        Guid conversationId,
+        ConciergeActionType actionType,
+        string notificationType,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        if (actionType != ConciergeActionType.RequestLateCheckout
+            || notificationType is not ("HostApproved" or "HostDeclined"))
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("No host action template is configured for this notification.");
+        }
+
+        var conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversationId, cancellationToken);
+        if (conversation is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("Conversation was not found.");
+        }
+
+        var integration = conversation.WhatsAppIntegrationId.HasValue
+            ? await whatsAppRepository.GetIntegrationForCompanyAsync(companyId, conversation.WhatsAppIntegrationId.Value, cancellationToken)
+            : await whatsAppRepository.GetSoleActiveIntegrationForCompanyAsync(companyId, cancellationToken);
+        if (integration is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("WhatsApp integration is not configured for this company.");
+        }
+
+        var templateName = notificationType == "HostApproved"
+            ? "host_late_checkout_approved"
+            : "host_late_checkout_declined";
+        var template = await whatsAppRepository.GetTemplateByNameAsync(companyId, integration.Id, templateName, "en", cancellationToken);
+        if (template is null)
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("No approved host action template is configured.");
+        }
+
+        return await SendLifecycleAutomationTemplateMessageAsync(
+            companyId,
+            conversationId,
+            integration.Id,
+            template.Id,
+            [],
+            idempotencyKey,
+            cancellationToken);
     }
 
     public async Task<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>> GetCustomerServiceWindowStatusAsync(Guid conversationId, CancellationToken cancellationToken)

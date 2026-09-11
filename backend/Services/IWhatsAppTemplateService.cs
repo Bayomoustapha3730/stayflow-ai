@@ -1,6 +1,7 @@
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.WhatsApp;
+using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Services;
 
@@ -27,6 +28,13 @@ public interface IWhatsAppTemplateService
         Guid integrationId,
         Guid templateId,
         IReadOnlyCollection<string> variables,
+        string idempotencyKey,
+        CancellationToken cancellationToken);
+    Task<ApiResponse<ConversationMessageResponse>> SendHostActionTemplateMessageAsync(
+        Guid companyId,
+        Guid conversationId,
+        ConciergeActionType actionType,
+        string notificationType,
         string idempotencyKey,
         CancellationToken cancellationToken);
     Task<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>> GetCustomerServiceWindowStatusAsync(Guid conversationId, CancellationToken cancellationToken);

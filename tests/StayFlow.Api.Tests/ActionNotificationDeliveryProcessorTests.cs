@@ -4,6 +4,7 @@ using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIOrchestration;
 using StayFlow.Api.DTOs.Chat;
 using StayFlow.Api.DTOs.Conversations;
+using StayFlow.Api.DTOs.WhatsApp;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
@@ -34,6 +35,148 @@ public sealed class ActionNotificationDeliveryProcessorTests
         Assert.NotNull(outbox.SentAt);
         Assert.Equal(1, conversationService.CallCount);
         Assert.Contains("approved", conversationService.LastContent, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_OpenWindowFreeFormSuccess_DoesNotInvokeTemplateFallback()
+    {
+        var pendingAction = NewPendingAction(ConciergeActionType.RequestLateCheckout);
+        var outbox = NewOutbox(pendingAction, "HostApproved");
+        var repository = new FakeRepository([outbox], pendingAction);
+        var conversationService = new FakeConversationService(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            DeliveryStatus = ConversationMessageDeliveryStatus.Sent
+        }));
+        var templateService = new FakeWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            DeliveryStatus = ConversationMessageDeliveryStatus.Sent
+        }));
+
+        var processor = CreateProcessor(repository, conversationService, templateService: templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Sent);
+        Assert.Equal(ActionNotificationOutboxStatus.Sent, outbox.Status);
+        Assert.Equal(1, conversationService.CallCount);
+        Assert.EndsWith(":freeform", conversationService.LastIdempotencyKey, StringComparison.Ordinal);
+        Assert.Equal(0, templateService.CallCount);
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_ClosedWindowApprovedTemplateSuccess_MarksSentWithTemplateKey()
+    {
+        var pendingAction = NewPendingAction(ConciergeActionType.RequestLateCheckout);
+        var outbox = NewOutbox(pendingAction, "HostApproved");
+        var repository = new FakeRepository([outbox], pendingAction);
+        var conversationService = ClosedWindowConversationService();
+        var templateService = new FakeWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            DeliveryStatus = ConversationMessageDeliveryStatus.Sent
+        }));
+
+        var processor = CreateProcessor(repository, conversationService, templateService: templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Sent);
+        Assert.Equal(0, result.Failed);
+        Assert.Equal(ActionNotificationOutboxStatus.Sent, outbox.Status);
+        Assert.EndsWith(":freeform", conversationService.LastIdempotencyKey, StringComparison.Ordinal);
+        Assert.Equal(1, templateService.CallCount);
+        Assert.Equal(ConciergeActionType.RequestLateCheckout, templateService.LastActionType);
+        Assert.Equal("HostApproved", templateService.LastNotificationType);
+        Assert.EndsWith(":template", templateService.LastIdempotencyKey, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_ClosedWindowDeclinedTemplateSuccess_MarksSentWithTemplateKey()
+    {
+        var pendingAction = NewPendingAction(ConciergeActionType.RequestLateCheckout);
+        var outbox = NewOutbox(pendingAction, "HostDeclined");
+        var repository = new FakeRepository([outbox], pendingAction);
+        var conversationService = ClosedWindowConversationService();
+        var templateService = new FakeWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            DeliveryStatus = ConversationMessageDeliveryStatus.Sent
+        }));
+
+        var processor = CreateProcessor(repository, conversationService, templateService: templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Sent);
+        Assert.Equal(ActionNotificationOutboxStatus.Sent, outbox.Status);
+        Assert.Equal(1, templateService.CallCount);
+        Assert.Equal("HostDeclined", templateService.LastNotificationType);
+        Assert.EndsWith(":template", templateService.LastIdempotencyKey, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_ClosedWindowTemplateUnavailable_DoesNotMarkSentAndRetries()
+    {
+        var pendingAction = NewPendingAction(ConciergeActionType.RequestLateCheckout);
+        var outbox = NewOutbox(pendingAction, "HostApproved");
+        var repository = new FakeRepository([outbox], pendingAction);
+        var conversationService = ClosedWindowConversationService();
+        var templateService = new FakeWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Fail("No approved host action template is configured."));
+
+        var processor = CreateProcessor(repository, conversationService, maxAttempts: 5, templateService: templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(0, result.Sent);
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(ActionNotificationOutboxStatus.Pending, outbox.Status);
+        Assert.Equal(1, outbox.AttemptCount);
+        Assert.Equal("No approved host action template is configured.", outbox.LastFailureCode);
+        Assert.Equal(1, templateService.CallCount);
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_NonWindowFreeFormFailure_DoesNotInvokeTemplateFallback()
+    {
+        var pendingAction = NewPendingAction(ConciergeActionType.RequestLateCheckout);
+        var outbox = NewOutbox(pendingAction, "HostApproved");
+        var repository = new FakeRepository([outbox], pendingAction);
+        var conversationService = new FakeConversationService(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            DeliveryStatus = ConversationMessageDeliveryStatus.Failed,
+            FailureCode = "ProviderUnavailable"
+        }));
+        var templateService = new FakeWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            DeliveryStatus = ConversationMessageDeliveryStatus.Sent
+        }));
+
+        var processor = CreateProcessor(repository, conversationService, maxAttempts: 5, templateService: templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(0, result.Sent);
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(ActionNotificationOutboxStatus.Pending, outbox.Status);
+        Assert.Equal("ProviderUnavailable", outbox.LastFailureCode);
+        Assert.Equal(0, templateService.CallCount);
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_ReprocessingSentTemplateFallback_DoesNotDuplicateTemplateDelivery()
+    {
+        var pendingAction = NewPendingAction(ConciergeActionType.RequestLateCheckout);
+        var outbox = NewOutbox(pendingAction, "HostApproved");
+        var repository = new FakeRepository([outbox], pendingAction);
+        var conversationService = ClosedWindowConversationService();
+        var templateService = new FakeWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            DeliveryStatus = ConversationMessageDeliveryStatus.Sent
+        }));
+
+        var processor = CreateProcessor(repository, conversationService, templateService: templateService);
+        await processor.ProcessDueAsync(CancellationToken.None);
+        var firstAttemptCount = outbox.AttemptCount;
+        var replay = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(ActionNotificationOutboxStatus.Sent, outbox.Status);
+        Assert.Equal(firstAttemptCount, outbox.AttemptCount);
+        Assert.Equal(0, replay.Claimed);
+        Assert.Equal(1, conversationService.CallCount);
+        Assert.Equal(1, templateService.CallCount);
     }
 
     [Fact]
@@ -158,7 +301,7 @@ public sealed class ActionNotificationDeliveryProcessorTests
         Assert.Equal(0, conversationService.CallCount);
     }
 
-    private static PendingConciergeAction NewPendingAction()
+    private static PendingConciergeAction NewPendingAction(ConciergeActionType actionType = ConciergeActionType.RequestEarlyCheckIn)
     {
         return new PendingConciergeAction
         {
@@ -166,7 +309,7 @@ public sealed class ActionNotificationDeliveryProcessorTests
             CompanyId = Guid.NewGuid(),
             ConversationId = Guid.NewGuid(),
             PropertyId = Guid.NewGuid(),
-            ActionType = ConciergeActionType.RequestEarlyCheckIn,
+            ActionType = actionType,
             Status = PendingConciergeActionStatus.Completed,
             CreatedFromMessageId = Guid.NewGuid()
         };
@@ -189,7 +332,8 @@ public sealed class ActionNotificationDeliveryProcessorTests
     private static ActionNotificationDeliveryProcessor CreateProcessor(
         FakeRepository repository,
         FakeConversationService conversationService,
-        int maxAttempts = 5)
+        int maxAttempts = 5,
+        FakeWhatsAppTemplateService? templateService = null)
     {
         var options = Options.Create(new ActionNotificationDeliveryOptions
         {
@@ -204,8 +348,17 @@ public sealed class ActionNotificationDeliveryProcessorTests
             conversationService,
             TimeProvider.System,
             options,
-            NullLogger<ActionNotificationDeliveryProcessor>.Instance);
+            NullLogger<ActionNotificationDeliveryProcessor>.Instance,
+            templateService);
     }
+
+    private static FakeConversationService ClosedWindowConversationService()
+        => new(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            DeliveryStatus = ConversationMessageDeliveryStatus.Failed,
+            FailureCode = "CustomerServiceWindowClosed",
+            SafeFailureSummary = "CustomerServiceWindowClosed"
+        }));
 
     private sealed class FakeRepository(
         List<ActionNotificationOutbox> outbox,
@@ -259,11 +412,13 @@ public sealed class ActionNotificationDeliveryProcessorTests
     {
         public int CallCount { get; private set; }
         public string LastContent { get; private set; } = string.Empty;
+        public string LastIdempotencyKey { get; private set; } = string.Empty;
 
         public Task<ApiResponse<ConversationMessageResponse>> AddLifecycleAutomationMessageAsync(Guid companyId, Guid conversationId, string content, string idempotencyKey, CancellationToken cancellationToken)
         {
             CallCount++;
             LastContent = content;
+            LastIdempotencyKey = idempotencyKey;
             return Task.FromResult(response);
         }
 
@@ -289,5 +444,37 @@ public sealed class ActionNotificationDeliveryProcessorTests
         public Task<ApiResponse<bool>> MarkConversationReadForGuestAsync(Guid conversationId, Guid guestId, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<ChatMessageFeedbackResponse>> AddGuestMessageFeedbackAsync(Guid conversationId, Guid messageId, AddChatMessageFeedbackRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<ConversationFeedbackAnalyticsResponse>> GetFeedbackAnalyticsAsync(ConversationFeedbackAnalyticsQuery query, CancellationToken cancellationToken) => throw new NotImplementedException();
+    }
+
+    private sealed class FakeWhatsAppTemplateService(ApiResponse<ConversationMessageResponse> response) : IWhatsAppTemplateService
+    {
+        public int CallCount { get; private set; }
+        public ConciergeActionType? LastActionType { get; private set; }
+        public string LastNotificationType { get; private set; } = string.Empty;
+        public string LastIdempotencyKey { get; private set; } = string.Empty;
+
+        public Task<ApiResponse<ConversationMessageResponse>> SendHostActionTemplateMessageAsync(Guid companyId, Guid conversationId, ConciergeActionType actionType, string notificationType, string idempotencyKey, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastActionType = actionType;
+            LastNotificationType = notificationType;
+            LastIdempotencyKey = idempotencyKey;
+            return Task.FromResult(response);
+        }
+
+        public Task<ApiResponse<IReadOnlyCollection<WhatsAppIntegrationSummaryResponse>>> GetIntegrationsAsync(CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationDetailResponse>> GetIntegrationDetailAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationDetailResponse>> CreateIntegrationAsync(WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationDetailResponse>> UpdateIntegrationAsync(Guid integrationId, WhatsAppIntegrationConfigurationRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppProductionEnableResponse>> EnableProductionAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppProductionEnableResponse>> DisableProductionAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppIntegrationHealthResponse>> CheckHealthAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplateSyncResponse>> SyncTemplatesAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplateListResponse>> ListTemplatesAsync(Guid integrationId, WhatsAppTemplateListQuery query, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplateDetailResponse>> GetTemplateAsync(Guid integrationId, Guid templateId, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppTemplatePreviewResponse>> PreviewTemplateAsync(Guid integrationId, Guid templateId, WhatsAppTemplatePreviewRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ConversationMessageResponse>> SendTemplateMessageAsync(Guid conversationId, Guid templateId, SendWhatsAppTemplateMessageRequest request, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(Guid companyId, Guid conversationId, Guid integrationId, Guid templateId, IReadOnlyCollection<string> variables, string idempotencyKey, CancellationToken cancellationToken) => throw new NotImplementedException();
+        public Task<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>> GetCustomerServiceWindowStatusAsync(Guid conversationId, CancellationToken cancellationToken) => throw new NotImplementedException();
     }
 }

@@ -1430,6 +1430,9 @@ public sealed class OnboardingServiceTests
         public Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(Guid companyId, Guid conversationId, Guid integrationId, Guid templateId, IReadOnlyCollection<string> variables, string idempotencyKey, CancellationToken cancellationToken)
             => Task.FromResult(ApiResponse<ConversationMessageResponse>.Fail("not implemented"));
 
+        public Task<ApiResponse<ConversationMessageResponse>> SendHostActionTemplateMessageAsync(Guid companyId, Guid conversationId, ConciergeActionType actionType, string notificationType, string idempotencyKey, CancellationToken cancellationToken)
+            => Task.FromResult(ApiResponse<ConversationMessageResponse>.Fail("not implemented"));
+
         public Task<ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>> GetCustomerServiceWindowStatusAsync(Guid conversationId, CancellationToken cancellationToken)
             => Task.FromResult(ApiResponse<WhatsAppCustomerServiceWindowStatusResponse>.Fail("not implemented"));
     }

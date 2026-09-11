@@ -578,6 +578,9 @@ public sealed class GuestJourneyMessageDeliveryProcessorTests
             return Task.FromResult(ApiResponse<ConversationMessageResponse>.Fail("not used"));
         }
 
+        public Task<ApiResponse<ConversationMessageResponse>> SendHostActionTemplateMessageAsync(Guid companyId, Guid conversationId, ConciergeActionType actionType, string notificationType, string idempotencyKey, CancellationToken cancellationToken)
+            => Task.FromResult(ApiResponse<ConversationMessageResponse>.Fail("not used"));
+
         public Task<ApiResponse<IReadOnlyCollection<WhatsAppIntegrationSummaryResponse>>> GetIntegrationsAsync(CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<WhatsAppIntegrationHealthResponse>> CheckHealthAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
         public Task<ApiResponse<WhatsAppTemplateSyncResponse>> SyncTemplatesAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
@@ -599,6 +602,12 @@ public sealed class GuestJourneyMessageDeliveryProcessorTests
         public Task<ApiResponse<WhatsAppProductionEnableResponse>> DisableProductionAsync(Guid integrationId, CancellationToken cancellationToken) => throw new NotImplementedException();
 
         public Task<ApiResponse<ConversationMessageResponse>> SendLifecycleAutomationTemplateMessageAsync(Guid companyId, Guid conversationId, Guid integrationId, Guid templateId, IReadOnlyCollection<string> variables, string idempotencyKey, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(result);
+        }
+
+        public Task<ApiResponse<ConversationMessageResponse>> SendHostActionTemplateMessageAsync(Guid companyId, Guid conversationId, ConciergeActionType actionType, string notificationType, string idempotencyKey, CancellationToken cancellationToken)
         {
             CallCount++;
             return Task.FromResult(result);

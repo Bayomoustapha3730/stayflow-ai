@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Options;
+using StayFlow.Api.Common;
+using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 
@@ -16,7 +18,8 @@ public sealed class ActionNotificationDeliveryProcessor(
     IConversationService conversationService,
     TimeProvider timeProvider,
     IOptions<ActionNotificationDeliveryOptions> options,
-    ILogger<ActionNotificationDeliveryProcessor> logger) : IActionNotificationDeliveryProcessor
+    ILogger<ActionNotificationDeliveryProcessor> logger,
+    IWhatsAppTemplateService? whatsAppTemplateService = null) : IActionNotificationDeliveryProcessor
 {
     private const string HostApprovedNotificationType = "HostApproved";
     private const string HostDeclinedNotificationType = "HostDeclined";
@@ -53,13 +56,29 @@ public sealed class ActionNotificationDeliveryProcessor(
 
             try
             {
-                var idempotencyKey = $"action-notification:{outbox.Id:N}";
+                var idempotencyKey = $"action-notification:{outbox.Id:N}:freeform";
                 var response = await conversationService.AddLifecycleAutomationMessageAsync(
                     outbox.CompanyId,
                     pendingAction.ConversationId,
                     guestMessage,
                     idempotencyKey,
                     cancellationToken);
+
+                if (response.Success
+                    && response.Data?.DeliveryStatus == ConversationMessageDeliveryStatus.Failed
+                    && response.Data.FailureCode == "CustomerServiceWindowClosed")
+                {
+                    if (whatsAppTemplateService is not null)
+                    {
+                        response = await whatsAppTemplateService.SendHostActionTemplateMessageAsync(
+                            outbox.CompanyId,
+                            pendingAction.ConversationId,
+                            pendingAction.ActionType,
+                            outbox.NotificationType,
+                            $"action-notification:{outbox.Id:N}:template",
+                            cancellationToken);
+                    }
+                }
 
                 if (response.Success && response.Data?.DeliveryStatus is
                     ConversationMessageDeliveryStatus.Sent or
