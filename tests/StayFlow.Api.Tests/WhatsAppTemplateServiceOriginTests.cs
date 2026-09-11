@@ -49,6 +49,119 @@ public sealed class WhatsAppTemplateServiceOriginTests
         Assert.Equal(WhatsAppSendOrigin.ReservationLifecycle, request.Origin);
     }
 
+    [Fact]
+    public async Task SendLifecycleAutomationTemplateMessageAsync_SuccessReplayReusesMessageAndProviderIdentity()
+    {
+        var fixture = new Fixture();
+
+        var first = await fixture.Service.SendLifecycleAutomationTemplateMessageAsync(
+            fixture.CompanyId, fixture.Conversation.Id, fixture.Integration.Id, fixture.Template.Id, [],
+            "automated-template-success", CancellationToken.None);
+        var stored = Assert.Single(fixture.ConversationRepository.Messages);
+        var second = await fixture.Service.SendLifecycleAutomationTemplateMessageAsync(
+            fixture.CompanyId, fixture.Conversation.Id, fixture.Integration.Id, fixture.Template.Id, [],
+            "automated-template-success", CancellationToken.None);
+
+        Assert.True(first.Success);
+        Assert.True(second.Success);
+        Assert.Equal(stored.Id, second.Data?.Id);
+        Assert.Equal("automated-template-success", stored.IdempotencyKey);
+        Assert.Equal("wamid.origin-test", stored.ExternalMessageId);
+        Assert.Equal(ConversationMessageDeliveryStatus.Sent, stored.DeliveryStatus);
+        Assert.Single(fixture.ConversationRepository.Messages);
+        Assert.Single(fixture.CloudClient.TemplateRequests);
+    }
+
+    [Fact]
+    public async Task SendLifecycleAutomationTemplateMessageAsync_FailedSendRetriesSameMessageRow()
+    {
+        var fixture = new Fixture();
+        fixture.CloudClient.Results.Enqueue(new WhatsAppSendTemplateMessageResult
+        {
+            Success = false,
+            FailureCode = "ProviderUnavailable",
+            FailureReason = "temporary",
+            ProviderRequestId = "provider-request-failed"
+        });
+        fixture.CloudClient.Results.Enqueue(new WhatsAppSendTemplateMessageResult
+        {
+            Success = true,
+            ExternalMessageId = "wamid.retry-success"
+        });
+
+        var first = await fixture.Service.SendLifecycleAutomationTemplateMessageAsync(
+            fixture.CompanyId, fixture.Conversation.Id, fixture.Integration.Id, fixture.Template.Id, [],
+            "automated-template-retry", CancellationToken.None);
+        var stored = Assert.Single(fixture.ConversationRepository.Messages);
+        var firstId = stored.Id;
+        Assert.True(first.Success);
+        Assert.Equal(ConversationMessageDeliveryStatus.Failed, first.Data?.DeliveryStatus);
+        Assert.Equal("provider-request-failed", stored.ProviderRequestId);
+
+        var second = await fixture.Service.SendLifecycleAutomationTemplateMessageAsync(
+            fixture.CompanyId, fixture.Conversation.Id, fixture.Integration.Id, fixture.Template.Id, [],
+            "automated-template-retry", CancellationToken.None);
+
+        Assert.True(second.Success);
+        Assert.Equal(firstId, second.Data?.Id);
+        Assert.Equal("automated-template-retry", stored.IdempotencyKey);
+        Assert.Equal("wamid.retry-success", stored.ExternalMessageId);
+        Assert.Null(stored.ProviderRequestId);
+        Assert.Null(stored.FailureCode);
+        Assert.Null(stored.FailureReason);
+        Assert.Null(stored.FailureCategory);
+        Assert.Null(stored.FailedAt);
+        Assert.Equal(ConversationMessageDeliveryStatus.Sent, stored.DeliveryStatus);
+        Assert.Equal(2, stored.SendAttemptNumber);
+        Assert.Single(fixture.ConversationRepository.Messages);
+        Assert.Equal(2, fixture.CloudClient.TemplateRequests.Count);
+    }
+
+    [Fact]
+    public async Task SendLifecycleAutomationTemplateMessageAsync_PendingReplayDoesNotSend()
+    {
+        var fixture = new Fixture();
+        fixture.ConversationRepository.Messages.Add(new ConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            ConversationId = fixture.Conversation.Id,
+            SenderType = ConversationSenderType.System,
+            MessageType = ConversationMessageType.LifecycleAutomation,
+            Content = "pending",
+            IdempotencyKey = "automated-template-pending",
+            Provider = ConversationMessageProvider.WhatsAppCloud,
+            DeliveryStatus = ConversationMessageDeliveryStatus.Pending,
+            IsTemplateMessage = true,
+            SentAt = DateTimeOffset.UtcNow
+        });
+
+        var result = await fixture.Service.SendLifecycleAutomationTemplateMessageAsync(
+            fixture.CompanyId, fixture.Conversation.Id, fixture.Integration.Id, fixture.Template.Id, [],
+            "automated-template-pending", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("already in progress", result.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(fixture.CloudClient.TemplateRequests);
+        Assert.Single(fixture.ConversationRepository.Messages);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SendLifecycleAutomationTemplateMessageAsync_RejectsBlankIdempotencyKey(string? key)
+    {
+        var fixture = new Fixture();
+
+        var result = await fixture.Service.SendLifecycleAutomationTemplateMessageAsync(
+            fixture.CompanyId, fixture.Conversation.Id, fixture.Integration.Id, fixture.Template.Id, [], key!, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Empty(fixture.ConversationRepository.Messages);
+        Assert.Empty(fixture.CloudClient.TemplateRequests);
+    }
+
     private sealed class Fixture
     {
         private readonly WhatsAppCloudOptions cloudOptions = new()
@@ -140,6 +253,9 @@ public sealed class WhatsAppTemplateServiceOriginTests
         public Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid companyId, string externalMessageId, ConversationMessageProvider? provider, CancellationToken cancellationToken)
             => Task.FromResult(Messages.FirstOrDefault(message => message.CompanyId == companyId && message.ExternalMessageId == externalMessageId && (provider is null || message.Provider == provider)));
 
+        public Task<ConversationMessage?> FindByIdempotencyKeyAsync(Guid companyId, string idempotencyKey, CancellationToken cancellationToken)
+            => Task.FromResult(Messages.FirstOrDefault(message => message.CompanyId == companyId && message.IdempotencyKey == idempotencyKey));
+
         public Task AddMessageAsync(ConversationMessage message, CancellationToken cancellationToken)
         {
             Messages.Add(message);
@@ -203,11 +319,14 @@ public sealed class WhatsAppTemplateServiceOriginTests
     private sealed class RecordingWhatsAppCloudClient : IWhatsAppCloudClient
     {
         public List<WhatsAppTemplateSendRequest> TemplateRequests { get; } = [];
+        public Queue<WhatsAppSendTemplateMessageResult> Results { get; } = [];
 
         public Task<WhatsAppSendTemplateMessageResult> SendTemplateMessageAsync(WhatsAppTemplateSendRequest request, CancellationToken cancellationToken)
         {
             TemplateRequests.Add(request);
-            return Task.FromResult(new WhatsAppSendTemplateMessageResult { Success = true, ExternalMessageId = "wamid.origin-test" });
+            return Task.FromResult(Results.Count > 0
+                ? Results.Dequeue()
+                : new WhatsAppSendTemplateMessageResult { Success = true, ExternalMessageId = "wamid.origin-test" });
         }
 
         public Task<WhatsAppSendTextMessageResult> SendTextMessageAsync(WhatsAppSendTextMessageRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();

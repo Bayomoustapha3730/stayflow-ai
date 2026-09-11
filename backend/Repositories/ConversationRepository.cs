@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using StayFlow.Api.Common;
 using StayFlow.Api.Data;
+using StayFlow.Api.Data.Configurations;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.ReservationContext;
 using StayFlow.Api.Models;
@@ -216,6 +218,41 @@ public sealed class ConversationRepository(ApplicationDbContext dbContext) : ICo
             .FirstOrDefaultAsync(message => message.CompanyId == companyId
                 && message.ConversationId == conversationId
                 && message.Id == messageId, cancellationToken);
+    }
+
+    public Task<ConversationMessage?> FindByIdempotencyKeyAsync(Guid companyId, string idempotencyKey, CancellationToken cancellationToken)
+    {
+        return dbContext.ConversationMessages
+            .FirstOrDefaultAsync(message => message.CompanyId == companyId && message.IdempotencyKey == idempotencyKey, cancellationToken);
+    }
+
+    public async Task<(ConversationMessage Message, bool Claimed)> ClaimAutomatedTemplateMessageAsync(ConversationMessage candidate, CancellationToken cancellationToken)
+    {
+        await dbContext.ConversationMessages.AddAsync(candidate, cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return (candidate, true);
+        }
+        catch (DbUpdateException exception) when (IsIdempotencyKeyUniqueViolation(exception))
+        {
+            dbContext.Entry(candidate).State = EntityState.Detached;
+            var winner = await FindByIdempotencyKeyAsync(candidate.CompanyId, candidate.IdempotencyKey!, cancellationToken);
+            if (winner is null)
+            {
+                // Should not happen: a unique violation on this index means a row now exists.
+                throw;
+            }
+
+            return (winner, false);
+        }
+    }
+
+    private static bool IsIdempotencyKeyUniqueViolation(DbUpdateException dbUpdateException)
+    {
+        return dbUpdateException.GetBaseException() is PostgresException postgresException
+            && postgresException.SqlState == PostgresErrorCodes.UniqueViolation
+            && string.Equals(postgresException.ConstraintName, ConversationMessageConfiguration.IdempotencyKeyUniqueIndexName, StringComparison.Ordinal);
     }
 
     public Task<Conversation?> GetOpenConversationAsync(Guid companyId, Guid guestId, GuestChannel channel, string? channelIdentity, Guid? reservationId, Guid? propertyId, DateTimeOffset cutoff, CancellationToken cancellationToken)

@@ -30,6 +30,19 @@ public interface IConversationRepository
     Task<ConversationParticipantReadState?> GetReadStateAsync(Guid companyId, Guid conversationId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<ConversationParticipantReadState>> GetReadStatesForParticipantAsync(Guid companyId, ConversationParticipantKind participantKind, Guid participantId, CancellationToken cancellationToken);
     Task<ConversationMessage?> FindByExternalMessageIdAsync(Guid companyId, string externalMessageId, ConversationMessageProvider? provider, CancellationToken cancellationToken);
+    Task<ConversationMessage?> FindByIdempotencyKeyAsync(Guid companyId, string idempotencyKey, CancellationToken cancellationToken)
+        => Task.FromResult<ConversationMessage?>(null);
+    // Persists a brand-new automated-template ConversationMessage that owns a not-yet-seen
+    // CompanyId+IdempotencyKey. If a concurrent caller wins the race for the same key, the losing
+    // caller must not proceed to a provider send: it reloads and returns the winner's row instead.
+    // Default implementation (used by non-EF test fakes) has no unique-constraint protection and
+    // always "claims" successfully; only the real EF-backed repository enforces the race guarantee.
+    async Task<(ConversationMessage Message, bool Claimed)> ClaimAutomatedTemplateMessageAsync(ConversationMessage candidate, CancellationToken cancellationToken)
+    {
+        await AddMessageAsync(candidate, cancellationToken);
+        await SaveChangesAsync(cancellationToken);
+        return (candidate, true);
+    }
     Task<Guest?> GetGuestAsync(Guid companyId, Guid guestId, CancellationToken cancellationToken);
     Task<Reservation?> GetReservationAsync(Guid companyId, Guid reservationId, CancellationToken cancellationToken);
     Task<Property?> GetPropertyAsync(Guid companyId, Guid propertyId, CancellationToken cancellationToken);

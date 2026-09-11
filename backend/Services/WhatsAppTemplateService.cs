@@ -643,10 +643,36 @@ public sealed class WhatsAppTemplateService(
         string idempotencyKey,
         CancellationToken cancellationToken)
     {
-        var duplicate = await conversationRepository.FindByExternalMessageIdAsync(companyId, idempotencyKey, null, cancellationToken);
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            return ApiResponse<ConversationMessageResponse>.Fail("An idempotency key is required for automated template delivery.");
+        }
+
+        var duplicate = await conversationRepository.FindByIdempotencyKeyAsync(companyId, idempotencyKey, cancellationToken);
         if (duplicate is not null)
         {
-            return ApiResponse<ConversationMessageResponse>.Ok(MapMessage(duplicate), "Lifecycle automation template message already exists.");
+            if (duplicate.DeliveryStatus is not ConversationMessageDeliveryStatus.Failed)
+            {
+                // Sent/Delivered/Read => already delivered, zero provider calls. Pending/Sending =>
+                // another invocation owns this operation right now; never treat Pending as success
+                // and never issue a second provider send for the same key while one is in flight.
+                return MapAutomatedTemplateReplay(duplicate);
+            }
+
+            // Retry THE SAME row (no second ConversationMessage, no RetryOfMessageId): this is the
+            // durable owner of the deterministic operation identity, not a manual-host retry.
+            duplicate.DeliveryStatus = ConversationMessageDeliveryStatus.Pending;
+            duplicate.ExternalMessageId = null;
+            duplicate.ProviderRequestId = null;
+            duplicate.DeliveredAt = null;
+            duplicate.ReadAt = null;
+            duplicate.FailedAt = null;
+            duplicate.FailureCode = null;
+            duplicate.FailureReason = null;
+            duplicate.FailureCategory = null;
+            duplicate.SentAt = DateTimeOffset.UtcNow;
+            duplicate.SendAttemptNumber = Math.Max(1, duplicate.SendAttemptNumber) + 1;
+            await conversationRepository.SaveChangesAsync(cancellationToken);
         }
 
         var conversation = await conversationRepository.GetByIdForCompanyAsync(companyId, conversationId, cancellationToken);
@@ -724,43 +750,62 @@ public sealed class WhatsAppTemplateService(
 
         var rendered = RenderTemplateText(template.BodyText, validation.SanitizedVariables, includeMissingMarker: false, out _);
 
-        var message = new ConversationMessage
+        ConversationMessage message;
+        if (duplicate is not null)
         {
-            Id = Guid.NewGuid(),
-            CompanyId = companyId,
-            ConversationId = conversation.Id,
-            SenderType = ConversationSenderType.System,
-            MessageType = ConversationMessageType.LifecycleAutomation,
-            Content = rendered,
-            ExternalMessageId = idempotencyKey,
-            Provider = ConversationMessageProvider.WhatsAppCloud,
-            DeliveryStatus = ConversationMessageDeliveryStatus.Pending,
-            IsTemplateMessage = true,
-            WhatsAppTemplateId = template.Id,
-            TemplateName = template.Name,
-            TemplateLanguageCode = template.LanguageCode,
-            TemplateRenderedPreview = rendered,
-            SentAt = DateTimeOffset.UtcNow,
-            IsInternal = false
-        };
-
-        conversation.LastActivityAt = message.SentAt;
-
-        await conversationRepository.AddMessageAsync(message, cancellationToken);
-        await conversationRepository.AddAuditLogAsync(new AuditLog
+            message = duplicate;
+            message.Content = rendered;
+            message.TemplateRenderedPreview = rendered;
+            conversation.LastActivityAt = DateTimeOffset.UtcNow;
+        }
+        else
         {
-            Id = Guid.NewGuid(),
-            EntityName = nameof(Conversation),
-            EntityId = conversation.Id,
-            Action = "LifecycleAutomationTemplateMessageStored",
-            Details = JsonSerializer.Serialize(new
+            var candidate = new ConversationMessage
             {
-                template = template.Name,
-                language = template.LanguageCode
-            }),
-            CreatedAt = DateTimeOffset.UtcNow
-        }, cancellationToken);
-        await conversationRepository.SaveChangesAsync(cancellationToken);
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                ConversationId = conversation.Id,
+                SenderType = ConversationSenderType.System,
+                MessageType = ConversationMessageType.LifecycleAutomation,
+                Content = rendered,
+                IdempotencyKey = idempotencyKey,
+                Provider = ConversationMessageProvider.WhatsAppCloud,
+                DeliveryStatus = ConversationMessageDeliveryStatus.Pending,
+                IsTemplateMessage = true,
+                WhatsAppTemplateId = template.Id,
+                TemplateName = template.Name,
+                TemplateLanguageCode = template.LanguageCode,
+                TemplateRenderedPreview = rendered,
+                SentAt = DateTimeOffset.UtcNow,
+                IsInternal = false
+            };
+
+            conversation.LastActivityAt = candidate.SentAt;
+
+            var (claimedMessage, claimed) = await conversationRepository.ClaimAutomatedTemplateMessageAsync(candidate, cancellationToken);
+            if (!claimed)
+            {
+                // Lost the race for CompanyId+IdempotencyKey: another invocation already owns this
+                // operation. Never send to the provider from the losing invocation.
+                return MapAutomatedTemplateReplay(claimedMessage);
+            }
+
+            message = claimedMessage;
+            await conversationRepository.AddAuditLogAsync(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                EntityName = nameof(Conversation),
+                EntityId = conversation.Id,
+                Action = "LifecycleAutomationTemplateMessageStored",
+                Details = JsonSerializer.Serialize(new
+                {
+                    template = template.Name,
+                    language = template.LanguageCode
+                }),
+                CreatedAt = DateTimeOffset.UtcNow
+            }, cancellationToken);
+            await conversationRepository.SaveChangesAsync(cancellationToken);
+        }
 
         await realtimePublisher.PublishMessageCreatedAsync(companyId, conversation.Id, new
         {
@@ -1254,6 +1299,18 @@ public sealed class WhatsAppTemplateService(
             BodyText = template.BodyText,
             FooterText = template.FooterText,
             Variables = variables
+        };
+    }
+
+    private static ApiResponse<ConversationMessageResponse> MapAutomatedTemplateReplay(ConversationMessage existing)
+    {
+        return existing.DeliveryStatus switch
+        {
+            ConversationMessageDeliveryStatus.Sent or ConversationMessageDeliveryStatus.Delivered or ConversationMessageDeliveryStatus.Read
+                => ApiResponse<ConversationMessageResponse>.Ok(MapMessage(existing), "Automated template message already delivered."),
+            ConversationMessageDeliveryStatus.Pending
+                => ApiResponse<ConversationMessageResponse>.Fail("Automated template delivery for this operation is already in progress.", ["AutomatedTemplateSendInProgress"]),
+            _ => ApiResponse<ConversationMessageResponse>.Fail("Automated template message previously failed and is eligible for retry on the next invocation.", ["AutomatedTemplateSendPreviouslyFailed"])
         };
     }
 

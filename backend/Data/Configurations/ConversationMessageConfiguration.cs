@@ -6,6 +6,10 @@ namespace StayFlow.Api.Data.Configurations;
 
 public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<ConversationMessage>
 {
+    // Stable, explicit name so a unique-violation exception can be matched safely instead of by
+    // fragile string inspection of the underlying provider error message.
+    public const string IdempotencyKeyUniqueIndexName = "UX_ConversationMessages_CompanyId_IdempotencyKey";
+
     public void Configure(EntityTypeBuilder<ConversationMessage> builder)
     {
         builder.ToTable("ConversationMessages");
@@ -22,6 +26,7 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
         builder.Property(message => message.Content).HasMaxLength(4000).IsRequired();
         builder.Property(message => message.MessageType).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(message => message.ExternalMessageId).HasMaxLength(160);
+        builder.Property(message => message.IdempotencyKey).HasMaxLength(160);
         builder.Property(message => message.Provider).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(message => message.DeliveryStatus).HasConversion<string>().HasMaxLength(40);
         builder.Property(message => message.FailureCode).HasMaxLength(80);
@@ -57,6 +62,10 @@ public sealed class ConversationMessageConfiguration : IEntityTypeConfiguration<
         builder.HasIndex(message => message.SentAt);
         builder.HasIndex(message => message.CreatedAt);
         builder.HasIndex(message => message.ExternalMessageId);
+        builder.HasIndex(message => new { message.CompanyId, message.IdempotencyKey })
+            .IsUnique()
+            .HasDatabaseName(IdempotencyKeyUniqueIndexName)
+            .HasFilter("\"IdempotencyKey\" IS NOT NULL");
         builder.HasIndex(message => message.IsDeleted);
         builder.HasIndex(message => message.RetryOfMessageId);
         builder.HasIndex(message => new { message.CompanyId, message.ConversationId, message.DeliveryStatus });

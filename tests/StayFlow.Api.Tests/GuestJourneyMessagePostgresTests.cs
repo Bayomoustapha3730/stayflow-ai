@@ -76,6 +76,46 @@ public sealed class GuestJourneyMessagePostgresTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ClaimAutomatedTemplateMessageAsync_ConcurrentSameKeyReturnsWinnerWithoutSecondProviderClaim()
+    {
+        var graph = await SeedGraphAsync();
+        var conversation = new Conversation
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = graph.CompanyId,
+            GuestId = graph.Guest.Id,
+            ReservationId = graph.Reservation.Id,
+            PropertyId = graph.Property.Id,
+            Channel = DTOs.ReservationContext.GuestChannel.WhatsApp,
+            ChannelIdentity = "+254700000002",
+            Status = ConversationStatus.Open,
+            StartedAt = DateTimeOffset.UtcNow,
+            LastActivityAt = DateTimeOffset.UtcNow
+        };
+
+        await using (var seedContext = new ApplicationDbContext(dbOptions))
+        {
+            seedContext.Conversations.Add(conversation);
+            await seedContext.SaveChangesAsync();
+        }
+
+        var providerClaims = 0;
+        var attempts = Enumerable.Range(0, 2)
+            .Select(_ => ClaimAutomatedTemplateWithNewContextAsync(graph.CompanyId, conversation.Id, "automated-template:concurrent", () => Interlocked.Increment(ref providerClaims)))
+            .ToArray();
+        var results = await Task.WhenAll(attempts);
+
+        Assert.Equal(1, results.Count(result => result.Claimed));
+        Assert.Equal(1, results.Count(result => !result.Claimed));
+        Assert.Equal(1, providerClaims);
+        Assert.Equal(results[0].Message.Id, results[1].Message.Id);
+
+        await using var verificationContext = new ApplicationDbContext(dbOptions);
+        Assert.Equal(1, await verificationContext.ConversationMessages.CountAsync(message =>
+            message.CompanyId == graph.CompanyId && message.IdempotencyKey == "automated-template:concurrent"));
+    }
+
+    [Fact]
     public async Task ConcurrentClaimDueAsync_ReturnsEachMessageToAtMostOneClaimer()
     {
         var graph = await SeedGraphAsync();
@@ -173,6 +213,38 @@ public sealed class GuestJourneyMessagePostgresTests : IAsyncLifetime
         var lifecycleEvent = await dbContext.ReservationLifecycleEvents.SingleAsync(item => item.CompanyId == companyId && item.Id == lifecycleEventId);
         var service = new GuestJourneyMessageService(new GuestJourneyMessageRepository(dbContext));
         return await service.TryCreateAsync(lifecycleEvent, "en", "Hi Ada, today is your check-in day at Demo Property.", null, CancellationToken.None);
+    }
+
+    private async Task<(ConversationMessage Message, bool Claimed)> ClaimAutomatedTemplateWithNewContextAsync(
+        Guid companyId,
+        Guid conversationId,
+        string idempotencyKey,
+        Action onClaim)
+    {
+        await using var dbContext = new ApplicationDbContext(dbOptions);
+        var repository = new ConversationRepository(dbContext);
+        var candidate = new ConversationMessage
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            ConversationId = conversationId,
+            SenderType = ConversationSenderType.System,
+            MessageType = ConversationMessageType.LifecycleAutomation,
+            Content = "Automated template",
+            IdempotencyKey = idempotencyKey,
+            Provider = ConversationMessageProvider.WhatsAppCloud,
+            DeliveryStatus = ConversationMessageDeliveryStatus.Pending,
+            IsTemplateMessage = true,
+            SentAt = DateTimeOffset.UtcNow
+        };
+
+        var result = await repository.ClaimAutomatedTemplateMessageAsync(candidate, CancellationToken.None);
+        if (result.Claimed)
+        {
+            onClaim();
+        }
+
+        return result;
     }
 
     private async Task<IReadOnlyCollection<GuestJourneyMessage>> ClaimWithNewContextAsync(DateTimeOffset nowUtc, int batchSize)

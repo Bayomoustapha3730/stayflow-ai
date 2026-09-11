@@ -8,6 +8,7 @@ public sealed class ConversationMessage : AuditableEntity
     public string Content { get; set; } = string.Empty;
     public ConversationMessageType MessageType { get; set; } = ConversationMessageType.Text;
     public string? ExternalMessageId { get; set; }
+    public string? IdempotencyKey { get; set; }
     public ConversationMessageProvider Provider { get; set; } = ConversationMessageProvider.None;
     public ConversationMessageDeliveryStatus? DeliveryStatus { get; set; }
     public DateTimeOffset? DeliveredAt { get; set; }
