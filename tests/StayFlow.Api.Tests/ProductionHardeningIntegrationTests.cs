@@ -4,7 +4,11 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using StayFlow.Api.Services;
+using StayFlow.Api.Services.Payments;
 
 namespace StayFlow.Api.Tests;
 
@@ -33,6 +37,38 @@ public sealed class ProductionHardeningIntegrationTests : IClassFixture<SignalRT
 
         Assert.True(liveJson.RootElement.TryGetProperty("status", out _));
         Assert.True(readyJson.RootElement.TryGetProperty("status", out _));
+    }
+
+    [Fact]
+    public void Test_Host_Disables_External_Integrations_And_Background_Workers()
+    {
+        using var scope = factory.Services.CreateScope();
+        var provider = scope.ServiceProvider;
+
+        var mpesaOptions = provider.GetRequiredService<IOptions<MpesaOptions>>().Value;
+        Assert.False(mpesaOptions.Enabled);
+        Assert.False(mpesaOptions.ReconciliationEnabled);
+
+        var whatsAppOptions = provider.GetRequiredService<IOptions<WhatsAppCloudOptions>>().Value;
+        Assert.False(whatsAppOptions.Enabled);
+
+        var lifecycleOptions = provider.GetRequiredService<IOptions<ReservationLifecycleEventOptions>>().Value;
+        Assert.False(lifecycleOptions.WorkerEnabled);
+
+        var guestJourneyOptions = provider.GetRequiredService<IOptions<GuestJourneyDeliveryOptions>>().Value;
+        Assert.False(guestJourneyOptions.WorkerEnabled);
+    }
+
+    [Fact]
+    public async Task Mpesa_Health_Check_Reports_Disabled_Without_Contacting_Safaricom()
+    {
+        using var scope = factory.Services.CreateScope();
+        var mpesaHealthService = scope.ServiceProvider.GetRequiredService<IMpesaHealthService>();
+
+        var result = await mpesaHealthService.CheckAsync(CancellationToken.None);
+
+        Assert.Equal("Disabled", result.Status);
+        Assert.False(result.IsOperational);
     }
 
     [Fact]

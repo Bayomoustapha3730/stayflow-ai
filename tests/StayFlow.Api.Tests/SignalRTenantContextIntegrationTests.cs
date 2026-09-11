@@ -348,9 +348,20 @@ public sealed class SignalRTestAppFactory : WebApplicationFactory<Program>
             var settings = new Dictionary<string, string?>
             {
                 ["ConnectionStrings:DefaultConnection"] = "Host=localhost;Port=5432;Database=unused;Username=unused;Password=unused",
-                ["DevelopmentSeed:DemoPassword"] = string.Empty
+                ["DevelopmentSeed:DemoPassword"] = string.Empty,
+
+                // Force-disable external integrations/background workers so automated tests
+                // never make real network calls or run polling loops, regardless of what
+                // the Development environment's appsettings happen to contain.
+                ["Mpesa:Enabled"] = "false",
+                ["Mpesa:ReconciliationEnabled"] = "false",
+                ["WhatsAppCloud:Enabled"] = "false",
+                ["WhatsAppCloud:DevelopmentMode"] = "false",
+                ["ReservationLifecycleEvents:WorkerEnabled"] = "false",
+                ["GuestJourneyDelivery:WorkerEnabled"] = "false"
             };
 
+            // Added last so it overrides values already loaded from appsettings.*.json.
             configBuilder.AddInMemoryCollection(settings);
         });
 
