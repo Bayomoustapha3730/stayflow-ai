@@ -1344,6 +1344,7 @@ public sealed class ConversationService(
             ReadAt = message.ReadAt,
             FailedAt = message.FailedAt,
             SafeFailureSummary = safeFailureSummary,
+            FailureCode = message.FailureCode,
             RetryOfMessageId = message.RetryOfMessageId,
             SendAttemptNumber = message.SendAttemptNumber,
             CanRetry = CanRetryMessage(message, conversation),

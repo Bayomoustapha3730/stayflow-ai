@@ -146,6 +146,7 @@ public sealed class ConversationMessageResponse
     public DateTimeOffset? ReadAt { get; init; }
     public DateTimeOffset? FailedAt { get; init; }
     public string? SafeFailureSummary { get; init; }
+    public string? FailureCode { get; init; }
     public Guid? RetryOfMessageId { get; init; }
     public int SendAttemptNumber { get; init; }
     public bool CanRetry { get; init; }

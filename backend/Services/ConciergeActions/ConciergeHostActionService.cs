@@ -75,6 +75,12 @@ public sealed class ConciergeHostActionService(
             return ApiResponse<HostActionListItem>.Fail("Action is not awaiting host approval.");
         }
 
+        var trimmedNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim()[..Math.Min(note.Trim().Length, 500)];
+        if (!await UpdateDomainEntityStatusAsync(item, approve, userId, trimmedNote, cancellationToken))
+        {
+            return ApiResponse<HostActionListItem>.Fail("The late checkout request was not found.");
+        }
+
         item.Status = approve ? PendingConciergeActionStatus.Completed : PendingConciergeActionStatus.Cancelled;
         item.ExecutedAt = DateTimeOffset.UtcNow;
         item.FailureReasonCode = approve ? null : "HostDeclined";
@@ -112,5 +118,33 @@ public sealed class ConciergeHostActionService(
     private static HostActionListItem Map(PendingConciergeAction item)
     {
         return new HostActionListItem(item.Id, item.ActionType, item.Status, item.ConversationId, item.PropertyId, item.ReservationId, item.CreatedAt, item.ExecutedAt);
+    }
+
+    private async Task<bool> UpdateDomainEntityStatusAsync(PendingConciergeAction item, bool approve, Guid userId, string? note, CancellationToken cancellationToken)
+    {
+        if (item.ActionType != ConciergeActionType.RequestLateCheckout)
+        {
+            return true;
+        }
+
+        var lateCheckout = await dbContext.LateCheckoutRequests
+            .Where(entry => entry.CompanyId == item.CompanyId
+                && entry.PropertyId == item.PropertyId
+                && entry.ReservationId == item.ReservationId
+                && entry.ConversationId == item.ConversationId
+                && entry.Status == LateCheckoutRequestStatus.Pending)
+            .OrderByDescending(entry => entry.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (lateCheckout is null)
+        {
+            return false;
+        }
+
+        lateCheckout.Status = approve ? LateCheckoutRequestStatus.Approved : LateCheckoutRequestStatus.Declined;
+        lateCheckout.ReviewedAt = DateTimeOffset.UtcNow;
+        lateCheckout.ReviewedByUserId = userId;
+        lateCheckout.DecisionNote = note;
+        return true;
     }
 }

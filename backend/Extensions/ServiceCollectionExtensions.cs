@@ -124,6 +124,13 @@ public static class ServiceCollectionExtensions
         services.AddOptions<Services.AI.Orchestration.DevelopmentConciergeLanguageModelOptions>()
             .Bind(configuration.GetSection(Services.AI.Orchestration.DevelopmentConciergeLanguageModelOptions.SectionName))
             .ValidateOnStart();
+        services.AddOptions<Services.ConciergeActions.ActionNotificationDeliveryOptions>()
+            .Bind(configuration.GetSection(Services.ConciergeActions.ActionNotificationDeliveryOptions.SectionName))
+            .Validate(options => options.PollingIntervalSeconds is >= 1 and <= 3600, "Action notification delivery polling interval must be between 1 and 3600 seconds.")
+            .Validate(options => options.BatchSize is >= 1 and <= 500, "Action notification delivery batch size must be between 1 and 500.")
+            .Validate(options => options.RetryDelayMinutes is >= 1 and <= 1440, "Action notification delivery retry delay must be between 1 and 1440 minutes.")
+            .Validate(options => options.MaxAttempts is >= 1 and <= 20, "Action notification delivery max attempts must be between 1 and 20.")
+            .ValidateOnStart();
         services.AddOptions<Services.ConciergeActions.ConciergeActionsOptions>()
             .Bind(configuration.GetSection(Services.ConciergeActions.ConciergeActionsOptions.SectionName))
             .Validate(options => options.PendingActionExpirationMinutes is >= 5 and <= 1440, "Concierge action pending expiration must be between 5 and 1440 minutes.")
@@ -334,6 +341,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.ConciergeActions.IConciergeActionExecutor, Services.ConciergeActions.ConciergeActionExecutor>();
         services.AddScoped<Services.ConciergeActions.IConciergeActionOrchestrator, Services.ConciergeActions.ConciergeActionOrchestrator>();
         services.AddScoped<Services.ConciergeActions.IConciergeHostActionService, Services.ConciergeActions.ConciergeHostActionService>();
+        services.AddScoped<Repositories.IActionNotificationOutboxRepository, Repositories.ActionNotificationOutboxRepository>();
+        services.AddScoped<Services.ConciergeActions.IActionNotificationDeliveryProcessor, Services.ConciergeActions.ActionNotificationDeliveryProcessor>();
+        services.AddHostedService<Services.ConciergeActions.ActionNotificationDeliveryWorker>();
         services.AddScoped<Services.HostCopilot.IHostCopilotWorkspaceService, Services.HostCopilot.HostCopilotWorkspaceService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();
