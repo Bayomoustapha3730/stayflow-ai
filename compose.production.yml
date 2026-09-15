@@ -36,6 +36,11 @@ services:
       AIProvider__Provider: ${AI_PROVIDER:-Development}
       WhatsAppCloud__Enabled: ${WHATSAPP_CLOUD_ENABLED:-false}
       WhatsAppCloud__DevelopmentMode: ${WHATSAPP_DEVELOPMENT_MODE:-false}
+      ActionNotificationDelivery__WorkerEnabled: ${ACTION_NOTIFICATION_DELIVERY_WORKER_ENABLED:-false}
+      ActionNotificationDelivery__PollingIntervalSeconds: ${ACTION_NOTIFICATION_DELIVERY_POLLING_INTERVAL_SECONDS:-30}
+      ActionNotificationDelivery__BatchSize: ${ACTION_NOTIFICATION_DELIVERY_BATCH_SIZE:-25}
+      ActionNotificationDelivery__MaxAttempts: ${ACTION_NOTIFICATION_DELIVERY_MAX_ATTEMPTS:-5}
+      ActionNotificationDelivery__RetryDelayMinutes: ${ACTION_NOTIFICATION_DELIVERY_RETRY_DELAY_MINUTES:-5}
     depends_on:
       db:
         condition: service_healthy

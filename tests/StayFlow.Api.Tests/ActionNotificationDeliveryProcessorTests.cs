@@ -180,6 +180,45 @@ public sealed class ActionNotificationDeliveryProcessorTests
     }
 
     [Fact]
+    public async Task ProcessDueAsync_MessageBeforeNextAttemptAt_IsNotProcessed()
+    {
+        var pendingAction = NewPendingAction();
+        var outbox = NewOutbox(pendingAction, "HostApproved");
+        outbox.NextAttemptAt = DateTimeOffset.UtcNow.AddMinutes(1);
+        var repository = new FakeRepository([outbox], pendingAction);
+        var conversationService = new FakeConversationService(ApiResponse<ConversationMessageResponse>.Ok(new ConversationMessageResponse
+        {
+            DeliveryStatus = ConversationMessageDeliveryStatus.Sent
+        }));
+
+        var processor = CreateProcessor(repository, conversationService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(0, result.Claimed);
+        Assert.Equal(ActionNotificationOutboxStatus.Pending, outbox.Status);
+        Assert.Equal(0, conversationService.CallCount);
+    }
+
+    [Fact]
+    public async Task ProcessDueAsync_ClosedWindowTemplateFailureAtMaxAttempts_MarksTerminalFailure()
+    {
+        var pendingAction = NewPendingAction(ConciergeActionType.RequestLateCheckout);
+        var outbox = NewOutbox(pendingAction, "HostApproved");
+        var repository = new FakeRepository([outbox], pendingAction);
+        var conversationService = ClosedWindowConversationService();
+        var templateService = new FakeWhatsAppTemplateService(ApiResponse<ConversationMessageResponse>.Fail("template rejected"));
+
+        var processor = CreateProcessor(repository, conversationService, maxAttempts: 1, templateService: templateService);
+        var result = await processor.ProcessDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(ActionNotificationOutboxStatus.Failed, outbox.Status);
+        Assert.Equal(1, outbox.AttemptCount);
+        Assert.Equal("template rejected", outbox.LastFailureCode);
+        Assert.Equal(1, templateService.CallCount);
+    }
+
+    [Fact]
     public async Task ProcessDueAsync_HostDeclined_SendsGuestDeclineMessage()
     {
         var pendingAction = NewPendingAction();

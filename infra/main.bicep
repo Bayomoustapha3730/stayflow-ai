@@ -74,6 +74,29 @@ param backendMinReplicas int = 1
 @description('Backend maximum replica count.')
 param backendMaxReplicas int = 3
 
+@description('Whether the action notification delivery worker runs in the backend.')
+param actionNotificationDeliveryWorkerEnabled bool = false
+
+@minValue(1)
+@maxValue(3600)
+@description('Action notification delivery polling interval in seconds.')
+param actionNotificationDeliveryPollingIntervalSeconds int = 30
+
+@minValue(1)
+@maxValue(500)
+@description('Maximum action notifications processed per polling iteration.')
+param actionNotificationDeliveryBatchSize int = 25
+
+@minValue(1)
+@maxValue(20)
+@description('Maximum delivery attempts before an action notification fails terminally.')
+param actionNotificationDeliveryMaxAttempts int = 5
+
+@minValue(0)
+@maxValue(1440)
+@description('Delay in minutes before retrying an action notification delivery.')
+param actionNotificationDeliveryRetryDelayMinutes int = 5
+
 @description('Frontend minimum replica count.')
 param frontendMinReplicas int = 1
 
@@ -317,6 +340,26 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
               {
                 name: 'Jwt__SigningKey'
                 secretRef: 'jwt-signing-key'
+              }
+              {
+                name: 'ActionNotificationDelivery__WorkerEnabled'
+                value: string(actionNotificationDeliveryWorkerEnabled)
+              }
+              {
+                name: 'ActionNotificationDelivery__PollingIntervalSeconds'
+                value: string(actionNotificationDeliveryPollingIntervalSeconds)
+              }
+              {
+                name: 'ActionNotificationDelivery__BatchSize'
+                value: string(actionNotificationDeliveryBatchSize)
+              }
+              {
+                name: 'ActionNotificationDelivery__MaxAttempts'
+                value: string(actionNotificationDeliveryMaxAttempts)
+              }
+              {
+                name: 'ActionNotificationDelivery__RetryDelayMinutes'
+                value: string(actionNotificationDeliveryRetryDelayMinutes)
               }
             ],
             [for (origin, index) in allowedOrigins: {

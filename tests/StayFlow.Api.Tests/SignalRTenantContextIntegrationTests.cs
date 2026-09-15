@@ -357,6 +357,7 @@ public sealed class SignalRTestAppFactory : WebApplicationFactory<Program>
                 ["Mpesa:ReconciliationEnabled"] = "false",
                 ["WhatsAppCloud:Enabled"] = "false",
                 ["WhatsAppCloud:DevelopmentMode"] = "false",
+                ["ActionNotificationDelivery:WorkerEnabled"] = "false",
                 ["ReservationLifecycleEvents:WorkerEnabled"] = "false",
                 ["GuestJourneyDelivery:WorkerEnabled"] = "false"
             };
