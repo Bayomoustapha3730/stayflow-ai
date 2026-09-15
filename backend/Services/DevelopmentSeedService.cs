@@ -528,7 +528,7 @@ public sealed class DevelopmentSeedService(
         primary.CurrentPeriodStartUtc = periodStart;
         primary.CurrentPeriodEndUtc = periodEnd;
         primary.TrialEndsAtUtc = null;
-        primary.Notes = "Development seed: demo tenant pinned to Starter plan for WhatsApp-enabled validation.";
+        primary.Notes = $"Development seed: demo tenant pinned to {SubscriptionPlanNames.Starter} plan for WhatsApp-enabled validation.";
 
         foreach (var subscription in subscriptions)
         {

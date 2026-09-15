@@ -27,8 +27,7 @@ public sealed class BillingServiceTests
                 PlanPriceIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["Starter"] = "price_starter",
-                    ["Growth"] = "price_growth",
-                    ["Scale"] = "price_scale"
+                    ["Professional"] = "price_professional"
                 }
             },
             provider: null);
@@ -54,23 +53,22 @@ public sealed class BillingServiceTests
                 BillingPortalReturnUrl = "https://example.test/portal",
                 PlanPriceIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["Starter"] = "price_starter",
-                    ["Growth"] = "price_growth"
+                    ["Starter"] = "price_starter"
                 }
             });
 
         var response = await fixture.Service.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest
         {
-            PlanName = "Scale"
+            PlanName = "Professional"
         }, CancellationToken.None);
 
         Assert.False(response.Success);
-        Assert.Contains("Scale", response.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Professional", response.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Billing:PlanPriceIds", response.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task CreateCheckoutSessionAsync_ReturnsCapabilityMessage_WhenStripeConfigurationMissing()
+    public async Task CreateCheckoutSessionAsync_DevelopmentStarter_SucceedsWithoutStripeConfiguration()
     {
         var fixture = await CreateFixtureAsync(
             configuredOptions: new BillingOptions
@@ -89,10 +87,10 @@ public sealed class BillingServiceTests
             PlanName = "Starter"
         }, CancellationToken.None);
 
-        Assert.False(response.Success);
-        Assert.Contains("unavailable", response.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Billing:Provider", response.Errors);
-        Assert.Contains("Billing:StripeSecretKey", response.Errors);
+        Assert.True(response.Success);
+        Assert.Equal("Development", response.Data!.Provider);
+        Assert.Contains("session_id=dev_", response.Data.CheckoutUrl, StringComparison.Ordinal);
+        Assert.Contains("dev_plan_starter", response.Data.CheckoutUrl, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -127,15 +125,14 @@ public sealed class BillingServiceTests
 
         Assert.True(response.Success);
         Assert.NotNull(response.Data);
-        Assert.Equal("Free", response.Data!.PlanName);
+        Assert.Equal(SubscriptionPlanNames.Free, response.Data!.PlanName);
         Assert.False(response.Data.HasStripeCustomer);
         Assert.False(response.Data.HasStripeSubscription);
     }
 
     [Theory]
     [InlineData("Starter", "price_starter")]
-    [InlineData("Growth", "price_growth")]
-    [InlineData("Scale", "price_scale")]
+    [InlineData("Professional", "price_professional")]
     public async Task CreateCheckoutSessionAsync_UsesConfiguredPriceId(string planName, string expectedPriceId)
     {
         var provider = new TestBillingProvider();
@@ -154,6 +151,63 @@ public sealed class BillingServiceTests
     }
 
     [Fact]
+    public async Task GetPlansAsync_ReturnsCanonicalCatalog()
+    {
+        var fixture = await CreateFixtureAsync();
+
+        var response = await fixture.Service.GetPlansAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(SubscriptionPlanNames.Canonical, response.Data!.Select(plan => plan.Name));
+        Assert.False(response.Data.Single(plan => plan.Name == SubscriptionPlanNames.Free).IsSelfServiceCheckoutEligible);
+        Assert.True(response.Data.Single(plan => plan.Name == SubscriptionPlanNames.Professional).IsSelfServiceCheckoutEligible);
+        Assert.False(response.Data.Single(plan => plan.Name == SubscriptionPlanNames.Enterprise).IsSelfServiceCheckoutEligible);
+    }
+
+    [Fact]
+    public async Task GetSubscriptionAsync_PersistedStarter_ReturnsCanonicalName()
+    {
+        var fixture = await CreateFixtureAsync();
+
+        var response = await fixture.Service.GetSubscriptionAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(SubscriptionPlanNames.Starter, response.Data!.PlanName);
+        Assert.NotEqual("Unknown", response.Data.PlanName);
+    }
+
+    [Fact]
+    public async Task CreateCheckoutSessionAsync_DevelopmentProfessional_SucceedsWithoutPriceMapping()
+    {
+        var fixture = await CreateFixtureAsync(configuredOptions: DevelopmentOptions());
+
+        var response = await fixture.Service.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest
+        {
+            PlanName = SubscriptionPlanNames.Professional
+        }, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Contains("dev_plan_professional", response.Data!.CheckoutUrl, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Free", "does not require checkout")]
+    [InlineData("Enterprise", "sales-assisted")]
+    [InlineData("NotAPlan", "was not found")]
+    public async Task CreateCheckoutSessionAsync_NonSelfServicePlan_IsRejectedCleanly(string planName, string expectedMessage)
+    {
+        var fixture = await CreateFixtureAsync(configuredOptions: DevelopmentOptions());
+
+        var response = await fixture.Service.CreateCheckoutSessionAsync(new CreateCheckoutSessionRequest
+        {
+            PlanName = planName
+        }, CancellationToken.None);
+
+        Assert.False(response.Success);
+        Assert.Contains(expectedMessage, response.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GetUsageSummaryAsync_ReturnsUsageForTenant()
     {
         var fixture = await CreateFixtureAsync();
@@ -164,6 +218,91 @@ public sealed class BillingServiceTests
         Assert.NotNull(response.Data);
         Assert.Equal(fixture.CompanyId, response.Data!.CompanyId);
         Assert.NotEmpty(response.Data.Metrics);
+        Assert.Contains(response.Data.Metrics, metric => metric.Metric == UsageMetric.AiRequests.ToStorageValue()
+            && metric.Used == 120
+            && metric.Limit == 1000
+            && metric.Remaining == 880);
+    }
+
+    [Fact]
+    public async Task GetUsageSummaryAsync_MissingUsageRecord_ReturnsZeroUsage()
+    {
+        var fixture = await CreateFixtureAsync();
+        fixture.DbContext.UsageRecords.RemoveRange(fixture.DbContext.UsageRecords);
+        await fixture.DbContext.SaveChangesAsync();
+
+        var response = await fixture.Service.GetUsageSummaryAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        var metric = Assert.Single(response.Data!.Metrics);
+        Assert.Equal(0, metric.Used);
+        Assert.Equal(1000, metric.Remaining);
+    }
+
+    [Fact]
+    public async Task GetUsageSummaryAsync_UnlimitedQuota_HasNoLimitOrRemaining()
+    {
+        var fixture = await CreateFixtureAsync();
+        var entitlement = await fixture.DbContext.PlanEntitlements.SingleAsync();
+        entitlement.IsUnlimited = true;
+        entitlement.QuotaLimit = null;
+        await fixture.DbContext.SaveChangesAsync();
+
+        var response = await fixture.Service.GetUsageSummaryAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        var metric = Assert.Single(response.Data!.Metrics);
+        Assert.True(metric.IsUnlimited);
+        Assert.Null(metric.Limit);
+        Assert.Null(metric.Remaining);
+        Assert.Equal(120, metric.Used);
+    }
+
+    [Fact]
+    public async Task GetUsageSummaryAsync_DoesNotIncludeAnotherTenantsUsage()
+    {
+        var fixture = await CreateFixtureAsync();
+        var current = await fixture.DbContext.UsageRecords.SingleAsync();
+        var setupOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(fixture.DatabaseName)
+            .Options;
+        await using var setupContext = new ApplicationDbContext(setupOptions);
+        setupContext.UsageRecords.Add(new UsageRecord
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = Guid.NewGuid(),
+            Metric = current.Metric,
+            PeriodStartUtc = current.PeriodStartUtc,
+            PeriodEndUtc = current.PeriodEndUtc,
+            QuantityUsed = 900
+        });
+        await setupContext.SaveChangesAsync();
+
+        var response = await fixture.Service.GetUsageSummaryAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(120, Assert.Single(response.Data!.Metrics).Used);
+    }
+
+    [Fact]
+    public async Task GetPlansAsync_NewerCancelledSubscription_DoesNotOverrideCurrentPlan()
+    {
+        var fixture = await CreateFixtureAsync();
+        fixture.DbContext.TenantSubscriptions.Add(new TenantSubscription
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = fixture.CompanyId,
+            SubscriptionPlanId = fixture.EnterprisePlanId,
+            Status = SubscriptionStatus.Cancelled.ToStorageValue(),
+            CurrentPeriodStartUtc = DateTimeOffset.UtcNow.AddDays(1),
+            CurrentPeriodEndUtc = DateTimeOffset.UtcNow.AddDays(31)
+        });
+        await fixture.DbContext.SaveChangesAsync();
+
+        var response = await fixture.Service.GetPlansAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(SubscriptionPlanNames.Starter, Assert.Single(response.Data!, plan => plan.IsCurrentPlan).Name);
     }
 
     [Fact]
@@ -197,8 +336,9 @@ public sealed class BillingServiceTests
         BillingOptions? configuredOptions = null,
         IBillingProvider? provider = null)
     {
+        var databaseName = $"billing-service-{Guid.NewGuid():N}";
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseInMemoryDatabase($"billing-service-{Guid.NewGuid():N}")
+            .UseInMemoryDatabase(databaseName)
             .ConfigureWarnings(builder => builder.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
 
@@ -206,8 +346,10 @@ public sealed class BillingServiceTests
         var userId = Guid.NewGuid();
         var freePlanId = Guid.NewGuid();
         var starterPlanId = Guid.NewGuid();
-        var growthPlanId = Guid.NewGuid();
-        var scalePlanId = Guid.NewGuid();
+        var professionalPlanId = Guid.NewGuid();
+        var enterprisePlanId = Guid.NewGuid();
+        var periodStart = DateTimeOffset.UtcNow.AddDays(-10);
+        var periodEnd = DateTimeOffset.UtcNow.AddDays(20);
 
         var tenantContext = new FakeTenantContext(companyId, userId, true);
         var dbContext = new ApplicationDbContext(options, tenantContext);
@@ -254,8 +396,8 @@ public sealed class BillingServiceTests
         new SubscriptionPlan
         {
             Id = freePlanId,
-            Name = "Free",
-            DisplayName = "Free",
+            Name = SubscriptionPlanNames.Free,
+            DisplayName = SubscriptionPlanNames.Free,
             Description = "Free plan",
             IsActive = true,
             SortOrder = 1
@@ -263,28 +405,29 @@ public sealed class BillingServiceTests
         new SubscriptionPlan
         {
             Id = starterPlanId,
-            Name = "Starter",
-            DisplayName = "Starter",
+            Name = SubscriptionPlanNames.Starter,
+            DisplayName = SubscriptionPlanNames.Starter,
             Description = "Starter plan",
             IsActive = true,
             SortOrder = 2
         },
         new SubscriptionPlan
         {
-            Id = growthPlanId,
-            Name = "Growth",
-            DisplayName = "Growth",
-            Description = "Growth plan",
+            Id = professionalPlanId,
+            Name = SubscriptionPlanNames.Professional,
+            DisplayName = SubscriptionPlanNames.Professional,
+            Description = "Professional plan",
             IsActive = true,
             SortOrder = 3
         },
         new SubscriptionPlan
         {
-            Id = scalePlanId,
-            Name = "Scale",
-            DisplayName = "Scale",
-            Description = "Scale plan",
+            Id = enterprisePlanId,
+            Name = SubscriptionPlanNames.Enterprise,
+            DisplayName = SubscriptionPlanNames.Enterprise,
+            Description = "Enterprise plan",
             IsActive = true,
+            IsEnterprise = true,
             SortOrder = 4
         });
 
@@ -294,19 +437,19 @@ public sealed class BillingServiceTests
             {
                 Id = Guid.NewGuid(),
                 CompanyId = companyId,
-                SubscriptionPlanId = growthPlanId,
+                SubscriptionPlanId = starterPlanId,
                 Status = SubscriptionStatus.Active.ToStorageValue(),
-                CurrentPeriodStartUtc = DateTimeOffset.UtcNow.AddDays(-10),
-                CurrentPeriodEndUtc = DateTimeOffset.UtcNow.AddDays(20),
+                CurrentPeriodStartUtc = periodStart,
+                CurrentPeriodEndUtc = periodEnd,
                 ExternalSubscriptionId = "sub_test_123",
-                ExternalPriceId = "price_growth"
+                ExternalPriceId = "price_starter"
             });
         }
 
         dbContext.PlanEntitlements.Add(new PlanEntitlement
         {
             Id = Guid.NewGuid(),
-            SubscriptionPlanId = growthPlanId,
+            SubscriptionPlanId = starterPlanId,
             Key = UsageMetric.AiRequests.ToQuotaEntitlementKey(),
             IsEnabled = true,
             QuotaLimit = 1000,
@@ -319,8 +462,8 @@ public sealed class BillingServiceTests
             Id = Guid.NewGuid(),
             CompanyId = companyId,
             Metric = UsageMetric.AiRequests.ToStorageValue(),
-            PeriodStartUtc = DateTimeOffset.UtcNow.AddDays(-5),
-            PeriodEndUtc = DateTimeOffset.UtcNow.AddDays(25),
+            PeriodStartUtc = periodStart,
+            PeriodEndUtc = periodEnd,
             QuantityUsed = 120
         });
 
@@ -336,9 +479,8 @@ public sealed class BillingServiceTests
             BillingPortalReturnUrl = "https://example.test/portal",
             PlanPriceIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                ["Growth"] = "price_growth",
                 ["Starter"] = "price_starter",
-                ["Scale"] = "price_scale"
+                ["Professional"] = "price_professional"
             }
         };
 
@@ -370,13 +512,23 @@ public sealed class BillingServiceTests
             "\"amount_paid\":2500," +
             "\"currency\":\"usd\"}}}";
 
-        return new Fixture(service, dbContext, companyId, payload, "test-signature");
+        return new Fixture(service, dbContext, companyId, enterprisePlanId, databaseName, payload, "test-signature");
     }
+
+    private static BillingOptions DevelopmentOptions() => new()
+    {
+        Provider = "Development",
+        CheckoutSuccessUrl = "https://example.test/success?checkout=success",
+        CheckoutCancelUrl = "https://example.test/cancel",
+        BillingPortalReturnUrl = "https://example.test/portal"
+    };
 
     private sealed record Fixture(
         BillingService Service,
         ApplicationDbContext DbContext,
         Guid CompanyId,
+        Guid EnterprisePlanId,
+        string DatabaseName,
         string RawWebhookPayload,
         string ValidSignatureHeader);
 
@@ -425,7 +577,7 @@ public sealed class BillingServiceTests
             => Task.FromResult(new BillingProviderSubscriptionSnapshot(
                 request.SubscriptionId,
                 request.AtPeriodEnd ? "active" : "canceled",
-                "price_growth",
+                "price_professional",
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow.AddMonths(1),
                 null,
@@ -436,7 +588,7 @@ public sealed class BillingServiceTests
             => Task.FromResult(new BillingProviderSubscriptionSnapshot(
                 request.SubscriptionId,
                 "active",
-                "price_growth",
+                "price_professional",
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow.AddMonths(1),
                 null,
@@ -447,7 +599,7 @@ public sealed class BillingServiceTests
             => Task.FromResult(new BillingProviderSubscriptionSnapshot(
                 subscriptionId,
                 "active",
-                "price_growth",
+                "price_professional",
                 DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow.AddMonths(1),
                 null,

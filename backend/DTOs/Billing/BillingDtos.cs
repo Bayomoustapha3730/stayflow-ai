@@ -58,6 +58,7 @@ public sealed class BillingPlanResponse
     public string Description { get; init; } = string.Empty;
     public int SortOrder { get; init; }
     public bool IsEnterprise { get; init; }
+    public bool IsSelfServiceCheckoutEligible { get; init; }
     public bool IsCurrentPlan { get; init; }
     public string Currency { get; init; } = string.Empty;
     public long? MonthlyAmountMinor { get; init; }

@@ -167,6 +167,7 @@ public static class ServiceCollectionExtensions
                 && !string.IsNullOrWhiteSpace(options.BillingPortalReturnUrl),
                 "Billing URLs must be configured.")
             .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.Billing.BillingOptions>, Services.Billing.BillingOptionsValidator>();
         services.AddOptions<StayFlow.Api.Configuration.EmailDeliveryOptions>()
             .Bind(configuration.GetSection(StayFlow.Api.Configuration.EmailDeliveryOptions.SectionName))
             .Validate(options => options.Provider.Equals("Development", StringComparison.OrdinalIgnoreCase)

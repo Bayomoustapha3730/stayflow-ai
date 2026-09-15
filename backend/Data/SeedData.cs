@@ -22,8 +22,8 @@ public static class SeedData
             new SubscriptionPlan
             {
                 Id = FreePlanId,
-                Name = "Free",
-                DisplayName = "Free",
+                Name = SubscriptionPlanNames.Free,
+                DisplayName = SubscriptionPlanNames.Free,
                 Description = "Entry tier for early setup and light usage.",
                 IsActive = true,
                 IsEnterprise = false,
@@ -34,8 +34,8 @@ public static class SeedData
             new SubscriptionPlan
             {
                 Id = StarterPlanId,
-                Name = "Starter",
-                DisplayName = "Starter",
+                Name = SubscriptionPlanNames.Starter,
+                DisplayName = SubscriptionPlanNames.Starter,
                 Description = "Small teams with moderate operational volume.",
                 IsActive = true,
                 IsEnterprise = false,
@@ -46,8 +46,8 @@ public static class SeedData
             new SubscriptionPlan
             {
                 Id = ProfessionalPlanId,
-                Name = "Professional",
-                DisplayName = "Professional",
+                Name = SubscriptionPlanNames.Professional,
+                DisplayName = SubscriptionPlanNames.Professional,
                 Description = "Default production-safe plan for multi-property operations.",
                 IsActive = true,
                 IsEnterprise = false,
@@ -58,8 +58,8 @@ public static class SeedData
             new SubscriptionPlan
             {
                 Id = EnterprisePlanId,
-                Name = "Enterprise",
-                DisplayName = "Enterprise",
+                Name = SubscriptionPlanNames.Enterprise,
+                DisplayName = SubscriptionPlanNames.Enterprise,
                 Description = "Custom enterprise plan with unlimited negotiated capacities.",
                 IsActive = true,
                 IsEnterprise = true,

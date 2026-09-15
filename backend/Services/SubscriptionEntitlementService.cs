@@ -29,6 +29,8 @@ public sealed class SubscriptionEntitlementService(
             .Include(item => item.SubscriptionPlan)
             .ThenInclude(plan => plan.Entitlements)
             .OrderByDescending(item => item.CurrentPeriodStartUtc)
+            .ThenByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id)
             .FirstOrDefaultAsync(item => item.CompanyId == companyId
                 && ActiveStatuses.Contains(item.Status), cancellationToken);
 
@@ -250,12 +252,22 @@ public sealed class SubscriptionEntitlementService(
             .OrderBy(item => item.Key, StringComparer.Ordinal)
             .ToList();
 
-        var usageByMetric = await dbContext.UsageRecords
+        var usageRecords = await dbContext.UsageRecords
             .AsNoTracking()
             .Where(record => record.CompanyId == subscription.CompanyId
                 && record.PeriodStartUtc == subscription.CurrentPeriodStartUtc
                 && record.PeriodEndUtc == subscription.CurrentPeriodEndUtc)
-            .ToDictionaryAsync(record => record.Metric, record => record.QuantityUsed, StringComparer.Ordinal, cancellationToken);
+            .ToListAsync(cancellationToken);
+        if (usageRecords.Any(record => record.QuantityUsed < 0)
+            || usageRecords.GroupBy(record => record.Metric, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        {
+            throw new DomainValidationException("Usage data is inconsistent for the current subscription period.", "usage_data_invalid");
+        }
+
+        var usageByMetric = usageRecords.ToDictionary(
+            record => record.Metric,
+            record => record.QuantityUsed,
+            StringComparer.Ordinal);
 
         var quotas = metricEntitlements
             .Select(entitlement =>
@@ -301,6 +313,8 @@ public sealed class SubscriptionEntitlementService(
             .Include(item => item.SubscriptionPlan)
             .ThenInclude(plan => plan.Entitlements)
             .OrderByDescending(item => item.CurrentPeriodStartUtc)
+            .ThenByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id)
             .FirstOrDefaultAsync(item => item.CompanyId == companyId
                 && ActiveStatuses.Contains(item.Status), cancellationToken);
 
@@ -349,34 +363,25 @@ public sealed class SubscriptionEntitlementService(
 
     private async Task<SubscriptionPlan> ResolveDefaultProvisioningPlanAsync(CancellationToken cancellationToken)
     {
-        const string freePlanName = "FREE";
-        const string professionalPlanName = "PROFESSIONAL";
-
+        // Automatic provisioning is restricted to the canonical Free plan. Falling back to any other
+        // plan would silently grant a paid tier to a new tenant, so a missing/inactive Free entry fails.
         var defaultPlan = await dbContext.SubscriptionPlans
             .OrderBy(plan => plan.SortOrder)
             .FirstOrDefaultAsync(plan => plan.IsActive
-                && plan.Name.ToUpper() == freePlanName, cancellationToken);
-
-        defaultPlan ??= await dbContext.SubscriptionPlans
-            .OrderBy(plan => plan.SortOrder)
-            .FirstOrDefaultAsync(plan => plan.IsActive
-                && plan.Name.ToUpper() == professionalPlanName, cancellationToken);
-
-        defaultPlan ??= await dbContext.SubscriptionPlans
-            .OrderBy(plan => plan.SortOrder)
-            .FirstOrDefaultAsync(plan => plan.IsActive, cancellationToken);
-
-        defaultPlan ??= await dbContext.SubscriptionPlans
-            .OrderBy(plan => plan.SortOrder)
-            .FirstOrDefaultAsync(cancellationToken);
+                && plan.Name.ToUpper() == SubscriptionPlanNames.Free.ToUpper(), cancellationToken);
 
         if (defaultPlan is not null)
         {
             return defaultPlan;
         }
 
-        logger.LogError("Unable to provision a default subscription because no subscription plans are configured.");
-        throw new InvalidOperationException("No subscription plans are configured.");
+        logger.LogError(
+            "Unable to provision a default subscription because the canonical '{PlanName}' subscription plan is missing or inactive.",
+            SubscriptionPlanNames.Free);
+
+        throw new ExternalDependencyException(
+            $"The canonical '{SubscriptionPlanNames.Free}' subscription plan is missing or inactive, so a default subscription cannot be provisioned.",
+            "default_plan_not_configured");
     }
 
     private async Task<SubscriptionPlan> ResolvePlanAsync(Guid? planId, string? planName, CancellationToken cancellationToken)

@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using StayFlow.Api.Models;
 
 namespace StayFlow.Api.Services.Billing;
 
@@ -37,6 +39,44 @@ public sealed class BillingOptions
     public string DefaultCurrency { get; set; } = "USD";
     public int WebhookToleranceSeconds { get; set; } = 300;
     public int WebhookMaxBodyBytes { get; set; } = 262144;
+}
+
+public sealed class BillingOptionsValidator : IValidateOptions<BillingOptions>
+{
+    public ValidateOptionsResult Validate(string? name, BillingOptions options)
+    {
+        if (!string.Equals(options.Provider, "Stripe", StringComparison.OrdinalIgnoreCase))
+        {
+            return ValidateOptionsResult.Success;
+        }
+
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(options.StripeSecretKey))
+        {
+            errors.Add("Billing:StripeSecretKey is required when Billing:Provider is Stripe.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.StripeWebhookSigningSecret))
+        {
+            errors.Add("Billing:StripeWebhookSigningSecret is required when Billing:Provider is Stripe.");
+        }
+
+        foreach (var planName in new[] { SubscriptionPlanNames.Starter, SubscriptionPlanNames.Professional })
+        {
+            if (!options.PlanPriceIds.TryGetValue(planName, out var priceId) || string.IsNullOrWhiteSpace(priceId))
+            {
+                errors.Add($"Billing:PlanPriceIds:{planName} is required when Billing:Provider is Stripe.");
+            }
+        }
+
+        if (options.PlanPriceIds.Keys.Any(key => string.Equals(key, "Growth", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(key, "Scale", StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add("Billing:PlanPriceIds must use canonical plan names; Growth and Scale are not valid plan identities.");
+        }
+
+        return errors.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(errors);
+    }
 }
 
 public sealed record BillingCustomerRequest(Guid CompanyId, string CompanyName, string Email);

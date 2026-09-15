@@ -20,7 +20,9 @@ public sealed class DevelopmentBillingProvider(IOptions<BillingOptions> options)
     public Task<string> CreateCheckoutSessionAsync(CheckoutSessionRequest request, CancellationToken cancellationToken)
     {
         _ = cancellationToken;
-        return Task.FromResult($"{options.Value.CheckoutSuccessUrl}?session_id=dev_{request.CompanyId:N}");
+        var separator = options.Value.CheckoutSuccessUrl.Contains('?', StringComparison.Ordinal) ? '&' : '?';
+        var sessionId = $"dev_{request.CompanyId:N}_{request.PriceId}";
+        return Task.FromResult($"{options.Value.CheckoutSuccessUrl}{separator}session_id={Uri.EscapeDataString(sessionId)}");
     }
 
     public Task<string> CreateBillingPortalSessionAsync(BillingPortalRequest request, CancellationToken cancellationToken)
