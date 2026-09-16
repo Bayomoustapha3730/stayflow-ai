@@ -69,7 +69,12 @@ public sealed class DevelopmentSeedService(
         await EnsureDemoOrganizationMembershipAsync(demoUser.Id, cancellationToken);
         await EnsureDemoCompanyOwnershipAsync(demoUser.Id, cancellationToken);
 
-        var onboardingPassword = configuration["DevelopmentSeed:OnboardingTestPassword"] ?? demoPassword;
+        var onboardingPassword = configuration["DevelopmentSeed:OnboardingTestPassword"];
+        if (string.IsNullOrEmpty(onboardingPassword))
+        {
+            onboardingPassword = demoPassword;
+        }
+
         await EnsureOnboardingTestTenantAsync(role, onboardingPassword, cancellationToken);
 
         await dbContext.SaveChangesAsync(cancellationToken);

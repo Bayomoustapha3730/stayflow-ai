@@ -57,6 +57,25 @@ public sealed class DevelopmentSeedServiceTests
     }
 
     [Fact]
+    public async Task SeedAsync_WithEmptyOnboardingTestPassword_FallsBackToDemoPassword()
+    {
+        // Tracked appsettings ship this key as an empty placeholder; an empty (not missing)
+        // value must still fall back to DemoPassword rather than hashing an empty string.
+        var dbContext = CreateInMemoryDbContext();
+        var seeder = CreateSeeder(dbContext, new Dictionary<string, string?>
+        {
+            ["DevelopmentSeed:DemoPassword"] = TestPassword,
+            ["DevelopmentSeed:OnboardingTestPassword"] = ""
+        });
+
+        await seeder.SeedAsync(CancellationToken.None);
+
+        var onboardingUser = await dbContext.Users.SingleAsync(item => item.Id == OnboardingTestUserId);
+        var hasher = new Pbkdf2PasswordHasher();
+        Assert.True(hasher.VerifyPassword(TestPassword, onboardingUser.PasswordHash));
+    }
+
+    [Fact]
     public async Task SeedAsync_CreatesUserWithHashedPassword_NotPlaintext()
     {
         var dbContext = CreateInMemoryDbContext();
