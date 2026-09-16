@@ -275,6 +275,69 @@ function createHostFetchMock(
       );
     }
 
+    if (url.endsWith("/auth/me")) {
+      return Promise.resolve(
+        apiSuccess({
+          id: "user-1",
+          companyId: "33333333-3333-4333-8333-333333333333",
+          fullName: "Host User",
+          email: "host@example.com",
+          phoneNumber: "+254700000000",
+          preferredLanguage: "en",
+          timeZone: "UTC",
+          isEmailVerified: true,
+          emailNotificationsEnabled: true,
+          securityNotificationsEnabled: true,
+          productUpdatesEnabled: false,
+          organizationRole: "Owner",
+          roles: ["Host"],
+          permissions: ["conversations.read"]
+        })
+      );
+    }
+
+    if (url.endsWith("/auth/organizations")) {
+      return Promise.resolve(
+        apiSuccess([
+          {
+            companyId: "33333333-3333-4333-8333-333333333333",
+            name: "StayFlow Demo Hosts",
+            slug: "stayflow-demo-hosts",
+            role: "Owner",
+            membershipStatus: "Active",
+            isActiveOrganization: true,
+            organizationStatus: "Active",
+            onboardingState: "Completed",
+            propertyCount: 1,
+            planName: "Free",
+            subscriptionStatus: "Active"
+          }
+        ])
+      );
+    }
+
+    if (url.endsWith("/api/onboarding/status")) {
+      return Promise.resolve(
+        apiSuccess({
+          companyId: "33333333-3333-4333-8333-333333333333",
+          userId: "user-1",
+          currentStep: "Completed",
+          currentStepState: "Completed",
+          completedSteps: [],
+          remainingSteps: [],
+          skippedSteps: [],
+          blockers: [],
+          checklist: [],
+          percentComplete: 100,
+          safeLinks: [],
+          startedAtUtc: "2026-07-01T00:00:00Z",
+          isCompleted: true,
+          lastUpdatedAtUtc: "2026-07-01T00:00:00Z",
+          version: 1
+        })
+      );
+    }
+
     if (url.includes("/conversations?") && options?.method === "GET") {
       const parsed = new URL(url);
       const page = Number(parsed.searchParams.get("page") ?? "1");
@@ -382,6 +445,14 @@ async function signIn(user = userEvent.setup()) {
   await user.clear(screen.getByLabelText(/password/i));
   await user.type(screen.getByLabelText(/password/i), "Password123!");
   await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+  // Wait for the authenticated workspace to actually render before callers interact with it;
+  // login/onboarding-gate resolution is async and must not be assumed complete synchronously.
+  await waitFor(() => {
+    expect(screen.queryByRole("heading", { name: /host sign in/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+  });
+
   return user;
 }
 

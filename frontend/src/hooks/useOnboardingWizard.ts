@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOnboardingStatus } from "./useOnboardingStatus";
 function toCanonicalOnboardingPath(step: string | null | undefined): string | null {
   if (!step) {
     return null;
@@ -64,12 +65,14 @@ import type {
 
 export interface UseOnboardingWizardOptions {
   accessToken: string | null;
+  /** Optional: when provided, status is scoped to this organization (see useOnboardingStatus). */
+  activeCompanyId?: string | null;
   onUnauthorized?: () => void;
 }
 
-export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardingWizardOptions) {
-  const [status, setStatus] = useState<OnboardingStatus | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+export function useOnboardingWizard({ accessToken, activeCompanyId, onUnauthorized }: UseOnboardingWizardOptions) {
+  // Delegates all status retrieval/caching to the canonical hook; this wizard only owns mutation state.
+  const canonicalStatus = useOnboardingStatus({ accessToken, activeCompanyId });
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -90,29 +93,11 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
   }, [onUnauthorized]);
 
   const refresh = useCallback(async () => {
-    if (!accessToken) {
-      setStatus(null);
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const current = await api.getStatus();
-      setStatus(current);
-    } catch (failure) {
-      handleFailure(failure, "Unable to load onboarding status.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [accessToken, api, handleFailure]);
+    await canonicalStatus.refresh();
+  }, [canonicalStatus]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    const canonicalPath = toCanonicalOnboardingPath(status?.currentStep);
+    const canonicalPath = toCanonicalOnboardingPath(canonicalStatus.status?.currentStep);
     if (!canonicalPath) {
       return;
     }
@@ -126,7 +111,7 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
       window.history.replaceState({}, "", canonicalPath);
       window.dispatchEvent(new PopStateEvent("popstate"));
     }
-  }, [status?.currentStep]);
+  }, [canonicalStatus.status?.currentStep]);
 
   const withStatusMutation = useCallback(async (action: () => Promise<OnboardingStatus>, successMessage: string) => {
     if (!accessToken) {
@@ -139,7 +124,7 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
 
     try {
       const next = await action();
-      setStatus(next);
+      canonicalStatus.applyStatus(next);
       setMessage(successMessage);
       return next;
     } catch (failure) {
@@ -148,7 +133,7 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
     } finally {
       setIsSaving(false);
     }
-  }, [accessToken, handleFailure]);
+  }, [accessToken, canonicalStatus, handleFailure]);
 
   const start = useCallback(async () => {
     return withStatusMutation(() => api.start(), "Onboarding started.");
@@ -176,7 +161,7 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
     setMessage(null);
     try {
       const response = await api.completeInvitations(request);
-      setStatus(response.status);
+      canonicalStatus.applyStatus(response.status);
       setMessage("Invitation step updated.");
       return response;
     } catch (failure) {
@@ -185,7 +170,7 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
     } finally {
       setIsSaving(false);
     }
-  }, [accessToken, api, handleFailure]);
+  }, [accessToken, api, canonicalStatus, handleFailure]);
 
   const configureWhatsApp = useCallback(async (request: OnboardingWhatsAppRequest) => {
     return withStatusMutation(() => api.completeWhatsApp(request), "WhatsApp readiness confirmed.");
@@ -212,10 +197,10 @@ export function useOnboardingWizard({ accessToken, onUnauthorized }: UseOnboardi
   }, [api, withStatusMutation]);
 
   return {
-    status,
-    isLoading,
+    status: canonicalStatus.status,
+    isLoading: canonicalStatus.isLoading,
     isSaving,
-    error,
+    error: error ?? canonicalStatus.error,
     message,
     refresh,
     start,

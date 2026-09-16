@@ -20,8 +20,18 @@ import { TermsOfServicePage } from "./pages/TermsOfServicePage";
 import { VerifyEmailPage } from "./pages/VerifyEmailPage";
 import { WhatsAppSettingsPage } from "./pages/WhatsAppSettingsPage";
 import { normalizePropertyId, resolvePropertyKnowledgePropertyId } from "./utils/propertyRouting";
+import { OnboardingGate } from "./routing/OnboardingGate";
+import { HostAuthProvider } from "./providers/HostAuthProvider";
 
 export default function App() {
+  return (
+    <HostAuthProvider>
+      <AppRoutes />
+    </HostAuthProvider>
+  );
+}
+
+function AppRoutes() {
   const [path, setPath] = useState(() => window.location.pathname.toLowerCase());
   const configuredDemoPropertyId = normalizePropertyId(import.meta.env.VITE_DEMO_PROPERTY_ID);
   const indexPropertyId = resolvePropertyKnowledgePropertyId(null, configuredDemoPropertyId, import.meta.env.DEV);
@@ -65,23 +75,23 @@ export default function App() {
   }
 
   if (/^\/host\/settings\/billing\/?$/.test(path)) {
-    return <BillingDashboardPage />;
+    return <OnboardingGate path={path}><BillingDashboardPage /></OnboardingGate>;
   }
 
   if (/^\/host\/settings\/billing\/subscription\/?$/.test(path)) {
-    return <CurrentSubscriptionPage />;
+    return <OnboardingGate path={path}><CurrentSubscriptionPage /></OnboardingGate>;
   }
 
   if (/^\/host\/settings\/billing\/plans\/?$/.test(path)) {
-    return <PlanComparisonPage />;
+    return <OnboardingGate path={path}><PlanComparisonPage /></OnboardingGate>;
   }
 
   if (/^\/host\/settings\/whatsapp\/?$/.test(path)) {
-    return <WhatsAppSettingsPage />;
+    return <OnboardingGate path={path}><WhatsAppSettingsPage /></OnboardingGate>;
   }
 
   if (/^\/host\/settings\/organization\/?$/.test(path)) {
-    return <OrganizationSettingsPage />;
+    return <OnboardingGate path={path}><OrganizationSettingsPage /></OnboardingGate>;
   }
 
   if (/^\/host\/organizations\/?$/.test(path)) {
@@ -89,55 +99,55 @@ export default function App() {
   }
 
   if (path === "/onboarding" || path === "/onboarding/") {
-    return <OnboardingPage />;
+    return <OnboardingGate path={path}><OnboardingPage /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/welcome\/?$/.test(path)) {
-    return <OnboardingPage routeStep="welcome" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="welcome" /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/organization\/?$/.test(path)) {
-    return <OnboardingPage routeStep="organization" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="organization" /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/plan\/?$/.test(path)) {
-    return <OnboardingPage routeStep="plan" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="plan" /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/property\/?$/.test(path)) {
-    return <OnboardingPage routeStep="property" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="property" /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/team\/?$/.test(path)) {
-    return <OnboardingPage routeStep="team" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="team" /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/whatsapp\/?$/.test(path)) {
-    return <OnboardingPage routeStep="whatsapp" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="whatsapp" /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/ai\/?$/.test(path)) {
-    return <OnboardingPage routeStep="ai" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="ai" /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/knowledge\/?$/.test(path)) {
-    return <OnboardingPage routeStep="knowledge" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="knowledge" /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/demo\/?$/.test(path)) {
-    return <OnboardingPage routeStep="demo" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="demo" /></OnboardingGate>;
   }
 
   if (/^\/onboarding\/review\/?$/.test(path)) {
-    return <OnboardingPage routeStep="review" />;
+    return <OnboardingGate path={path}><OnboardingPage routeStep="review" /></OnboardingGate>;
   }
 
   if (/^\/get-started\/?$/.test(path)) {
-    return <OnboardingPage />;
+    return <OnboardingGate path={path}><OnboardingPage /></OnboardingGate>;
   }
 
   if (path === "/host/copilot" || path === "/host/copilot/") {
-    return <HostCopilotWorkspacePage />;
+    return <OnboardingGate path={path}><HostCopilotWorkspacePage /></OnboardingGate>;
   }
 
   if (path === "/platform-admin" || path.startsWith("/platform-admin/")) {
@@ -145,16 +155,16 @@ export default function App() {
   }
 
   if (path === "/host" || path.startsWith("/host/conversations")) {
-    return <HostInboxPage />;
+    return <OnboardingGate path={path}><HostInboxPage /></OnboardingGate>;
   }
 
   if (path === "/host/properties" || path === "/host/properties/") {
-    return <PropertyKnowledgePage propertyId={indexPropertyId} />;
+    return <OnboardingGate path={path}><PropertyKnowledgePage propertyId={indexPropertyId} /></OnboardingGate>;
   }
 
   const knowledgeMatch = path.match(/^\/host\/properties\/([^/]+)\/knowledge(?:\/)?$/);
   if (knowledgeMatch) {
-    return <PropertyKnowledgePage propertyId={decodeURIComponent(knowledgeMatch[1])} />;
+    return <OnboardingGate path={path}><PropertyKnowledgePage propertyId={decodeURIComponent(knowledgeMatch[1])} /></OnboardingGate>;
   }
 
   return <DemoPage />;

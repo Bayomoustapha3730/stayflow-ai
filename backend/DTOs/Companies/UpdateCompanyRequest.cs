@@ -12,6 +12,5 @@ public sealed class UpdateCompanyRequest
     public string TimeZone { get; init; } = "Africa/Nairobi";
     public string? BrandingLogoUrl { get; init; }
     public string? BrandingPrimaryColor { get; init; }
-    public string? OnboardingState { get; init; }
     public bool IsActive { get; init; } = true;
 }

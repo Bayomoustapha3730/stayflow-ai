@@ -111,6 +111,7 @@ export function OnboardingPage({ routeStep }: OnboardingPageProps) {
   const auth = useHostAuth();
   const onboarding = useOnboardingWizard({
     accessToken: auth.accessToken,
+    activeCompanyId: auth.currentUser?.companyId ?? null,
     onUnauthorized: auth.logout
   });
 

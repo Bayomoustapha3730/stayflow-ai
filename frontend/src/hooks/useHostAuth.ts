@@ -1,8 +1,9 @@
 import { getRuntimeApiUrl } from "../runtimeConfig";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createAuthApi } from "../api/authApi";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { createOnboardingApi } from "../api/onboardingApi";
+import { HostAuthContext } from "../context/HostAuthContext";
 import type { AuthTokenSession } from "../models/auth";
 import type {
   CreateOrganizationWorkspaceRequest,
@@ -27,12 +28,18 @@ export interface UseHostAuthResult {
   setCurrentUserProfile: (profile: CurrentUserProfile | null) => void;
 }
 
-export function useHostAuth(): UseHostAuthResult {
+/**
+ * Owns the single, shared host-auth runtime (token state, current user, organization
+ * switching). This must only ever be instantiated once, by HostAuthProvider — consumers
+ * should import `useHostAuth` from this module, which reads from that shared instance.
+ */
+export function useHostAuthState(): UseHostAuthResult {
   const [accessToken, setAccessToken] = useState<string | null>(() => sessionStorage.getItem(hostTokenStorageKey));
   const [refreshToken, setRefreshToken] = useState<string | null>(() => sessionStorage.getItem(hostRefreshTokenStorageKey));
   const [currentUser, setCurrentUser] = useState<CurrentUserProfile | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isSwitchingRef = useRef(false);
 
   const http = useMemo(
     () =>
@@ -92,26 +99,20 @@ export function useHostAuth(): UseHostAuthResult {
   const loadCurrentUserWithToken = useCallback(async (token: string) => {
     const { auth } = buildAuthenticatedApi(token);
     const profile = await auth.getCurrentUser();
-    const organizations = await auth.listOrganizations();
 
-    if (organizations.some((item) => item.companyId === profile.companyId && item.membershipStatus === "Active")) {
-      setCurrentUser(profile);
-      return profile;
-    }
-
-    const fallbackOrganization = organizations[0];
-    if (!fallbackOrganization) {
+    // /auth/me already reports the live, authoritative CompanyId for this user; it must
+    // never be second-guessed or silently replaced by auto-selecting a different
+    // organization as a side effect of loading a page. If it is missing entirely, fail
+    // closed rather than guessing an organization.
+    if (!profile.companyId) {
       persistSession(null);
       setCurrentUser(null);
       setError("No active organization membership is available for this account.");
       return null;
     }
 
-    const fallbackSession = await auth.switchOrganization(fallbackOrganization.companyId);
-    persistSession(fallbackSession);
-    const fallbackProfile = await buildAuthenticatedApi(fallbackSession.accessToken).auth.getCurrentUser();
-    setCurrentUser(fallbackProfile);
-    return fallbackProfile;
+    setCurrentUser(profile);
+    return profile;
   }, [buildAuthenticatedApi, persistSession]);
 
   const refreshSession = useCallback(async () => {
@@ -185,10 +186,11 @@ export function useHostAuth(): UseHostAuthResult {
   }, [persistSession]);
 
   const switchOrganization = useCallback(async (companyId: string) => {
-    if (!accessToken) {
+    if (!accessToken || isSwitchingRef.current) {
       return false;
     }
 
+    isSwitchingRef.current = true;
     setError(null);
 
     try {
@@ -205,14 +207,17 @@ export function useHostAuth(): UseHostAuthResult {
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "Unable to switch organization.");
       return false;
+    } finally {
+      isSwitchingRef.current = false;
     }
   }, [accessToken, buildAuthenticatedApi, loadCurrentUserWithToken, navigateToCurrentOnboardingStepIfRequired, persistSession]);
 
   const createOrganization = useCallback(async (request: CreateOrganizationWorkspaceRequest) => {
-    if (!accessToken) {
+    if (!accessToken || isSwitchingRef.current) {
       return false;
     }
 
+    isSwitchingRef.current = true;
     setError(null);
 
     try {
@@ -229,6 +234,8 @@ export function useHostAuth(): UseHostAuthResult {
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "Unable to create organization.");
       return false;
+    } finally {
+      isSwitchingRef.current = false;
     }
   }, [accessToken, buildAuthenticatedApi, loadCurrentUserWithToken, navigateToCurrentOnboardingStepIfRequired, persistSession]);
 
@@ -248,6 +255,19 @@ export function useHostAuth(): UseHostAuthResult {
     createOrganization,
     setCurrentUserProfile: setCurrentUser
   };
+}
+
+/**
+ * Consumes the single shared HostAuthProvider instance. Every component that needs host
+ * auth/organization state must call this instead of instantiating its own runtime.
+ */
+export function useHostAuth(): UseHostAuthResult {
+  const context = useContext(HostAuthContext);
+  if (!context) {
+    throw new Error("useHostAuth must be used within a HostAuthProvider");
+  }
+
+  return context;
 }
 
 export function isHostSessionExpired(error: unknown): boolean {

@@ -52,6 +52,61 @@ const integrationDetail = {
   graphApiVersion: "v23.0"
 };
 
+const testCompanyId = "99999999-9999-4999-8999-999999999999";
+
+function currentUserProfile() {
+  return {
+    id: "user-1",
+    companyId: testCompanyId,
+    fullName: "Host Owner",
+    email: "owner@stayflow.test",
+    phoneNumber: "+254700000001",
+    preferredLanguage: "en",
+    timeZone: "Africa/Nairobi",
+    isEmailVerified: true,
+    emailNotificationsEnabled: true,
+    securityNotificationsEnabled: true,
+    organizationRole: "Owner",
+    permissions: []
+  };
+}
+
+function authorizedOrganizations() {
+  return [{
+    companyId: testCompanyId,
+    name: "StayFlow Test",
+    slug: "stayflow-test",
+    role: "Owner",
+    membershipStatus: "Active",
+    isActiveOrganization: true,
+    organizationStatus: "Active",
+    onboardingState: "Completed",
+    propertyCount: 1,
+    planName: "Free",
+    subscriptionStatus: "Active"
+  }];
+}
+
+function completedOnboardingStatus() {
+  return {
+    companyId: testCompanyId,
+    userId: "user-1",
+    currentStep: "Completed",
+    currentStepState: "Completed",
+    completedSteps: [],
+    remainingSteps: [],
+    skippedSteps: [],
+    blockers: [],
+    checklist: [],
+    percentComplete: 100,
+    safeLinks: [],
+    startedAtUtc: "2026-07-01T00:00:00Z",
+    isCompleted: true,
+    lastUpdatedAtUtc: "2026-07-01T00:00:00Z",
+    version: 1
+  };
+}
+
 const templates = [
   {
     id: "aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
@@ -168,6 +223,18 @@ function createFetchMock(options?: {
 }) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost:5243");
+
+    if (url.pathname === "/auth/me" && (init?.method ?? "GET") === "GET") {
+      return apiSuccess(currentUserProfile());
+    }
+
+    if (url.pathname === "/auth/organizations" && (init?.method ?? "GET") === "GET") {
+      return apiSuccess(authorizedOrganizations());
+    }
+
+    if (url.pathname === "/api/onboarding/status" && (init?.method ?? "GET") === "GET") {
+      return apiSuccess(completedOnboardingStatus());
+    }
 
     if (url.pathname === "/whatsapp/integrations" && (init?.method ?? "GET") === "GET") {
       return apiSuccess([
@@ -507,7 +574,7 @@ describe("WhatsAppSettingsPage", () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "WhatsApp Settings" });
-    expect(screen.getByText(status)).toBeInTheDocument();
+    expect(await screen.findByText(status)).toBeInTheDocument();
     expect(screen.getByText(summary)).toBeInTheDocument();
 
     expect(screen.queryByText(/access token/i)).not.toBeInTheDocument();

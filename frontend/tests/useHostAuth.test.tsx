@@ -1,122 +1,107 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useHostAuth } from "../src/hooks/useHostAuth";
+import { HostAuthProvider } from "../src/providers/HostAuthProvider";
 
-function loginSuccessResponse() {
+function ok<T>(data: T) {
   return {
     ok: true,
     status: 200,
-    json: async () => ({
-      success: true,
-      message: "ok",
-      data: {
-        accessToken: "host-access-token",
-        refreshToken: "refresh-token",
-        expiresAt: "2026-07-22T12:00:00Z"
-      },
-      errors: [],
-      correlationId: "cid"
-    })
+    json: async () => ({ success: true, message: "ok", data, errors: [], correlationId: "cid" })
   };
 }
 
-function currentUserSuccessResponse() {
+function fail(message: string, status = 400) {
   return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      success: true,
-      message: "ok",
-      data: {
-        id: "user-1",
-        companyId: "company-1",
-        fullName: "Host User",
-        email: "host@example.com",
-        phoneNumber: "+254700000000",
-          preferredLanguage: "en",
-          timeZone: "UTC",
-        isEmailVerified: true,
-          emailNotificationsEnabled: true,
-          securityNotificationsEnabled: true,
-          productUpdatesEnabled: false,
-        organizationRole: "Administrator",
-        roles: ["Host"],
-        permissions: ["conversations.read"]
-      },
-      errors: [],
-      correlationId: "cid"
-    })
+    ok: false,
+    status,
+    json: async () => ({ success: false, message, errors: [message], correlationId: "cid" })
   };
 }
 
-function organizationsSuccessResponse(activeCompanyId = "company-1") {
+function profileFor(companyId: string) {
   return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      success: true,
-      message: "ok",
-      data: [
-        {
-          companyId: activeCompanyId,
-          name: activeCompanyId === "company-2" ? "Orbit Ops" : "StayFlow KE",
-          slug: activeCompanyId === "company-2" ? "orbit-ops" : "stayflow-ke",
-          role: "Administrator",
-          membershipStatus: "Active",
-          isActiveOrganization: true,
-          organizationStatus: "Active",
-          onboardingState: "Completed",
-          propertyCount: 1,
-          planName: "Free",
-          subscriptionStatus: "Active"
-        },
-        {
-          companyId: activeCompanyId === "company-2" ? "company-1" : "company-2",
-          name: activeCompanyId === "company-2" ? "StayFlow KE" : "Orbit Ops",
-          slug: activeCompanyId === "company-2" ? "stayflow-ke" : "orbit-ops",
-          role: "Owner",
-          membershipStatus: "Active",
-          isActiveOrganization: false,
-          organizationStatus: "Active",
-          onboardingState: "Completed",
-          propertyCount: 2,
-          planName: "Growth",
-          subscriptionStatus: "Active"
-        }
-      ],
-      errors: [],
-      correlationId: "cid"
-    })
+    id: "user-1",
+    companyId,
+    fullName: "Host User",
+    email: "host@example.com",
+    phoneNumber: "+254700000000",
+    preferredLanguage: "en",
+    timeZone: "UTC",
+    isEmailVerified: true,
+    emailNotificationsEnabled: true,
+    securityNotificationsEnabled: true,
+    productUpdatesEnabled: false,
+    organizationRole: companyId === "company-2" ? "Owner" : "Administrator",
+    roles: ["Host"],
+    permissions: ["conversations.read"]
   };
 }
 
-function switchSuccessResponse() {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      success: true,
-      message: "ok",
-      data: {
-        accessToken: "org-2-access-token",
-        refreshToken: "org-2-refresh-token",
-        expiresAt: "2026-07-22T12:30:00Z"
-      },
-      errors: [],
-      correlationId: "cid"
-    })
-  };
+function organizationsFor(activeCompanyId: string) {
+  return [
+    {
+      companyId: "company-1",
+      name: "StayFlow KE",
+      slug: "stayflow-ke",
+      role: "Administrator",
+      membershipStatus: "Active",
+      isActiveOrganization: activeCompanyId === "company-1",
+      organizationStatus: "Active",
+      onboardingState: "Completed",
+      propertyCount: 1,
+      planName: "Free",
+      subscriptionStatus: "Active"
+    },
+    {
+      companyId: "company-2",
+      name: "Orbit Ops",
+      slug: "orbit-ops",
+      role: "Owner",
+      membershipStatus: "Active",
+      isActiveOrganization: activeCompanyId === "company-2",
+      organizationStatus: "Active",
+      onboardingState: "Completed",
+      propertyCount: 2,
+      planName: "Growth",
+      subscriptionStatus: "Active"
+    }
+  ];
 }
 
-function onboardingCompletedResponse() {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      success: true,
-      message: "ok",
-      data: {
-        companyId: "company-2",
+interface RouterState {
+  activeCompanyId: string;
+}
+
+function createRouterFetchMock(state: RouterState) {
+  const switchCalls: string[] = [];
+
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+
+    if (url.endsWith("/auth/login")) {
+      return ok({ accessToken: "host-access-token", refreshToken: "host-refresh-token", expiresAt: "2026-07-22T12:00:00Z" });
+    }
+
+    if (url.endsWith("/auth/me")) {
+      return ok(profileFor(state.activeCompanyId));
+    }
+
+    if (url.endsWith("/auth/organizations")) {
+      return ok(organizationsFor(state.activeCompanyId));
+    }
+
+    if (url.endsWith("/auth/organizations/switch")) {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { companyId: string };
+      switchCalls.push(body.companyId);
+      state.activeCompanyId = body.companyId;
+      return ok({ accessToken: `${body.companyId}-access-token`, refreshToken: `${body.companyId}-refresh-token`, expiresAt: "2026-07-22T12:30:00Z" });
+    }
+
+    if (url.endsWith("/api/onboarding/status")) {
+      return ok({
+        companyId: state.activeCompanyId,
         userId: "user-1",
         currentStep: "Completed",
         currentStepState: "Completed",
@@ -126,34 +111,26 @@ function onboardingCompletedResponse() {
         blockers: [],
         checklist: [],
         percentComplete: 100,
-        nextRecommendedAction: null,
         safeLinks: [],
         startedAtUtc: "2026-08-01T00:00:00Z",
-        selectedPlanName: "Free",
-        firstPropertyId: null,
         isCompleted: true,
-        completedAtUtc: "2026-08-02T00:00:00Z",
-        completedByUserId: "user-1",
-        lastUpdatedAtUtc: "2026-08-02T00:00:00Z",
+        lastUpdatedAtUtc: "2026-08-01T00:00:00Z",
         version: 1
-      },
-      errors: [],
-      correlationId: "cid"
-    })
-  };
+      });
+    }
+
+    return fail(`Unhandled route ${url}`, 404);
+  });
+
+  return { fetchMock, switchCalls };
 }
 
 function loginFailureResponse() {
-  return {
-    ok: false,
-    status: 401,
-    json: async () => ({
-      success: false,
-      message: "Invalid credentials",
-      errors: ["Invalid credentials"],
-      correlationId: "cid"
-    })
-  };
+  return fail("Invalid credentials", 401);
+}
+
+function providerWrapper({ children }: { children: ReactNode }) {
+  return <HostAuthProvider>{children}</HostAuthProvider>;
 }
 
 describe("useHostAuth", () => {
@@ -163,15 +140,10 @@ describe("useHostAuth", () => {
   });
 
   it("stores host access token after successful login", async () => {
-    vi.stubGlobal("fetch", vi
-      .fn()
-      .mockResolvedValueOnce(loginSuccessResponse())
-      .mockResolvedValueOnce(currentUserSuccessResponse())
-      .mockResolvedValueOnce(organizationsSuccessResponse())
-      .mockResolvedValueOnce(currentUserSuccessResponse())
-      .mockResolvedValueOnce(organizationsSuccessResponse()));
+    const { fetchMock } = createRouterFetchMock({ activeCompanyId: "company-1" });
+    vi.stubGlobal("fetch", fetchMock);
 
-    const { result } = renderHook(() => useHostAuth());
+    const { result } = renderHook(() => useHostAuth(), { wrapper: providerWrapper });
 
     await act(async () => {
       await result.current.login("host@example.com", "Password123!");
@@ -189,7 +161,7 @@ describe("useHostAuth", () => {
   it("exposes an error when login fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(loginFailureResponse()));
 
-    const { result } = renderHook(() => useHostAuth());
+    const { result } = renderHook(() => useHostAuth(), { wrapper: providerWrapper });
 
     await act(async () => {
       await expect(result.current.login("host@example.com", "wrong")).rejects.toThrow();
@@ -200,15 +172,10 @@ describe("useHostAuth", () => {
   });
 
   it("logout clears token and auth state", async () => {
-    vi.stubGlobal("fetch", vi
-      .fn()
-      .mockResolvedValueOnce(loginSuccessResponse())
-      .mockResolvedValueOnce(currentUserSuccessResponse())
-      .mockResolvedValueOnce(organizationsSuccessResponse())
-      .mockResolvedValueOnce(currentUserSuccessResponse())
-      .mockResolvedValueOnce(organizationsSuccessResponse()));
+    const { fetchMock } = createRouterFetchMock({ activeCompanyId: "company-1" });
+    vi.stubGlobal("fetch", fetchMock);
 
-    const { result } = renderHook(() => useHostAuth());
+    const { result } = renderHook(() => useHostAuth(), { wrapper: providerWrapper });
 
     await act(async () => {
       await result.current.login("host@example.com", "Password123!");
@@ -224,69 +191,10 @@ describe("useHostAuth", () => {
   });
 
   it("switches organizations using the backend token response and updates current user context", async () => {
-    vi.stubGlobal("fetch", vi
-      .fn()
-      .mockResolvedValueOnce(loginSuccessResponse())
-      .mockResolvedValueOnce(currentUserSuccessResponse())
-      .mockResolvedValueOnce(organizationsSuccessResponse())
-      .mockResolvedValueOnce(currentUserSuccessResponse())
-      .mockResolvedValueOnce(organizationsSuccessResponse())
-      .mockResolvedValueOnce(switchSuccessResponse())
-      .mockResolvedValueOnce({
-        ...currentUserSuccessResponse(),
-        json: async () => ({
-          success: true,
-          message: "ok",
-          data: {
-            id: "user-1",
-            companyId: "company-2",
-            fullName: "Host User",
-            email: "host@example.com",
-            phoneNumber: "+254700000000",
-            preferredLanguage: "en",
-            timeZone: "UTC",
-            isEmailVerified: true,
-            emailNotificationsEnabled: true,
-            securityNotificationsEnabled: true,
-            productUpdatesEnabled: false,
-            organizationRole: "Owner",
-            roles: ["Host"],
-            permissions: ["conversations.read"]
-          },
-          errors: [],
-          correlationId: "cid"
-        })
-      })
-      .mockResolvedValueOnce(organizationsSuccessResponse("company-2"))
-      .mockResolvedValueOnce(onboardingCompletedResponse())
-      .mockResolvedValueOnce({
-        ...currentUserSuccessResponse(),
-        json: async () => ({
-          success: true,
-          message: "ok",
-          data: {
-            id: "user-1",
-            companyId: "company-2",
-            fullName: "Host User",
-            email: "host@example.com",
-            phoneNumber: "+254700000000",
-            preferredLanguage: "en",
-            timeZone: "UTC",
-            isEmailVerified: true,
-            emailNotificationsEnabled: true,
-            securityNotificationsEnabled: true,
-            productUpdatesEnabled: false,
-            organizationRole: "Owner",
-            roles: ["Host"],
-            permissions: ["conversations.read"]
-          },
-          errors: [],
-          correlationId: "cid"
-        })
-      })
-      .mockResolvedValueOnce(organizationsSuccessResponse("company-2")));
+    const { fetchMock, switchCalls } = createRouterFetchMock({ activeCompanyId: "company-1" });
+    vi.stubGlobal("fetch", fetchMock);
 
-    const { result } = renderHook(() => useHostAuth());
+    const { result } = renderHook(() => useHostAuth(), { wrapper: providerWrapper });
 
     await act(async () => {
       await result.current.login("host@example.com", "Password123!");
@@ -301,7 +209,25 @@ describe("useHostAuth", () => {
       expect(result.current.currentUser?.companyId).toBe("company-2");
     });
 
-    expect(sessionStorage.getItem("stayflow.host.accessToken")).toBe("org-2-access-token");
-    expect(sessionStorage.getItem("stayflow.host.refreshToken")).toBe("org-2-refresh-token");
+    expect(switchCalls).toEqual(["company-2"]);
+    expect(sessionStorage.getItem("stayflow.host.accessToken")).toBe("company-2-access-token");
+    expect(sessionStorage.getItem("stayflow.host.refreshToken")).toBe("company-2-refresh-token");
+  });
+
+  it("never calls the switch endpoint automatically merely from loading the current user", async () => {
+    const { fetchMock, switchCalls } = createRouterFetchMock({ activeCompanyId: "company-1" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useHostAuth(), { wrapper: providerWrapper });
+
+    await act(async () => {
+      await result.current.login("host@example.com", "Password123!");
+    });
+
+    await waitFor(() => {
+      expect(result.current.currentUser?.companyId).toBe("company-1");
+    });
+
+    expect(switchCalls).toEqual([]);
   });
 });

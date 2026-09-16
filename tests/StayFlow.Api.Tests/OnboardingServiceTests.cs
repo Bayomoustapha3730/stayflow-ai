@@ -806,6 +806,67 @@ public sealed class OnboardingServiceTests
     }
 
     [Fact]
+    public async Task GetStatusAsync_ForMemberWithOwnIncompleteProgress_StillReportsOrganizationCompletion()
+    {
+        var fixture = await CreateFixtureAsync();
+        await PromoteToDemoStepAsync(fixture.Service);
+        await fixture.Service.SkipStepAsync("DemoData", new OnboardingSkipStepRequest { Reason = "later" }, CancellationToken.None);
+        await fixture.Service.CompleteOnboardingAsync(new OnboardingCompleteRequest
+        {
+            ConfirmChecklistReviewed = true
+        }, CancellationToken.None);
+
+        // This member has their own, never-progressed onboarding row, but the organization is already complete.
+        var otherMemberId = Guid.NewGuid();
+        var otherMemberService = CreateService(fixture.DbContext, fixture.CompanyId, otherMemberId);
+        await otherMemberService.StartAsync(CancellationToken.None);
+
+        var response = await otherMemberService.GetStatusAsync(CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.True(response.Data!.IsCompleted);
+        Assert.Equal("Completed", response.Data.CurrentStep);
+    }
+
+    [Fact]
+    public async Task CompanyOnboardingState_StaysInSyncAcrossEveryStepTransition()
+    {
+        var fixture = await CreateFixtureAsync();
+
+        async Task<string?> CurrentCompanyOnboardingStateAsync()
+        {
+            var company = await fixture.DbContext.Companies
+                .AsNoTracking()
+                .SingleAsync(item => item.Id == fixture.CompanyId, CancellationToken.None);
+            return company.OnboardingState;
+        }
+
+        await fixture.Service.StartAsync(CancellationToken.None);
+        await fixture.Service.CompleteOrganizationStepAsync(new OnboardingOrganizationRequest { Name = "StayFlow", Slug = "stayflow" }, CancellationToken.None);
+        await fixture.Service.CompletePlanStepAsync(new OnboardingPlanRequest { PlanName = "Growth" }, CancellationToken.None);
+
+        var afterPlan = await fixture.Service.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(afterPlan.Data!.CurrentStep, await CurrentCompanyOnboardingStateAsync());
+
+        await fixture.Service.CompletePropertyStepAsync(new OnboardingPropertyRequest
+        {
+            Name = "Nairobi Loft",
+            AddressLine1 = "Kenyatta Avenue",
+            City = "Nairobi",
+            CountryCode = "KE",
+            TimeZone = "Africa/Nairobi"
+        }, CancellationToken.None);
+
+        var afterProperty = await fixture.Service.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(afterProperty.Data!.CurrentStep, await CurrentCompanyOnboardingStateAsync());
+        Assert.NotEqual("PlanConfirmation", await CurrentCompanyOnboardingStateAsync());
+
+        await fixture.Service.SkipStepAsync("TeamInvitations", new OnboardingSkipStepRequest { Reason = "later" }, CancellationToken.None);
+        var afterSkip = await fixture.Service.GetStatusAsync(CancellationToken.None);
+        Assert.Equal(afterSkip.Data!.CurrentStep, await CurrentCompanyOnboardingStateAsync());
+    }
+
+    [Fact]
     public async Task GetStatusAsync_DoesNotLeakCompletedStateFromAnotherOrganization()
     {
         var fixture = await CreateFixtureAsync();

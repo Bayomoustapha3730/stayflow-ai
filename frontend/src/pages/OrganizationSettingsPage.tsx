@@ -32,7 +32,6 @@ export function OrganizationSettingsPage() {
   const [status, setStatus] = useState("Active");
   const [brandingLogoUrl, setBrandingLogoUrl] = useState("");
   const [brandingPrimaryColor, setBrandingPrimaryColor] = useState("");
-  const [onboardingState, setOnboardingState] = useState("");
 
   const role = auth.currentUser?.organizationRole ?? null;
   const canUpdateOrganization = canEditOrganization(role);
@@ -49,7 +48,6 @@ export function OrganizationSettingsPage() {
     setStatus(settings.organization.status ?? "Active");
     setBrandingLogoUrl(settings.organization.brandingLogoUrl ?? "");
     setBrandingPrimaryColor(settings.organization.brandingPrimaryColor ?? "");
-    setOnboardingState(settings.organization.onboardingState ?? "");
   }, [settings.organization]);
 
   if (!auth.isAuthenticated) {
@@ -127,10 +125,9 @@ export function OrganizationSettingsPage() {
               Branding Primary Color
               <input value={brandingPrimaryColor} onChange={(event) => setBrandingPrimaryColor(event.target.value)} disabled={!canUpdateOrganization || settings.isSaving} placeholder="#0B5FFF" />
             </label>
-            <label>
-              Onboarding State
-              <input value={onboardingState} onChange={(event) => setOnboardingState(event.target.value)} disabled={!canUpdateOrganization || settings.isSaving} />
-            </label>
+            {settings.organization?.onboardingState ? (
+              <p className="sf-host-muted-note">Onboarding state: {settings.organization.onboardingState}</p>
+            ) : null}
 
             <button
               type="button"
@@ -141,8 +138,7 @@ export function OrganizationSettingsPage() {
                   slug,
                   status,
                   brandingLogoUrl,
-                  brandingPrimaryColor,
-                  onboardingState
+                  brandingPrimaryColor
                 });
               }}
             >

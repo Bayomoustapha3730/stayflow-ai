@@ -80,7 +80,7 @@ public sealed class OrganizationService(
         company.NormalizedSlug = normalizedSlug;
         company.BrandingLogoUrl = NormalizeOptional(request.BrandingLogoUrl);
         company.BrandingPrimaryColor = NormalizeOptional(request.BrandingPrimaryColor);
-        company.OnboardingState = NormalizeOptional(request.OnboardingState);
+        // OnboardingState is derived exclusively by OnboardingService from OnboardingProgress; it is not client-writable.
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return ApiResponse<OrganizationDto>.Ok(MapOrganization(company), "Organization updated successfully.");

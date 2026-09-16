@@ -86,5 +86,4 @@ export interface UpdateOrganizationRequest {
   status?: string;
   brandingLogoUrl?: string;
   brandingPrimaryColor?: string;
-  onboardingState?: string;
 }

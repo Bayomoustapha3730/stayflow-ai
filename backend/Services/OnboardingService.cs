@@ -51,10 +51,12 @@ public sealed class OnboardingService(
             return ApiResponse<OnboardingStatusDto>.Fail(error);
         }
 
-        // Onboarding completion is an organization-level fact, so members without their own
-        // progress row must still observe the completed state of the active organization.
-        var progress = await FindProgressAsync(companyId, userId, cancellationToken)
-            ?? await FindCompletedCompanyProgressAsync(companyId, cancellationToken);
+        // Onboarding completion is an organization-level fact: a completed record for the company
+        // takes precedence over the caller's own in-progress row so completion can never regress.
+        var userProgress = await FindProgressAsync(companyId, userId, cancellationToken);
+        var progress = userProgress is { IsCompleted: true }
+            ? userProgress
+            : await FindCompletedCompanyProgressAsync(companyId, cancellationToken) ?? userProgress;
         if (progress is null)
         {
             var notStarted = await BuildNotStartedStatusAsync(companyId, userId, cancellationToken);
@@ -127,13 +129,7 @@ public sealed class OnboardingService(
             progress.CurrentStep = ResolveCurrentStep(progress, completedOrSkipped, blockers).ToStorageValue();
         }
 
-        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
-        if (company is not null)
-        {
-            company.OnboardingState = progress.IsCompleted
-                ? OnboardingStep.Completed.ToStorageValue()
-                : progress.CurrentStep;
-        }
+        await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
         progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
         progress.Version++;
@@ -192,7 +188,7 @@ public sealed class OnboardingService(
         company.TimeZone = NormalizeOptional(request.TimeZone) ?? company.TimeZone;
 
         CompleteStep(progress, OnboardingStep.OrganizationProfile);
-        company.OnboardingState = progress.CurrentStep;
+        await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
         await AddAuditLogAsync(companyId, progress.Id, "OnboardingOrganizationCompleted", new
         {
@@ -231,6 +227,7 @@ public sealed class OnboardingService(
 
         progress.SelectedPlanName = effectivePlanName;
         CompleteStep(progress, OnboardingStep.PlanConfirmation);
+        await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
         await AddAuditLogAsync(companyId, progress.Id, "OnboardingPlanConfirmed", new { planName = effectivePlanName }, cancellationToken);
         await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.PlanConfirmation.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
@@ -302,6 +299,7 @@ public sealed class OnboardingService(
 
         progress.FirstPropertyId = propertyId;
         CompleteStep(progress, OnboardingStep.FirstProperty);
+        await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
         await AddAuditLogAsync(companyId, progress.Id, "OnboardingPropertyCreated", new
         {
@@ -369,6 +367,7 @@ public sealed class OnboardingService(
         }
 
         CompleteStep(progress, OnboardingStep.TeamInvitations);
+        await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
         await AddAuditLogAsync(companyId, progress.Id, "OnboardingInvitationsSent", new
         {
@@ -438,6 +437,7 @@ public sealed class OnboardingService(
         }
 
         CompleteStep(progress, OnboardingStep.WhatsAppSetup);
+        await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
         await AddAuditLogAsync(companyId, progress.Id, "OnboardingWhatsAppConfigured", new { integration.Id }, cancellationToken);
         await AddOnboardingEventAsync(companyId, userId, "onboarding.step_completed", OnboardingStep.WhatsAppSetup.ToStorageValue(), OnboardingStepState.Completed.ToString(), null, cancellationToken);
@@ -490,6 +490,7 @@ public sealed class OnboardingService(
             }
         }
 
+        await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
         await AddAuditLogAsync(companyId, progress.Id, "OnboardingAiConfigured", new { provider }, cancellationToken);
 
         progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -598,6 +599,7 @@ public sealed class OnboardingService(
             }
 
             CompleteStep(progress, OnboardingStep.KnowledgeBaseSetup);
+            await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
             await AddAuditLogAsync(companyId, progress.Id, "OnboardingKnowledgeAdded", new
             {
@@ -810,6 +812,7 @@ public sealed class OnboardingService(
             }
 
             CompleteStep(progress, OnboardingStep.DemoData);
+            await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
             await AddAuditLogAsync(companyId, progress.Id, "OnboardingDemoDataCreated", new
             {
@@ -856,6 +859,7 @@ public sealed class OnboardingService(
         }
 
         SkipStep(progress, targetStep);
+        await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
         await AddAuditLogAsync(companyId, progress.Id, "OnboardingStepSkipped", new
         {
@@ -911,11 +915,7 @@ public sealed class OnboardingService(
             progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
             progress.Version++;
 
-            var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
-            if (company is not null)
-            {
-                company.OnboardingState = OnboardingStep.Completed.ToStorageValue();
-            }
+            await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
             await AddAuditLogAsync(companyId, progress.Id, "OnboardingCompleted", new
             {
@@ -967,11 +967,7 @@ public sealed class OnboardingService(
         progress.LastUpdatedAtUtc = DateTimeOffset.UtcNow;
         progress.Version++;
 
-        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
-        if (company is not null)
-        {
-            company.OnboardingState = OnboardingStep.Welcome.ToStorageValue();
-        }
+        await SyncCompanyOnboardingStateAsync(companyId, progress, cancellationToken);
 
         await AddAuditLogAsync(companyId, progress.Id, "OnboardingReset", null, cancellationToken);
         await AddOnboardingEventAsync(companyId, userId, "onboarding.reset", OnboardingStep.Welcome.ToStorageValue(), OnboardingStepState.InProgress.ToString(), null, cancellationToken);
@@ -1641,6 +1637,21 @@ public sealed class OnboardingService(
     {
         var snapshot = await subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
         return NormalizeOptional(snapshot.PlanDisplayName) ?? NormalizeOptional(snapshot.PlanName);
+    }
+
+    // Company.OnboardingState is a read-model mirror of OnboardingProgress; every step transition must call this
+    // so list/summary endpoints that read the company column never disagree with the canonical progress record.
+    private async Task SyncCompanyOnboardingStateAsync(Guid companyId, OnboardingProgress progress, CancellationToken cancellationToken)
+    {
+        var company = await dbContext.Companies.FirstOrDefaultAsync(item => item.Id == companyId, cancellationToken);
+        if (company is null)
+        {
+            return;
+        }
+
+        company.OnboardingState = progress.IsCompleted
+            ? OnboardingStep.Completed.ToStorageValue()
+            : progress.CurrentStep;
     }
 
     private static string? NormalizeOptional(string? value)

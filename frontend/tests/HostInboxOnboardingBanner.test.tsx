@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { HostInboxPage } from "../src/pages/HostInboxPage";
+import { HostAuthProvider } from "../src/providers/HostAuthProvider";
 
 const hostTokenStorageKey = "stayflow.host.accessToken";
 const hostRefreshTokenStorageKey = "stayflow.host.refreshToken";
@@ -153,7 +154,7 @@ describe("HostInboxPage onboarding banner", () => {
     sessionStorage.setItem(hostTokenStorageKey, tokenFor(organizationB.companyId));
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<HostInboxPage />);
+    render(<HostAuthProvider><HostInboxPage /></HostAuthProvider>);
 
     await waitFor(() => expect(screen.getByText(/testing 2/i)).toBeInTheDocument());
     expect(screen.queryByText(banner)).not.toBeInTheDocument();
@@ -163,7 +164,7 @@ describe("HostInboxPage onboarding banner", () => {
     sessionStorage.setItem(hostTokenStorageKey, tokenFor(organizationA.companyId));
     vi.stubGlobal("fetch", createFetchMock());
 
-    render(<HostInboxPage />);
+    render(<HostAuthProvider><HostInboxPage /></HostAuthProvider>);
 
     expect(await screen.findByText(banner)).toBeInTheDocument();
   });
@@ -173,7 +174,7 @@ describe("HostInboxPage onboarding banner", () => {
     vi.stubGlobal("fetch", createFetchMock());
     const user = userEvent.setup();
 
-    render(<HostInboxPage />);
+    render(<HostAuthProvider><HostInboxPage /></HostAuthProvider>);
 
     expect(await screen.findByText(banner)).toBeInTheDocument();
 
@@ -187,7 +188,7 @@ describe("HostInboxPage onboarding banner", () => {
     vi.stubGlobal("fetch", createFetchMock());
     const user = userEvent.setup();
 
-    render(<HostInboxPage />);
+    render(<HostAuthProvider><HostInboxPage /></HostAuthProvider>);
 
     await waitFor(() => expect(screen.getByText(/testing 2/i)).toBeInTheDocument());
     expect(screen.queryByText(banner)).not.toBeInTheDocument();
@@ -203,7 +204,7 @@ describe("HostInboxPage onboarding banner", () => {
       onboardingStatusOverride: { companyId: organizationA.companyId, isCompleted: false }
     }));
 
-    render(<HostInboxPage />);
+    render(<HostAuthProvider><HostInboxPage /></HostAuthProvider>);
 
     await waitFor(() => expect(screen.getByText(/testing 2/i)).toBeInTheDocument());
     expect(screen.queryByText(banner)).not.toBeInTheDocument();
@@ -215,7 +216,7 @@ describe("HostInboxPage onboarding banner", () => {
       onboardingStatusOverride: { companyId: organizationB.companyId, isCompleted: true }
     }));
 
-    render(<HostInboxPage />);
+    render(<HostAuthProvider><HostInboxPage /></HostAuthProvider>);
 
     await waitFor(() => expect(screen.getByText(/testing 1/i)).toBeInTheDocument());
     expect(screen.queryByText(banner)).not.toBeInTheDocument();
@@ -225,11 +226,11 @@ describe("HostInboxPage onboarding banner", () => {
     sessionStorage.setItem(hostTokenStorageKey, tokenFor(organizationA.companyId));
     vi.stubGlobal("fetch", createFetchMock());
 
-    const first = render(<HostInboxPage />);
+    const first = render(<HostAuthProvider><HostInboxPage /></HostAuthProvider>);
     expect(await screen.findByText(banner)).toBeInTheDocument();
     first.unmount();
 
-    render(<HostInboxPage />);
+    render(<HostAuthProvider><HostInboxPage /></HostAuthProvider>);
     expect(await screen.findByText(banner)).toBeInTheDocument();
   });
 });

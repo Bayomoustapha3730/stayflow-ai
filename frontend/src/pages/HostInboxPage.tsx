@@ -10,7 +10,7 @@ import { CopilotPanel } from "../components/copilot";
 import { useHostAuth } from "../hooks/useHostAuth";
 import { useConversationCopilot } from "../hooks/useConversationCopilot";
 import { useHostConversations } from "../hooks/useHostConversations";
-import { useOrganizationOnboardingStatus } from "../hooks/useOrganizationOnboardingStatus";
+import { useOnboardingStatus } from "../hooks/useOnboardingStatus";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ConversationSenderType } from "../models/enums";
 import { HostConsoleNav } from "../components/host/HostConsoleNav";
@@ -58,7 +58,7 @@ export function HostInboxPage() {
     accessToken: auth.accessToken,
     onUnauthorized: auth.logout
   });
-  const onboarding = useOrganizationOnboardingStatus({
+  const onboarding = useOnboardingStatus({
     accessToken: auth.accessToken,
     activeCompanyId: auth.currentUser?.companyId ?? null
   });

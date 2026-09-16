@@ -98,7 +98,7 @@ public sealed class CompanyService(ICompanyRepository companyRepository, ICurren
         company.TimeZone = request.TimeZone.Trim();
         company.BrandingLogoUrl = NormalizeOptional(request.BrandingLogoUrl);
         company.BrandingPrimaryColor = NormalizeOptional(request.BrandingPrimaryColor);
-        company.OnboardingState = NormalizeOptional(request.OnboardingState);
+        // OnboardingState is derived exclusively by OnboardingService from OnboardingProgress; it is not client-writable.
         company.IsActive = request.IsActive;
 
         await AddAuditLogAsync("Updated", company, cancellationToken);
