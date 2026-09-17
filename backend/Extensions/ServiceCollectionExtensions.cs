@@ -26,6 +26,13 @@ public static class ServiceCollectionExtensions
             .Validate(options => options.RetryDelayMinutes is >= 1 and <= 1440, "Guest journey delivery retry delay must be between 1 and 1440 minutes.")
             .Validate(options => options.MaxAttempts is >= 1 and <= 20, "Guest journey delivery max attempts must be between 1 and 20.")
             .ValidateOnStart();
+        services.AddOptions<Services.ConciergeActions.ActionNotificationDeliveryOptions>()
+            .Bind(configuration.GetSection(Services.ConciergeActions.ActionNotificationDeliveryOptions.SectionName))
+            .Validate(options => options.PollingIntervalSeconds is >= 1 and <= 3600, "Action notification delivery polling interval must be between 1 and 3600 seconds.")
+            .Validate(options => options.BatchSize is >= 1 and <= 500, "Action notification delivery batch size must be between 1 and 500.")
+            .Validate(options => options.MaxAttempts is >= 1 and <= 20, "Action notification delivery max attempts must be between 1 and 20.")
+            .Validate(options => options.RetryDelayMinutes is >= 0 and <= 1440, "Action notification delivery retry delay must be between 0 and 1440 minutes.")
+            .ValidateOnStart();
         services.AddOptions<Services.ReservationLifecycleEventOptions>()
             .Bind(configuration.GetSection(Services.ReservationLifecycleEventOptions.SectionName))
             .Validate(options => options.PollingIntervalSeconds is >= 1 and <= 3600, "Reservation lifecycle polling interval must be between 1 and 3600 seconds.")
@@ -124,13 +131,6 @@ public static class ServiceCollectionExtensions
         services.AddOptions<Services.AI.Orchestration.DevelopmentConciergeLanguageModelOptions>()
             .Bind(configuration.GetSection(Services.AI.Orchestration.DevelopmentConciergeLanguageModelOptions.SectionName))
             .ValidateOnStart();
-        services.AddOptions<Services.ConciergeActions.ActionNotificationDeliveryOptions>()
-            .Bind(configuration.GetSection(Services.ConciergeActions.ActionNotificationDeliveryOptions.SectionName))
-            .Validate(options => options.PollingIntervalSeconds is >= 1 and <= 3600, "Action notification delivery polling interval must be between 1 and 3600 seconds.")
-            .Validate(options => options.BatchSize is >= 1 and <= 500, "Action notification delivery batch size must be between 1 and 500.")
-            .Validate(options => options.RetryDelayMinutes is >= 0 and <= 1440, "Action notification delivery retry delay must be between 0 and 1440 minutes.")
-            .Validate(options => options.MaxAttempts is >= 1 and <= 20, "Action notification delivery max attempts must be between 1 and 20.")
-            .ValidateOnStart();
         services.AddOptions<Services.ConciergeActions.ConciergeActionsOptions>()
             .Bind(configuration.GetSection(Services.ConciergeActions.ConciergeActionsOptions.SectionName))
             .Validate(options => options.PendingActionExpirationMinutes is >= 5 and <= 1440, "Concierge action pending expiration must be between 5 and 1440 minutes.")
@@ -167,7 +167,6 @@ public static class ServiceCollectionExtensions
                 && !string.IsNullOrWhiteSpace(options.BillingPortalReturnUrl),
                 "Billing URLs must be configured.")
             .ValidateOnStart();
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.Billing.BillingOptions>, Services.Billing.BillingOptionsValidator>();
         services.AddOptions<StayFlow.Api.Configuration.EmailDeliveryOptions>()
             .Bind(configuration.GetSection(StayFlow.Api.Configuration.EmailDeliveryOptions.SectionName))
             .Validate(options => options.Provider.Equals("Development", StringComparison.OrdinalIgnoreCase)
@@ -290,7 +289,6 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<Services.WhatsAppCloudClient>();
         services.AddScoped<Services.DevelopmentWhatsAppCloudClient>();
-        services.AddScoped<Services.IWhatsAppOutboundSendGate, Services.WhatsAppOutboundSendGate>();
         services.AddSingleton<Services.IWhatsAppProviderTelemetry, Services.WhatsAppProviderTelemetry>();
         services.AddScoped<Services.IWhatsAppCloudClient>(serviceProvider =>
         {
@@ -317,6 +315,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IWhatsAppWebhookProcessor, Services.WhatsAppWebhookProcessor>();
         services.AddScoped<Services.IWhatsAppCredentialResolver, Services.WhatsAppCredentialResolver>();
         services.AddScoped<Services.IWhatsAppIntegrationHealthService, Services.WhatsAppIntegrationHealthService>();
+        services.AddSingleton<Services.IWhatsAppOutboundSendGate, Services.WhatsAppOutboundSendGate>();
         services.AddScoped<Services.IWhatsAppTemplateService, Services.WhatsAppTemplateService>();
         services.AddScoped<Services.IWhatsAppCustomerServiceWindowEvaluator, Services.WhatsAppCustomerServiceWindowEvaluator>();
         services.AddSingleton<Services.IWhatsAppTemplateVariableValidator, Services.WhatsAppTemplateVariableValidator>();
@@ -342,9 +341,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.ConciergeActions.IConciergeActionExecutor, Services.ConciergeActions.ConciergeActionExecutor>();
         services.AddScoped<Services.ConciergeActions.IConciergeActionOrchestrator, Services.ConciergeActions.ConciergeActionOrchestrator>();
         services.AddScoped<Services.ConciergeActions.IConciergeHostActionService, Services.ConciergeActions.ConciergeHostActionService>();
-        services.AddScoped<Repositories.IActionNotificationOutboxRepository, Repositories.ActionNotificationOutboxRepository>();
-        services.AddScoped<Services.ConciergeActions.IActionNotificationDeliveryProcessor, Services.ConciergeActions.ActionNotificationDeliveryProcessor>();
-        services.AddHostedService<Services.ConciergeActions.ActionNotificationDeliveryWorker>();
         services.AddScoped<Services.HostCopilot.IHostCopilotWorkspaceService, Services.HostCopilot.HostCopilotWorkspaceService>();
         services.AddScoped<Services.IReservationContextResolver, Services.ReservationContextResolver>();
         services.AddScoped<Repositories.IAIContextRepository, Repositories.AIContextRepository>();

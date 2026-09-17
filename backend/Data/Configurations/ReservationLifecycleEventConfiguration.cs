@@ -11,9 +11,7 @@ public sealed class ReservationLifecycleEventConfiguration : IEntityTypeConfigur
         builder.ToTable("ReservationLifecycleEvents");
 
         builder.HasKey(item => item.Id);
-
-        // No Conversation relationship on this entity; the required, filtered principal is Guest.
-        builder.HasQueryFilter(item => !item.Guest.IsDeleted);
+        builder.HasQueryFilter(item => !item.Guest.IsDeleted && !item.Property.IsDeleted && !item.Reservation.IsDeleted);
 
         builder.Property(item => item.EventType).HasConversion<string>().HasMaxLength(40).IsRequired();
         builder.Property(item => item.RuleVersion).HasMaxLength(80).IsRequired();
