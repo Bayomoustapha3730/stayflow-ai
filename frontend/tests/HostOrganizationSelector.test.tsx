@@ -67,6 +67,7 @@ describe("HostOrganizationSelector", () => {
           isSigningIn: false,
           error: null,
           login: vi.fn(),
+          register: vi.fn(),
           logout: vi.fn(),
           clearError: vi.fn(),
           refreshCurrentUser: vi.fn(),

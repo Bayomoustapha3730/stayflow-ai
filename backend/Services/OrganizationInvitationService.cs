@@ -1,9 +1,13 @@
 using System.Security.Cryptography;
+using System.Security.Claims;
 using System.Text;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using StayFlow.Api.Common;
 using StayFlow.Api.Data;
+using StayFlow.Api.DTOs.Auth;
 using StayFlow.Api.DTOs.Organizations;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services.Email;
@@ -15,7 +19,10 @@ public sealed class OrganizationInvitationService(
     ICurrentTenantContext tenantContext,
     IPasswordHasher passwordHasher,
     IConfiguration configuration,
-    IIdentityEmailService identityEmailService) : IOrganizationInvitationService
+    IIdentityEmailService identityEmailService,
+    IJwtTokenService jwtTokenService,
+    IHttpContextAccessor httpContextAccessor,
+    ITenantExecutionContextAccessor tenantExecutionContextAccessor) : IOrganizationInvitationService
 {
     private static readonly TimeSpan DefaultExpiry = TimeSpan.FromDays(7);
     private static readonly TimeSpan ResendCooldown = TimeSpan.FromMinutes(1);
@@ -27,7 +34,7 @@ public sealed class OrganizationInvitationService(
             return ApiResponse<CreatedOrganizationInvitationDto>.Fail(error);
         }
 
-        if (!TryValidateRole(request.Role, out var normalizedRole, out error))
+        if (!OrganizationInvitationValidation.TryValidateRole(request.Role, out var normalizedRole, out error))
         {
             return ApiResponse<CreatedOrganizationInvitationDto>.Fail(error);
         }
@@ -38,7 +45,7 @@ public sealed class OrganizationInvitationService(
             return ApiResponse<CreatedOrganizationInvitationDto>.Fail("A valid invitation email is required.");
         }
 
-        var normalizedEmail = email.ToUpperInvariant();
+        var normalizedEmail = EmailIdentityNormalizer.Normalize(email);
         var existing = await dbContext.OrganizationInvitations
             .AsNoTracking()
             .AnyAsync(item => item.CompanyId == companyId
@@ -173,94 +180,161 @@ public sealed class OrganizationInvitationService(
         }, "Invitation resent.");
     }
 
-    public async Task<ApiResponse<object>> AcceptAsync(AcceptOrganizationInvitationRequest request, CancellationToken cancellationToken)
+    public async Task<ApiResponse<AuthTokenResponse>> AcceptAsync(AcceptOrganizationInvitationRequest request, CancellationToken cancellationToken)
     {
-        if (!TryGetContext(out var companyId, out var userId, out var error))
+        var userId = tenantContext.UserId ?? Guid.Empty;
+        if (!tenantContext.IsAuthenticated || userId == Guid.Empty)
         {
-            return ApiResponse<object>.Fail(error);
+            return ApiResponse<AuthTokenResponse>.Fail("Authenticated user context is required.");
         }
 
         var plainToken = request.Token.Trim();
         if (string.IsNullOrWhiteSpace(plainToken))
         {
-            return ApiResponse<object>.Fail("Invitation token is required.");
+            return ApiResponse<AuthTokenResponse>.Fail("Invitation token is required.");
         }
 
         var tokenHash = HashInvitationToken(plainToken);
-        var invitation = await dbContext.OrganizationInvitations
-            .FirstOrDefaultAsync(item => item.TokenHash == tokenHash, cancellationToken);
-        if (invitation is null)
-        {
-            return ApiResponse<object>.Fail("Invitation is invalid.");
-        }
+        IDbContextTransaction? transaction = null;
 
-        if (invitation.CompanyId != companyId)
+        try
         {
-            return ApiResponse<object>.Fail("Invitation does not belong to the current tenant.");
-        }
-
-        if (invitation.RevokedAtUtc is not null)
-        {
-            return ApiResponse<object>.Fail("Invitation has been revoked.");
-        }
-
-        if (invitation.AcceptedAtUtc is not null)
-        {
-            return ApiResponse<object>.Fail("Invitation has already been used.");
-        }
-
-        if (invitation.RejectedAtUtc is not null)
-        {
-            return ApiResponse<object>.Fail("Invitation has already been rejected.");
-        }
-
-        if (invitation.ExpiresAtUtc <= DateTimeOffset.UtcNow)
-        {
-            return ApiResponse<object>.Fail("Invitation has expired.");
-        }
-
-        var user = await dbContext.Users.FirstOrDefaultAsync(item => item.Id == userId && item.CompanyId == companyId, cancellationToken);
-        if (user is null)
-        {
-            return ApiResponse<object>.Fail("Current user was not found.");
-        }
-
-        var normalizedEmail = user.Email.Trim().ToUpperInvariant();
-        if (!string.Equals(normalizedEmail, invitation.NormalizedEmail, StringComparison.Ordinal))
-        {
-            return ApiResponse<object>.Fail("Invitation email does not match the signed in user.");
-        }
-
-        var existingMembership = await dbContext.OrganizationMembers
-            .FirstOrDefaultAsync(item => item.CompanyId == companyId
-                && item.UserId == userId
-                && item.Status == OrganizationMemberStatus.Active.ToStorageValue(), cancellationToken);
-
-        if (existingMembership is null)
-        {
-            await dbContext.OrganizationMembers.AddAsync(new OrganizationMember
+            if (dbContext.Database.IsRelational())
             {
-                Id = Guid.NewGuid(),
-                CompanyId = companyId,
-                UserId = userId,
-                Role = invitation.Role,
-                Status = OrganizationMemberStatus.Active.ToStorageValue(),
-                JoinedAt = DateTimeOffset.UtcNow,
-                InvitedByUserId = invitation.InvitedByUserId
-            }, cancellationToken);
+                transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            OrganizationInvitation? invitation;
+                if (transaction is not null && string.Equals(
+                    dbContext.Database.ProviderName,
+                    "Npgsql.EntityFrameworkCore.PostgreSQL",
+                    StringComparison.Ordinal))
+            {
+                invitation = await dbContext.OrganizationInvitations
+                    .FromSqlInterpolated($@"SELECT * FROM ""OrganizationInvitations"" WHERE ""TokenHash"" = {tokenHash} FOR UPDATE")
+                    .SingleOrDefaultAsync(cancellationToken);
+            }
+            else
+            {
+                invitation = await dbContext.OrganizationInvitations
+                    .SingleOrDefaultAsync(item => item.TokenHash == tokenHash, cancellationToken);
+            }
+
+            if (invitation is null)
+            {
+                return ApiResponse<AuthTokenResponse>.Fail("Invitation is invalid.");
+            }
+
+            if (!OrganizationInvitationValidation.TryValidate(invitation, out var validationError))
+            {
+                return ApiResponse<AuthTokenResponse>.Fail(validationError);
+            }
+
+            var user = await dbContext.Users
+                .Include(item => item.UserRoles)
+                    .ThenInclude(item => item.Role)
+                        .ThenInclude(item => item.RolePermissions)
+                            .ThenInclude(item => item.Permission)
+                .FirstOrDefaultAsync(item => item.Id == userId && item.IsActive, cancellationToken);
+            if (user is null)
+            {
+                return ApiResponse<AuthTokenResponse>.Fail("Current user was not found.");
+            }
+
+            var normalizedEmail = EmailIdentityNormalizer.Normalize(user.Email);
+            if (!string.Equals(normalizedEmail, invitation.NormalizedEmail, StringComparison.Ordinal))
+            {
+                return ApiResponse<AuthTokenResponse>.Fail("Invitation email does not match the signed in user.");
+            }
+
+            var existingMembership = await dbContext.OrganizationMembers
+                .FirstOrDefaultAsync(item => item.CompanyId == invitation.CompanyId
+                    && item.UserId == userId
+                    && item.Status == OrganizationMemberStatus.Active.ToStorageValue(), cancellationToken);
+
+            if (existingMembership is null)
+            {
+                await dbContext.OrganizationMembers.AddAsync(new OrganizationMember
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = invitation.CompanyId,
+                    UserId = userId,
+                    Role = invitation.Role,
+                    Status = OrganizationMemberStatus.Active.ToStorageValue(),
+                    JoinedAt = DateTimeOffset.UtcNow,
+                    InvitedByUserId = invitation.InvitedByUserId
+                }, cancellationToken);
+            }
+            else
+            {
+                existingMembership.Role = invitation.Role;
+                existingMembership.Status = OrganizationMemberStatus.Active.ToStorageValue();
+            }
+
+            invitation.AcceptedAtUtc = DateTimeOffset.UtcNow;
+            invitation.AcceptedByUserId = userId;
+            user.CompanyId = invitation.CompanyId;
+
+            var activeRefreshTokens = await dbContext.RefreshTokens
+                .Where(token => token.UserId == userId
+                    && token.RevokedAt == null
+                    && token.ExpiresAt > DateTimeOffset.UtcNow)
+                .ToListAsync(cancellationToken);
+
+            foreach (var activeRefreshToken in activeRefreshTokens)
+            {
+                activeRefreshToken.RevokedAt = DateTimeOffset.UtcNow;
+                activeRefreshToken.RevokedReason = "InvitationAccepted";
+            }
+
+            var sessionId = Guid.NewGuid();
+            var response = jwtTokenService.CreateTokenResponse(user, GetRoles(user), GetPermissions(user), sessionId);
+            await dbContext.RefreshTokens.AddAsync(CreateRefreshToken(user.Id, response.RefreshToken, sessionId), cancellationToken);
+            var previousCompanyId = tenantExecutionContextAccessor.CompanyId;
+            var previousUserId = tenantExecutionContextAccessor.UserId;
+            var previousCorrelationId = tenantExecutionContextAccessor.CorrelationId;
+            var hadTenantExecutionContext = tenantExecutionContextAccessor.IsAuthenticated;
+            try
+            {
+                tenantExecutionContextAccessor.Set(invitation.CompanyId, userId, previousCorrelationId);
+                await AddAuditLogAsync(invitation.CompanyId, invitation.Id, "InvitationAccepted", cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+            finally
+            {
+                if (hadTenantExecutionContext && previousCompanyId is { } restoredCompanyId && restoredCompanyId != Guid.Empty)
+                {
+                    tenantExecutionContextAccessor.Set(restoredCompanyId, previousUserId, previousCorrelationId);
+                }
+                else
+                {
+                    tenantExecutionContextAccessor.Clear();
+                }
+            }
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return ApiResponse<AuthTokenResponse>.Ok(response, "Invitation accepted.");
         }
-        else
+        catch
         {
-            existingMembership.Role = invitation.Role;
-            existingMembership.Status = OrganizationMemberStatus.Active.ToStorageValue();
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
         }
-
-        invitation.AcceptedAtUtc = DateTimeOffset.UtcNow;
-        invitation.AcceptedByUserId = userId;
-
-        await AddAuditLogAsync(companyId, invitation.Id, "InvitationAccepted", cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        return ApiResponse<object>.Ok(new { invitationId = invitation.Id }, "Invitation accepted.");
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
     }
 
     public async Task<ApiResponse<object>> RejectAsync(RejectOrganizationInvitationRequest request, CancellationToken cancellationToken)
@@ -320,32 +394,9 @@ public sealed class OrganizationInvitationService(
         return true;
     }
 
-    private static bool TryValidateRole(string role, out string normalizedRole, out string error)
-    {
-        normalizedRole = string.Empty;
-        error = string.Empty;
-
-        if (!OrganizationRoleExtensions.TryParse(role, out var parsed))
-        {
-            error = "Invitation role is invalid.";
-            return false;
-        }
-
-        if (parsed == OrganizationRole.Owner)
-        {
-            error = "Owner role cannot be granted through invitations.";
-            return false;
-        }
-
-        normalizedRole = parsed.ToStorageValue();
-        return true;
-    }
-
     private string HashInvitationToken(string token)
     {
-        var pepper = configuration["Jwt:SigningKey"] ?? "stayflow-invitation-pepper";
-        var combined = $"{pepper}:{token}";
-        return passwordHasher.HashToken(combined);
+        return OrganizationInvitationValidation.HashToken(token, passwordHasher, configuration);
     }
 
     private static string GenerateToken()
@@ -391,5 +442,49 @@ public sealed class OrganizationInvitationService(
     private bool ShouldExposeTokensForDevelopment()
     {
         return string.Equals(configuration["Email:Provider"], "Development", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private RefreshToken CreateRefreshToken(Guid userId, string refreshToken, Guid sessionId)
+    {
+        return new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            SessionId = sessionId,
+            UserId = userId,
+            TokenHash = passwordHasher.HashToken(refreshToken),
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(GetRefreshTokenDays()),
+            CreatedByIpAddress = httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString(),
+            CreatedByUserAgent = NormalizeUserAgent(httpContextAccessor.HttpContext?.Request.Headers.UserAgent.ToString())
+        };
+    }
+
+    private int GetRefreshTokenDays()
+    {
+        return int.TryParse(configuration["Jwt:RefreshTokenDays"], out var days) ? days : 30;
+    }
+
+    private static IReadOnlyCollection<string> GetRoles(User user)
+    {
+        return user.UserRoles.Select(userRole => userRole.Role.Name).Distinct().ToList();
+    }
+
+    private static IReadOnlyCollection<string> GetPermissions(User user)
+    {
+        return user.UserRoles
+            .SelectMany(userRole => userRole.Role.RolePermissions)
+            .Select(rolePermission => rolePermission.Permission.Name)
+            .Distinct()
+            .ToList();
+    }
+
+    private static string? NormalizeUserAgent(string? userAgent)
+    {
+        if (string.IsNullOrWhiteSpace(userAgent))
+        {
+            return null;
+        }
+
+        var trimmed = userAgent.Trim();
+        return trimmed.Length <= 256 ? trimmed : trimmed[..256];
     }
 }

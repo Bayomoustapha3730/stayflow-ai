@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using StayFlow.Api.Data;
 using StayFlow.Api.Models;
+using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Repositories;
 
@@ -8,8 +9,9 @@ public sealed class AuthRepository(ApplicationDbContext dbContext) : IAuthReposi
 {
     public Task<User?> GetUserByEmailAsync(string email, CancellationToken cancellationToken)
     {
+        var normalizedEmail = EmailIdentityNormalizer.Normalize(email);
         return UsersWithAuthorization()
-            .FirstOrDefaultAsync(user => user.Email == email && user.IsActive, cancellationToken);
+            .FirstOrDefaultAsync(user => user.NormalizedEmail == normalizedEmail && user.IsActive, cancellationToken);
     }
 
     public Task<User?> GetUserByIdAsync(Guid id, CancellationToken cancellationToken)

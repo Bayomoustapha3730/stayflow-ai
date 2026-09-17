@@ -1,6 +1,6 @@
 import { getRuntimeApiUrl } from "../runtimeConfig";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { createAuthApi } from "../api/authApi";
+import { createAuthApi, type RegisterRequest } from "../api/authApi";
 import { ApiError, HttpClient } from "../api/httpClient";
 import { createOnboardingApi } from "../api/onboardingApi";
 import { HostAuthContext } from "../context/HostAuthContext";
@@ -20,6 +20,7 @@ export interface UseHostAuthResult {
   isSigningIn: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
+  register: (request: RegisterRequest) => Promise<void>;
   logout: () => void;
   clearError: () => void;
   refreshCurrentUser: () => Promise<void>;
@@ -179,6 +180,28 @@ export function useHostAuthState(): UseHostAuthResult {
     [authApi, loadCurrentUserWithToken, persistSession]
   );
 
+  const register = useCallback(
+    async (request: RegisterRequest) => {
+      setError(null);
+      setIsSigningIn(true);
+
+      try {
+        const response = await authApi.register(request);
+        persistSession(response);
+        await loadCurrentUserWithToken(response.accessToken);
+        await navigateToCurrentOnboardingStepIfRequired(response.accessToken);
+      } catch (failure) {
+        const message = failure instanceof Error ? failure.message : "Unable to create account.";
+        setError(message);
+        setCurrentUser(null);
+        throw failure;
+      } finally {
+        setIsSigningIn(false);
+      }
+    },
+    [authApi, loadCurrentUserWithToken, navigateToCurrentOnboardingStepIfRequired, persistSession]
+  );
+
   const logout = useCallback(() => {
     persistSession(null);
     setCurrentUser(null);
@@ -248,6 +271,7 @@ export function useHostAuthState(): UseHostAuthResult {
     isSigningIn,
     error,
     login,
+    register,
     logout,
     clearError,
     refreshCurrentUser,

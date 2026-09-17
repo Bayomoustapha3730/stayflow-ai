@@ -15,10 +15,25 @@ import type {
 } from "../models/organization";
 import type { HttpClient } from "./httpClient";
 
+export interface RegisterRequest {
+  fullName: string;
+  email: string;
+  phoneNumber: string;
+  password: string;
+  countryCode: string;
+  timeZone: string;
+  invitationToken?: string;
+  organizationName?: string;
+  organizationSlug?: string;
+}
+
 export function createAuthApi(http: HttpClient) {
   return {
     loginForDevelopment(email: string, password: string) {
       return http.post<LoginResponse>("/auth/login", { email, password });
+    },
+    register(request: RegisterRequest) {
+      return http.post<AuthTokenSession>("/auth/register", request);
     },
     refreshSession(refreshToken: string) {
       return http.post<AuthTokenSession>("/auth/refresh", { refreshToken });

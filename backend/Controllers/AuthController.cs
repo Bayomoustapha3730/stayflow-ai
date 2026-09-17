@@ -31,6 +31,21 @@ public sealed class AuthController(IAuthService authService) : ControllerBase
     }
 
     /// <summary>
+    /// Registers a new customer account and creates the initial organization in one cohesive server-side operation.
+    /// </summary>
+    [AllowAnonymous]
+    [HttpPost("register")]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<AuthTokenResponse>), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<AuthTokenResponse>>> Register(
+        [FromBody] RegisterRequest request,
+        CancellationToken cancellationToken)
+    {
+        var response = await authService.RegisterAsync(request, cancellationToken);
+        return response.Success ? Ok(response) : BadRequest(response);
+    }
+
+    /// <summary>
     /// Rotates a refresh token and returns a new token pair.
     /// </summary>
     [HttpPost("refresh")]

@@ -7,6 +7,7 @@ namespace StayFlow.Api.Services;
 public interface IAuthService
 {
     Task<ApiResponse<AuthTokenResponse>> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
+    Task<ApiResponse<AuthTokenResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);
     Task<ApiResponse<AuthTokenResponse>> RefreshAsync(RefreshTokenRequest request, CancellationToken cancellationToken);
     Task<ApiResponse<IReadOnlyCollection<AuthOrganizationSummaryDto>>> GetAuthorizedOrganizationsAsync(ClaimsPrincipal principal, CancellationToken cancellationToken);
     Task<ApiResponse<AuthTokenResponse>> SwitchOrganizationAsync(ClaimsPrincipal principal, Guid companyId, CancellationToken cancellationToken);

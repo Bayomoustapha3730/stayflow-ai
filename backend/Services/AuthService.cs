@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
+using Npgsql;
 using StayFlow.Api.Common;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Companies;
@@ -66,6 +67,336 @@ public sealed class AuthService(
         await authRepository.SaveChangesAsync(cancellationToken);
 
         return ApiResponse<AuthTokenResponse>.Ok(response, "Login successful.");
+    }
+
+    public async Task<ApiResponse<AuthTokenResponse>> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.FullName) || request.FullName.Trim().Length > 160)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Full name is required and must be 160 characters or fewer.");
+        }
+
+        if (!TryValidatePassword(request.Password, out var passwordPolicyError))
+        {
+            return ApiResponse<AuthTokenResponse>.Fail(passwordPolicyError);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.InvitationToken))
+        {
+            return await RegisterFromInvitationAsync(request, cancellationToken);
+        }
+
+        var companyRequest = new CreateCompanyRequest
+        {
+            Name = request.OrganizationName,
+            Slug = request.OrganizationSlug,
+            Email = request.Email,
+            PhoneNumber = request.PhoneNumber,
+            CountryCode = request.CountryCode,
+            TimeZone = request.TimeZone
+        };
+        var validation = CompanyRequestValidator.Validate(companyRequest);
+        if (!validation.IsValid)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Registration validation failed.", validation.Errors);
+        }
+
+        var email = request.Email.Trim();
+        var normalizedEmail = EmailIdentityNormalizer.Normalize(email);
+        var existingUser = await dbContext.Users
+            .AsNoTracking()
+            .AnyAsync(item => item.NormalizedEmail == normalizedEmail, cancellationToken);
+        if (existingUser)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("An account already exists for this email.");
+        }
+
+        var slug = BuildSlug(request.OrganizationSlug, request.OrganizationName);
+        var normalizedSlug = slug.ToUpperInvariant();
+        var slugExists = await dbContext.Companies
+            .AsNoTracking()
+            .AnyAsync(item => item.NormalizedSlug == normalizedSlug, cancellationToken);
+        if (slugExists)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Organization slug already exists.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var companyId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        IDbContextTransaction? transaction = null;
+
+        try
+        {
+            if (dbContext.Database.IsRelational())
+            {
+                transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            var company = new Company
+            {
+                Id = companyId,
+                Name = request.OrganizationName.Trim(),
+                Slug = slug,
+                NormalizedSlug = normalizedSlug,
+                Status = "Active",
+                Email = email,
+                PhoneNumber = request.PhoneNumber.Trim(),
+                CountryCode = request.CountryCode.Trim().ToUpperInvariant(),
+                TimeZone = request.TimeZone.Trim(),
+                OnboardingState = OnboardingStep.Welcome.ToStorageValue(),
+                IsActive = true
+            };
+            var user = new User
+            {
+                Id = userId,
+                CompanyId = companyId,
+                FullName = request.FullName.Trim(),
+                Email = email,
+                NormalizedEmail = normalizedEmail,
+                PhoneNumber = request.PhoneNumber.Trim(),
+                PreferredLanguage = "en",
+                TimeZone = request.TimeZone.Trim(),
+                Role = OrganizationRole.Owner.ToStorageValue(),
+                PasswordHash = passwordHasher.HashPassword(request.Password),
+                IsActive = true
+            };
+            var membership = new OrganizationMember
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                UserId = userId,
+                Role = OrganizationRole.Owner.ToStorageValue(),
+                Status = OrganizationMemberStatus.Active.ToStorageValue(),
+                JoinedAt = now
+            };
+            var onboardingProgress = new OnboardingProgress
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                UserId = userId,
+                CurrentStep = OnboardingStep.Welcome.ToStorageValue(),
+                StartedAtUtc = now,
+                LastUpdatedAtUtc = now,
+                IsCompleted = false,
+                Version = 1
+            };
+
+            user.OrganizationMemberships.Add(membership);
+            await dbContext.Companies.AddAsync(company, cancellationToken);
+            await dbContext.Users.AddAsync(user, cancellationToken);
+            await dbContext.OrganizationMembers.AddAsync(membership, cancellationToken);
+            await dbContext.OnboardingProgressRecords.AddAsync(onboardingProgress, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            company.OwnerUserId = userId;
+            var previousCompanyId = tenantExecutionContextAccessor.CompanyId;
+            var previousUserId = tenantExecutionContextAccessor.UserId;
+            var previousCorrelationId = tenantExecutionContextAccessor.CorrelationId;
+            var hadTenantExecutionContext = tenantExecutionContextAccessor.IsAuthenticated;
+            try
+            {
+                tenantExecutionContextAccessor.Set(companyId, userId, previousCorrelationId);
+                await subscriptionEntitlementService.GetCurrentSnapshotAsync(companyId, cancellationToken);
+            }
+            finally
+            {
+                if (hadTenantExecutionContext && previousCompanyId is { } restoredCompanyId && restoredCompanyId != Guid.Empty)
+                {
+                    tenantExecutionContextAccessor.Set(restoredCompanyId, previousUserId, previousCorrelationId);
+                }
+                else
+                {
+                    tenantExecutionContextAccessor.Clear();
+                }
+            }
+
+            var sessionId = Guid.NewGuid();
+            var response = jwtTokenService.CreateTokenResponse(user, GetRoles(user), GetPermissions(user), sessionId);
+            await authRepository.AddRefreshTokenAsync(CreateRefreshToken(userId, response.RefreshToken, sessionId), cancellationToken);
+            await AddAuditLogAsync(user, "RegistrationCompleted", new { companyId }, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return ApiResponse<AuthTokenResponse>.Ok(response, "Registration successful.");
+        }
+        catch (DbUpdateException exception) when (IsNormalizedEmailUniqueViolation(exception))
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            return ApiResponse<AuthTokenResponse>.Fail("An account already exists for this email.");
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
+    }
+
+    private static bool IsNormalizedEmailUniqueViolation(DbUpdateException exception)
+    {
+        if (exception.GetBaseException() is PostgresException postgresException)
+        {
+            return postgresException.SqlState == PostgresErrorCodes.UniqueViolation
+                && string.Equals(postgresException.ConstraintName, "IX_Users_NormalizedEmail", StringComparison.Ordinal);
+        }
+
+        return exception.GetBaseException().Message.Contains("Users.NormalizedEmail", StringComparison.OrdinalIgnoreCase)
+            || exception.GetBaseException().Message.Contains("IX_Users_NormalizedEmail", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<ApiResponse<AuthTokenResponse>> RegisterFromInvitationAsync(RegisterRequest request, CancellationToken cancellationToken)
+    {
+        var userValidation = CompanyRequestValidator.Validate(new CreateCompanyRequest
+        {
+            Name = "Invited user",
+            Email = request.Email.Trim(),
+            PhoneNumber = request.PhoneNumber.Trim(),
+            CountryCode = request.CountryCode.Trim(),
+            TimeZone = request.TimeZone.Trim()
+        });
+        if (!userValidation.IsValid)
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("Registration validation failed.", userValidation.Errors);
+        }
+
+        var email = request.Email.Trim();
+        var normalizedEmail = EmailIdentityNormalizer.Normalize(email);
+        if (await dbContext.Users.AsNoTracking().AnyAsync(item => item.NormalizedEmail == normalizedEmail, cancellationToken))
+        {
+            return ApiResponse<AuthTokenResponse>.Fail("An account already exists for this email. Sign in to accept the invitation.");
+        }
+
+        var tokenHash = OrganizationInvitationValidation.HashToken(request.InvitationToken!.Trim(), passwordHasher, configuration);
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            if (dbContext.Database.IsRelational())
+            {
+                transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            OrganizationInvitation? invitation;
+            if (transaction is not null && string.Equals(dbContext.Database.ProviderName, "Npgsql.EntityFrameworkCore.PostgreSQL", StringComparison.Ordinal))
+            {
+                invitation = await dbContext.OrganizationInvitations
+                    .FromSqlInterpolated($@"SELECT * FROM ""OrganizationInvitations"" WHERE ""TokenHash"" = {tokenHash} FOR UPDATE")
+                    .SingleOrDefaultAsync(cancellationToken);
+            }
+            else
+            {
+                invitation = await dbContext.OrganizationInvitations.SingleOrDefaultAsync(item => item.TokenHash == tokenHash, cancellationToken);
+            }
+
+            if (invitation is null)
+            {
+                return ApiResponse<AuthTokenResponse>.Fail("Invitation is invalid.");
+            }
+
+            if (!OrganizationInvitationValidation.TryValidate(invitation, out var invitationError))
+            {
+                return ApiResponse<AuthTokenResponse>.Fail(invitationError);
+            }
+
+            if (!string.Equals(normalizedEmail, invitation.NormalizedEmail, StringComparison.Ordinal))
+            {
+                return ApiResponse<AuthTokenResponse>.Fail("Invitation email does not match the registration email.");
+            }
+
+            var company = await dbContext.Companies
+                .FirstOrDefaultAsync(item => item.Id == invitation.CompanyId && item.IsActive, cancellationToken);
+            if (company is null)
+            {
+                return ApiResponse<AuthTokenResponse>.Fail("Invitation organization is not available.");
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var user = new User
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = invitation.CompanyId,
+                FullName = request.FullName.Trim(),
+                Email = email,
+                NormalizedEmail = normalizedEmail,
+                PhoneNumber = request.PhoneNumber.Trim(),
+                PreferredLanguage = "en",
+                TimeZone = request.TimeZone.Trim(),
+                Role = invitation.Role,
+                PasswordHash = passwordHasher.HashPassword(request.Password),
+                IsActive = true
+            };
+            var membership = new OrganizationMember
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = invitation.CompanyId,
+                UserId = user.Id,
+                Role = invitation.Role,
+                Status = OrganizationMemberStatus.Active.ToStorageValue(),
+                JoinedAt = now,
+                InvitedByUserId = invitation.InvitedByUserId
+            };
+            user.OrganizationMemberships.Add(membership);
+            invitation.AcceptedAtUtc = now;
+            invitation.AcceptedByUserId = user.Id;
+
+            await dbContext.Users.AddAsync(user, cancellationToken);
+            await dbContext.OrganizationMembers.AddAsync(membership, cancellationToken);
+            var sessionId = Guid.NewGuid();
+            var response = jwtTokenService.CreateTokenResponse(user, [], [], sessionId);
+            await authRepository.AddRefreshTokenAsync(CreateRefreshToken(user.Id, response.RefreshToken, sessionId), cancellationToken);
+            await AddAuditLogAsync(user, "InvitationRegistrationCompleted", new { invitation.Id }, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return ApiResponse<AuthTokenResponse>.Ok(response, "Registration successful.");
+        }
+        catch (DbUpdateException exception) when (IsNormalizedEmailUniqueViolation(exception))
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            return ApiResponse<AuthTokenResponse>.Fail("An account already exists for this email. Sign in to accept the invitation.");
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
+        }
     }
 
     public async Task<ApiResponse<AuthTokenResponse>> RefreshAsync(RefreshTokenRequest request, CancellationToken cancellationToken)
@@ -186,6 +517,8 @@ public sealed class AuthService(
         user.OrganizationMemberships = user.OrganizationMemberships
             .Where(item => item.CompanyId != companyId || item.Status == OrganizationMemberStatus.Active.ToStorageValue())
             .ToList();
+
+        await authRepository.RevokeActiveRefreshTokensAsync(userId, "OrganizationSwitched", exceptSessionId: null, cancellationToken);
 
         var sessionId = Guid.NewGuid();
         var response = jwtTokenService.CreateTokenResponse(user, GetRoles(user), GetPermissions(user), sessionId);

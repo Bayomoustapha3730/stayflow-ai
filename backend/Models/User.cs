@@ -5,6 +5,7 @@ public sealed class User : AuditableEntity
     public Guid CompanyId { get; set; }
     public string FullName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public string NormalizedEmail { get; set; } = string.Empty;
     public string PhoneNumber { get; set; } = string.Empty;
     public string PreferredLanguage { get; set; } = "en";
     public string TimeZone { get; set; } = "UTC";

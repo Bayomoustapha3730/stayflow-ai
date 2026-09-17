@@ -14,6 +14,7 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
 
         builder.Property(user => user.FullName).HasMaxLength(160).IsRequired();
         builder.Property(user => user.Email).HasMaxLength(254).IsRequired();
+        builder.Property(user => user.NormalizedEmail).HasMaxLength(254).IsRequired();
         builder.Property(user => user.PhoneNumber).HasMaxLength(32).IsRequired();
         builder.Property(user => user.PreferredLanguage).HasMaxLength(16).IsRequired();
         builder.Property(user => user.TimeZone).HasMaxLength(80).IsRequired();
@@ -38,6 +39,6 @@ public sealed class UserConfiguration : IEntityTypeConfiguration<User>
         builder.HasIndex(user => user.CompanyId);
         builder.HasIndex(user => user.PhoneNumber);
         builder.HasIndex(user => user.CreatedAt);
-        builder.HasIndex(user => new { user.CompanyId, user.Email }).IsUnique();
+        builder.HasIndex(user => user.NormalizedEmail).IsUnique();
     }
 }

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StayFlow.Api.Authorization;
 using StayFlow.Api.Common;
+using StayFlow.Api.DTOs.Auth;
 using StayFlow.Api.DTOs.Organizations;
 using StayFlow.Api.Services;
 
@@ -48,8 +49,7 @@ public sealed class OrganizationInvitationsController(IOrganizationInvitationSer
     }
 
     [HttpPost("accept")]
-    [Authorize(Policy = OrganizationPolicyNames.ReadOnly)]
-    public async Task<ActionResult<ApiResponse<object>>> Accept([FromBody] AcceptOrganizationInvitationRequest request, CancellationToken cancellationToken)
+    public async Task<ActionResult<ApiResponse<AuthTokenResponse>>> Accept([FromBody] AcceptOrganizationInvitationRequest request, CancellationToken cancellationToken)
     {
         var response = await invitationService.AcceptAsync(request, cancellationToken);
         return response.Success ? Ok(response) : BadRequest(response);

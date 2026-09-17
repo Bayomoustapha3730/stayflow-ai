@@ -95,6 +95,41 @@ public sealed class AuthServiceTests
     }
 
     [Fact]
+    public async Task SwitchOrganizationAsync_WithExistingSessions_RevokesPreviousRefreshTokens()
+    {
+        var hasher = new Pbkdf2PasswordHasher();
+        var repository = new FakeAuthRepository();
+        repository.User = NewUser(hasher.HashPassword("a very strong password"));
+        var previousSessionId = Guid.NewGuid();
+        repository.RefreshTokens.Add(new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            UserId = repository.User.Id,
+            User = repository.User,
+            SessionId = previousSessionId,
+            TokenHash = hasher.HashToken("stale-token"),
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(7)
+        });
+
+        var otherCompanyId = Guid.NewGuid();
+        repository.User.OrganizationMemberships.Add(new OrganizationMember
+        {
+            CompanyId = otherCompanyId,
+            UserId = repository.User.Id,
+            Role = "Host",
+            Status = OrganizationMemberStatus.Active.ToStorageValue()
+        });
+        var service = CreateService(repository, hasher);
+
+        var response = await service.SwitchOrganizationAsync(CreatePrincipal(repository.User.Id), otherCompanyId, CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(2, repository.RefreshTokens.Count);
+        Assert.NotNull(repository.RefreshTokens.Single(token => token.SessionId == previousSessionId).RevokedAt);
+        Assert.Null(repository.RefreshTokens.Single(token => token.SessionId != previousSessionId).RevokedAt);
+    }
+
+    [Fact]
     public async Task UpdateCurrentUserAsync_WithValidRequest_UpdatesProfile()
     {
         var hasher = new Pbkdf2PasswordHasher();

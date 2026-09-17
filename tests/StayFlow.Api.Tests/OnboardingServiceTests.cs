@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.Data;
+using StayFlow.Api.DTOs.Auth;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.Onboarding;
 using StayFlow.Api.DTOs.Organizations;
@@ -1364,8 +1365,8 @@ public sealed class OnboardingServiceTests
         public Task<ApiResponse<ResentOrganizationInvitationDto>> ResendAsync(Guid invitationId, CancellationToken cancellationToken)
             => Task.FromResult(ApiResponse<ResentOrganizationInvitationDto>.Fail("not implemented"));
 
-        public Task<ApiResponse<object>> AcceptAsync(AcceptOrganizationInvitationRequest request, CancellationToken cancellationToken)
-            => Task.FromResult(ApiResponse<object>.Fail("not implemented"));
+        public Task<ApiResponse<AuthTokenResponse>> AcceptAsync(AcceptOrganizationInvitationRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(ApiResponse<AuthTokenResponse>.Fail("not implemented"));
 
         public Task<ApiResponse<object>> RejectAsync(RejectOrganizationInvitationRequest request, CancellationToken cancellationToken)
             => Task.FromResult(ApiResponse<object>.Fail("not implemented"));

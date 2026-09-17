@@ -71,6 +71,7 @@ public sealed class ApplicationDbContext(
 
     public override int SaveChanges()
     {
+        NormalizeUserEmails();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChanges();
@@ -78,6 +79,7 @@ public sealed class ApplicationDbContext(
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        NormalizeUserEmails();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChangesAsync(cancellationToken);
@@ -116,6 +118,17 @@ public sealed class ApplicationDbContext(
             {
                 entry.Property(entity => entity.CreatedAt).IsModified = false;
                 entry.Entity.UpdatedAt = utcNow;
+            }
+        }
+    }
+
+    private void NormalizeUserEmails()
+    {
+        foreach (var entry in ChangeTracker.Entries<User>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.NormalizedEmail = EmailIdentityNormalizer.Normalize(entry.Entity.Email);
             }
         }
     }
