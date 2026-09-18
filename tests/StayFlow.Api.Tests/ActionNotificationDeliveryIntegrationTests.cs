@@ -34,6 +34,8 @@ public sealed class ActionNotificationDeliveryIntegrationTests
         Assert.Equal(ActionNotificationOutboxStatus.Sent, outbox.Status);
         Assert.NotNull(outbox.SentAt);
         Assert.Single(fixture.MessageStore.GetRecords());
+        Assert.Equal(1, fixture.Coordinator.InvocationCount);
+        Assert.StartsWith("whatsapp:message:", fixture.Coordinator.OperationKeys.Single(), StringComparison.Ordinal);
         Assert.Contains("late checkout", fixture.MessageStore.GetRecords().Single().BodyPreview, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -129,7 +131,8 @@ public sealed class ActionNotificationDeliveryIntegrationTests
                 new WhatsAppCustomerServiceWindowEvaluator(WhatsAppRepository, whatsAppOptions),
                 new WhatsAppOutboundSendGate(whatsAppOptions),
                 new PhoneNumberNormalizer(),
-                NullLogger<WhatsAppConversationChannelSender>.Instance);
+                NullLogger<WhatsAppConversationChannelSender>.Instance,
+                Coordinator);
 
             var dispatcher = new ConversationChannelDispatcher(
                 [whatsAppSender, new WebConversationChannelSender()],
@@ -175,6 +178,7 @@ public sealed class ActionNotificationDeliveryIntegrationTests
         public ConversationService ConversationService { get; }
         public FakeOutboxRepository OutboxRepository { get; }
         public ActionNotificationDeliveryProcessor Processor { get; }
+        public RecordingWhatsAppOutboundSendCoordinator Coordinator { get; } = new();
 
         public void AddInboundGuestMessage(DateTimeOffset sentAt)
         {
@@ -259,6 +263,19 @@ public sealed class ActionNotificationDeliveryIntegrationTests
         public Guid? UserId { get; } = Guid.NewGuid();
         public string? CorrelationId { get; } = "action-notification-test";
         public bool IsAuthenticated { get; } = true;
+    }
+
+    private sealed class RecordingWhatsAppOutboundSendCoordinator : IWhatsAppOutboundSendCoordinator
+    {
+        public List<string> OperationKeys { get; } = [];
+        public int InvocationCount { get; private set; }
+
+        public Task<T> ExecuteAsync<T>(Guid companyId, string operationKey, Func<CancellationToken, Task<T>> send, CancellationToken cancellationToken)
+        {
+            InvocationCount++;
+            OperationKeys.Add(operationKey);
+            return send(cancellationToken);
+        }
     }
 
     private sealed class SuccessfulCredentialResolver : IWhatsAppCredentialResolver

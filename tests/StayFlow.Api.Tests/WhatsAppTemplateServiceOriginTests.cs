@@ -31,6 +31,24 @@ public sealed class WhatsAppTemplateServiceOriginTests
     }
 
     [Fact]
+    public async Task SendTemplateMessageAsync_AdmitsQuotaExactlyOnceThroughCoordinator()
+    {
+        var fixture = new Fixture();
+
+        var response = await fixture.Service.SendTemplateMessageAsync(
+            fixture.Conversation.Id,
+            fixture.Template.Id,
+            new SendWhatsAppTemplateMessageRequest { ClientRequestId = "single-template-admission" },
+            CancellationToken.None);
+
+        Assert.True(response.Success);
+        Assert.Equal(1, fixture.Coordinator.InvocationCount);
+        Assert.Equal("whatsapp:message:" + fixture.ConversationRepository.Messages.Single().Id.ToString("N"), fixture.Coordinator.OperationKeys.Single());
+        Assert.Empty(fixture.Entitlement.QuotaKeys);
+        Assert.Single(fixture.CloudClient.TemplateRequests);
+    }
+
+    [Fact]
     public async Task SendLifecycleAutomationTemplateMessageAsync_AssignsReservationLifecycleOriginToCloudRequest()
     {
         var fixture = new Fixture();
@@ -224,12 +242,13 @@ public sealed class WhatsAppTemplateServiceOriginTests
                 new NoOpWhatsAppIntegrationHealthService(),
                 new WhatsAppTemplateVariableValidator(),
                 new WhatsAppOutboundSendGate(Options.Create(cloudOptions)),
-                new AllowingSubscriptionEntitlementService(),
+                Entitlement,
                 new OpenWhatsAppCustomerServiceWindowEvaluator(),
                 new PhoneNumberNormalizer(),
                 new FakeHostEnvironment("Development"),
                 Options.Create(cloudOptions),
-                NullLogger<WhatsAppTemplateService>.Instance);
+                NullLogger<WhatsAppTemplateService>.Instance,
+                Coordinator);
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();
@@ -239,6 +258,8 @@ public sealed class WhatsAppTemplateServiceOriginTests
         public FakeConversationRepository ConversationRepository { get; }
         public FakeWhatsAppRepository WhatsAppRepository { get; }
         public RecordingWhatsAppCloudClient CloudClient { get; }
+        public RecordingOutboundSendCoordinator Coordinator { get; } = new();
+        public AllowingSubscriptionEntitlementService Entitlement { get; } = new();
         public WhatsAppTemplateService Service { get; }
     }
 
@@ -355,13 +376,31 @@ public sealed class WhatsAppTemplateServiceOriginTests
 
     private sealed class AllowingSubscriptionEntitlementService : ISubscriptionEntitlementService
     {
+        public List<string> QuotaKeys { get; } = [];
+
         public Task<UsageConsumptionResult> ConsumeQuotaAsync(Guid companyId, UsageMetric metric, long quantity, string idempotencyKey, CancellationToken cancellationToken)
-            => Task.FromResult(new UsageConsumptionResult(metric, null, 0, quantity, true, false));
+        {
+            QuotaKeys.Add(idempotencyKey);
+            return Task.FromResult(new UsageConsumptionResult(metric, null, 0, quantity, true, false));
+        }
 
         public Task<SubscriptionSnapshot> GetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<SubscriptionSnapshot> UpdatePlanAsync(Guid companyId, Guid? planId, string? planName, string? notes, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingOutboundSendCoordinator : IWhatsAppOutboundSendCoordinator
+    {
+        public List<string> OperationKeys { get; } = [];
+        public int InvocationCount { get; private set; }
+
+        public Task<T> ExecuteAsync<T>(Guid companyId, string operationKey, Func<CancellationToken, Task<T>> send, CancellationToken cancellationToken)
+        {
+            InvocationCount++;
+            OperationKeys.Add(operationKey);
+            return send(cancellationToken);
+        }
     }
 
     private sealed class OpenWhatsAppCustomerServiceWindowEvaluator : IWhatsAppCustomerServiceWindowEvaluator

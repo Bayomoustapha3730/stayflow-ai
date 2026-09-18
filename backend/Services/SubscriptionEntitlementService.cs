@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Data;
+using Npgsql;
 using StayFlow.Api.Data;
 using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
@@ -67,6 +69,43 @@ public sealed class SubscriptionEntitlementService(
     }
 
     public async Task<UsageConsumptionResult> ConsumeQuotaAsync(
+        Guid companyId,
+        UsageMetric metric,
+        long quantity,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        if (!dbContext.Database.IsRelational())
+        {
+            return await ConsumeQuotaCoreAsync(companyId, metric, quantity, idempotencyKey, cancellationToken);
+        }
+
+        return await QuotaAdmissionRetryPolicy.ExecuteAsync(
+            async _ =>
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(
+                IsolationLevel.Serializable,
+                cancellationToken);
+
+            try
+            {
+                var result = await ConsumeQuotaCoreAsync(companyId, metric, quantity, idempotencyKey, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch (Exception exception) when (IsRetryableQuotaRace(exception))
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                dbContext.ChangeTracker.Clear();
+                throw;
+            }
+        },
+        static () => Task.CompletedTask,
+        IsRetryableQuotaRace,
+        cancellationToken);
+    }
+
+    private async Task<UsageConsumptionResult> ConsumeQuotaCoreAsync(
         Guid companyId,
         UsageMetric metric,
         long quantity,
@@ -171,29 +210,28 @@ public sealed class SubscriptionEntitlementService(
             Quantity = quantity
         }, cancellationToken);
 
-        try
-        {
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException exception) when (IsUniqueConstraintViolation(exception))
-        {
-            logger.LogInformation(
-                exception,
-                "Usage operation idempotency replay detected. CompanyId={CompanyId} Metric={Metric} PeriodStartUtc={PeriodStartUtc} IdempotencyKey={IdempotencyKey}",
-                companyId,
-                metricValue,
-                periodStartUtc,
-                normalizedKey);
-
-            var existingRecord = await dbContext.UsageRecords
-                .AsNoTracking()
-                .FirstOrDefaultAsync(record => record.CompanyId == companyId
-                    && record.Metric == metricValue
-                    && record.PeriodStartUtc == periodStartUtc, cancellationToken);
-            return new UsageConsumptionResult(metric, limit, previousUsage, existingRecord?.QuantityUsed ?? previousUsage, unlimited, true);
-        }
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return new UsageConsumptionResult(metric, limit, previousUsage, updatedUsage, unlimited, false);
+    }
+
+    private static bool IsRetryableQuotaRace(Exception exception)
+    {
+        var postgresException = exception.GetBaseException() as PostgresException;
+        if (postgresException is not null)
+        {
+            if (postgresException.SqlState is PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected)
+            {
+                return true;
+            }
+
+            return postgresException.SqlState == PostgresErrorCodes.UniqueViolation
+                && postgresException.ConstraintName is
+                    "IX_UsageOperations_CompanyId_Metric_PeriodStartUtc_IdempotencyKey"
+                    or "IX_UsageRecords_CompanyId_Metric_PeriodStartUtc";
+        }
+
+        return false;
     }
 
     public async Task<SubscriptionSnapshot> UpdatePlanAsync(

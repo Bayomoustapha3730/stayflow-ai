@@ -6,7 +6,7 @@ import { useConversationRealtime } from "./useConversationRealtime";
 import { ConversationMessageType, ConversationSenderType, ConversationStatus } from "../models/enums";
 import type { ConversationDetail, ConversationMessage } from "../models/hostConversations";
 import { ConversationMessageDeliveryStatus } from "../models/messageDelivery";
-import { getConversationActionErrorMessage, getConversationLoadErrorMessage } from "../utils/conversationErrors";
+import { getConversationActionErrorMessage, getConversationLoadErrorMessage, isQuotaExceededError } from "../utils/conversationErrors";
 
 const maxMessageLength = 2000;
 
@@ -29,6 +29,7 @@ export interface UseHostConversationDetailResult {
   isClosing: boolean;
   error: string | null;
   actionError: string | null;
+  quotaExceeded: boolean;
   realtimeState: "offline" | "connecting" | "online" | "reconnecting";
   isGuestTyping: boolean;
   isAnotherStaffTyping: boolean;
@@ -78,6 +79,7 @@ export function useHostConversationDetail({
   const [isClosing, setIsClosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
   const [isGuestTyping, setIsGuestTyping] = useState(false);
   const [isAnotherStaffTyping, setIsAnotherStaffTyping] = useState(false);
   const [isInternalNoteTyping, setIsInternalNoteTyping] = useState(false);
@@ -211,6 +213,7 @@ export function useHostConversationDetail({
       setMessages([]);
       setError(null);
       setActionError(null);
+      setQuotaExceeded(false);
       setIsLoading(false);
       setIsRefreshing(false);
       return;
@@ -276,6 +279,7 @@ export function useHostConversationDetail({
         }
 
         setActionError(getConversationActionErrorMessage(failure));
+        setQuotaExceeded(isQuotaExceededError(failure));
         return false;
       } finally {
         setBusy(false);
@@ -314,6 +318,7 @@ export function useHostConversationDetail({
       };
 
       setActionError(null);
+      setQuotaExceeded(false);
       setMessages((current) => sortMessagesChronologically([...current, optimisticMessage]));
       setIsSendingReply(true);
 
@@ -336,6 +341,7 @@ export function useHostConversationDetail({
         }
 
         setActionError(getConversationActionErrorMessage(failure));
+        setQuotaExceeded(isQuotaExceededError(failure));
         setMessages((current) =>
           current.map((item) =>
             item.id === optimisticId
@@ -715,6 +721,7 @@ export function useHostConversationDetail({
     isClosing,
     error,
     actionError,
+    quotaExceeded,
     realtimeState: realtime.connectionState,
     isGuestTyping,
     isAnotherStaffTyping,

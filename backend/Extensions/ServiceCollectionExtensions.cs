@@ -316,6 +316,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.IWhatsAppCredentialResolver, Services.WhatsAppCredentialResolver>();
         services.AddScoped<Services.IWhatsAppIntegrationHealthService, Services.WhatsAppIntegrationHealthService>();
         services.AddSingleton<Services.IWhatsAppOutboundSendGate, Services.WhatsAppOutboundSendGate>();
+        services.AddScoped<Services.IWhatsAppOutboundSendCoordinator, Services.WhatsAppOutboundSendCoordinator>();
         services.AddScoped<Services.IWhatsAppTemplateService, Services.WhatsAppTemplateService>();
         services.AddScoped<Services.IWhatsAppCustomerServiceWindowEvaluator, Services.WhatsAppCustomerServiceWindowEvaluator>();
         services.AddSingleton<Services.IWhatsAppTemplateVariableValidator, Services.WhatsAppTemplateVariableValidator>();

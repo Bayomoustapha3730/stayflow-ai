@@ -12,7 +12,8 @@ public sealed class WhatsAppConversationChannelSender(
     IWhatsAppCustomerServiceWindowEvaluator customerServiceWindowEvaluator,
     IWhatsAppOutboundSendGate outboundSendGate,
     IPhoneNumberNormalizer phoneNumberNormalizer,
-    ILogger<WhatsAppConversationChannelSender> logger) : IConversationChannelSender
+    ILogger<WhatsAppConversationChannelSender> logger,
+    IWhatsAppOutboundSendCoordinator outboundSendCoordinator) : IConversationChannelSender
 {
     public GuestChannel Channel => GuestChannel.WhatsApp;
 
@@ -92,7 +93,8 @@ public sealed class WhatsAppConversationChannelSender(
             return;
         }
 
-        var result = await whatsAppCloudClient.SendTextMessageAsync(new WhatsAppSendTextMessageRequest
+        var operationId = message.RetryOfMessageId ?? message.Id;
+        var request = new WhatsAppSendTextMessageRequest
         {
             CompanyId = conversation.CompanyId,
             IntegrationId = integration.Id,
@@ -103,8 +105,13 @@ public sealed class WhatsAppConversationChannelSender(
             PhoneNumberId = integration.PhoneNumberId,
             To = normalizedRecipient,
             Body = message.Content,
-            ClientMessageId = message.Id.ToString("N")
-        }, cancellationToken);
+            ClientMessageId = operationId.ToString("N")
+        };
+        var result = await outboundSendCoordinator.ExecuteAsync(
+            conversation.CompanyId,
+            $"whatsapp:message:{operationId:N}",
+            _ => whatsAppCloudClient.SendTextMessageAsync(request, cancellationToken),
+            cancellationToken);
 
         if (result.Success)
         {

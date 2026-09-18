@@ -110,7 +110,8 @@ export function HostConversationDetail({
 
         {detail.actionError ? (
           <div className="sf-host-inline-error" role="alert">
-            {detail.actionError}
+            <p>{detail.quotaExceeded ? "Your WhatsApp message limit has been reached for this billing period." : detail.actionError}</p>
+            {detail.quotaExceeded ? <a href="/host/settings/billing">Review billing</a> : null}
           </div>
         ) : null}
 

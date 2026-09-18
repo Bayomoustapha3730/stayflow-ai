@@ -30,6 +30,36 @@ public sealed class WhatsAppConversationChannelSenderWindowTests
     }
 
     [Fact]
+    public async Task SendAsync_FreeForm_UsesStableLogicalIdentityOnce()
+    {
+        var fixture = new Fixture();
+        fixture.AddInbound(DateTimeOffset.UtcNow.AddMinutes(-2), ConversationMessageProvider.WhatsAppCloud);
+        var message = Fixture.NewOutbound();
+
+        await fixture.Sender.SendAsync(fixture.Conversation, message, WhatsAppSendOrigin.AiConcierge, CancellationToken.None);
+
+        Assert.Equal(["whatsapp:message:" + message.Id.ToString("N")], fixture.Coordinator.OperationKeys);
+        Assert.Equal(1, fixture.Coordinator.InvocationCount);
+        Assert.Equal(1, fixture.CloudClient.TextSendCount);
+    }
+
+    [Fact]
+    public async Task SendAsync_ManualRetry_UsesOriginalLogicalIdentity()
+    {
+        var fixture = new Fixture();
+        fixture.AddInbound(DateTimeOffset.UtcNow.AddMinutes(-2), ConversationMessageProvider.WhatsAppCloud);
+        var originalId = Guid.NewGuid();
+        var retry = Fixture.NewOutbound();
+        retry.Id = Guid.NewGuid();
+        retry.RetryOfMessageId = originalId;
+
+        await fixture.Sender.SendAsync(fixture.Conversation, retry, WhatsAppSendOrigin.AiConcierge, CancellationToken.None);
+
+        Assert.Equal(["whatsapp:message:" + originalId.ToString("N")], fixture.Coordinator.OperationKeys);
+        Assert.DoesNotContain(retry.Id.ToString("N"), fixture.Coordinator.OperationKeys.Single());
+    }
+
+    [Fact]
     public async Task SendAsync_NoQualifyingInbound_FreeFormRejectedAsCustomerServiceWindowClosed()
     {
         var fixture = new Fixture();
@@ -127,7 +157,8 @@ public sealed class WhatsAppConversationChannelSenderWindowTests
                 new WhatsAppCustomerServiceWindowEvaluator(repository, options),
                 new WhatsAppOutboundSendGate(options),
                 new PhoneNumberNormalizer(),
-                NullLogger<WhatsAppConversationChannelSender>.Instance);
+                NullLogger<WhatsAppConversationChannelSender>.Instance,
+                Coordinator);
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();
@@ -136,6 +167,7 @@ public sealed class WhatsAppConversationChannelSenderWindowTests
         public Conversation Conversation { get; }
         public RecordingWhatsAppCloudClient CloudClient { get; } = new();
         public WhatsAppConversationChannelSender Sender { get; }
+        public RecordingWhatsAppOutboundSendCoordinator Coordinator { get; } = new();
 
         public void AddInbound(DateTimeOffset sentAt, ConversationMessageProvider provider)
         {
@@ -182,6 +214,19 @@ public sealed class WhatsAppConversationChannelSenderWindowTests
         public Task<WhatsAppGetTemplatesResult> GetTemplatesAsync(WhatsAppGetTemplatesRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<WhatsAppSendTemplateMessageResult> SendTemplateMessageAsync(WhatsAppTemplateSendRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<WhatsAppValidateIntegrationResult> ValidateIntegrationAsync(WhatsAppValidateIntegrationRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingWhatsAppOutboundSendCoordinator : IWhatsAppOutboundSendCoordinator
+    {
+        public List<string> OperationKeys { get; } = [];
+        public int InvocationCount { get; private set; }
+
+        public Task<T> ExecuteAsync<T>(Guid companyId, string operationKey, Func<CancellationToken, Task<T>> send, CancellationToken cancellationToken)
+        {
+            InvocationCount++;
+            OperationKeys.Add(operationKey);
+            return send(cancellationToken);
+        }
     }
 
     private sealed class SuccessfulCredentialResolver : IWhatsAppCredentialResolver

@@ -28,7 +28,8 @@ public sealed class WhatsAppTemplateService(
     IPhoneNumberNormalizer phoneNumberNormalizer,
     IHostEnvironment hostEnvironment,
     IOptions<WhatsAppCloudOptions> cloudOptions,
-    ILogger<WhatsAppTemplateService> logger) : IWhatsAppTemplateService
+    ILogger<WhatsAppTemplateService> logger,
+    IWhatsAppOutboundSendCoordinator? outboundSendCoordinator = null) : IWhatsAppTemplateService
 {
     // Fixed by the AddWhatsAppMessagingFoundation migration; a violation here means a caller tried
     // to configure a PhoneNumberId already claimed by another integration.
@@ -526,13 +527,6 @@ public sealed class WhatsAppTemplateService(
             return ApiResponse<ConversationMessageResponse>.Fail(gate.FailureSummary ?? "WhatsApp sending is unavailable.", [gate.FailureCode ?? "ProductionSendingDisabled"]);
         }
 
-        await subscriptionEntitlementService.ConsumeQuotaAsync(
-            companyId,
-            UsageMetric.WhatsAppMessages,
-            1,
-            $"whatsapp:template-send:{conversation.Id:D}:{template.Id:D}:{request.LanguageCode?.Trim() ?? template.LanguageCode}",
-            cancellationToken);
-
         var credentials = await credentialResolver.ResolveAsync(integration, cancellationToken);
         if (!credentials.Success || string.IsNullOrWhiteSpace(credentials.AccessToken))
         {
@@ -586,21 +580,25 @@ public sealed class WhatsAppTemplateService(
             timestamp = DateTimeOffset.UtcNow
         }, false, cancellationToken);
 
-        var sendResult = await whatsAppCloudClient.SendTemplateMessageAsync(new WhatsAppTemplateSendRequest
-        {
-            CompanyId = integration.CompanyId,
-            IntegrationId = integration.Id,
-            IsIntegrationProductionEnabled = integration.IsProductionEnabled,
-            Origin = WhatsAppSendOrigin.TemplateManual,
-            AccessToken = credentials.AccessToken,
-            GraphApiVersion = integration.GraphApiVersion,
-            PhoneNumberId = integration.PhoneNumberId,
-            To = normalizedRecipient,
-            TemplateName = template.Name,
-            LanguageCode = message.TemplateLanguageCode ?? template.LanguageCode,
-            Variables = validation.SanitizedVariables,
-            ClientMessageId = request.ClientRequestId?.Trim() ?? message.Id.ToString("N")
-        }, cancellationToken);
+        var sendResult = await (outboundSendCoordinator ?? new WhatsAppOutboundSendCoordinator(subscriptionEntitlementService)).ExecuteAsync(
+            companyId,
+            $"whatsapp:message:{message.Id:N}",
+            _ => whatsAppCloudClient.SendTemplateMessageAsync(new WhatsAppTemplateSendRequest
+            {
+                CompanyId = integration.CompanyId,
+                IntegrationId = integration.Id,
+                IsIntegrationProductionEnabled = integration.IsProductionEnabled,
+                Origin = WhatsAppSendOrigin.TemplateManual,
+                AccessToken = credentials.AccessToken,
+                GraphApiVersion = integration.GraphApiVersion,
+                PhoneNumberId = integration.PhoneNumberId,
+                To = normalizedRecipient,
+                TemplateName = template.Name,
+                LanguageCode = message.TemplateLanguageCode ?? template.LanguageCode,
+                Variables = validation.SanitizedVariables,
+                ClientMessageId = request.ClientRequestId?.Trim() ?? message.Id.ToString("N")
+            }, cancellationToken),
+            cancellationToken);
 
         if (sendResult.Success)
         {
@@ -736,13 +734,6 @@ public sealed class WhatsAppTemplateService(
             return ApiResponse<ConversationMessageResponse>.Fail(gate.FailureSummary ?? "WhatsApp sending is unavailable.", [gate.FailureCode ?? "ProductionSendingDisabled"]);
         }
 
-        await subscriptionEntitlementService.ConsumeQuotaAsync(
-            companyId,
-            UsageMetric.WhatsAppMessages,
-            1,
-            $"whatsapp:lifecycle-template-send:{idempotencyKey}",
-            cancellationToken);
-
         var credentials = await credentialResolver.ResolveAsync(integration, cancellationToken);
         if (!credentials.Success || string.IsNullOrWhiteSpace(credentials.AccessToken))
         {
@@ -816,21 +807,25 @@ public sealed class WhatsAppTemplateService(
             timestamp = DateTimeOffset.UtcNow
         }, false, cancellationToken);
 
-        var sendResult = await whatsAppCloudClient.SendTemplateMessageAsync(new WhatsAppTemplateSendRequest
-        {
-            CompanyId = integration.CompanyId,
-            IntegrationId = integration.Id,
-            IsIntegrationProductionEnabled = integration.IsProductionEnabled,
-            Origin = WhatsAppSendOrigin.ReservationLifecycle,
-            AccessToken = credentials.AccessToken,
-            GraphApiVersion = integration.GraphApiVersion,
-            PhoneNumberId = integration.PhoneNumberId,
-            To = normalizedRecipient,
-            TemplateName = template.Name,
-            LanguageCode = template.LanguageCode,
-            Variables = validation.SanitizedVariables,
-            ClientMessageId = idempotencyKey
-        }, cancellationToken);
+        var sendResult = await (outboundSendCoordinator ?? new WhatsAppOutboundSendCoordinator(subscriptionEntitlementService)).ExecuteAsync(
+            companyId,
+            $"whatsapp:lifecycle:{idempotencyKey}",
+            _ => whatsAppCloudClient.SendTemplateMessageAsync(new WhatsAppTemplateSendRequest
+            {
+                CompanyId = integration.CompanyId,
+                IntegrationId = integration.Id,
+                IsIntegrationProductionEnabled = integration.IsProductionEnabled,
+                Origin = WhatsAppSendOrigin.ReservationLifecycle,
+                AccessToken = credentials.AccessToken,
+                GraphApiVersion = integration.GraphApiVersion,
+                PhoneNumberId = integration.PhoneNumberId,
+                To = normalizedRecipient,
+                TemplateName = template.Name,
+                LanguageCode = template.LanguageCode,
+                Variables = validation.SanitizedVariables,
+                ClientMessageId = idempotencyKey
+            }, cancellationToken),
+            cancellationToken);
 
         if (sendResult.Success)
         {

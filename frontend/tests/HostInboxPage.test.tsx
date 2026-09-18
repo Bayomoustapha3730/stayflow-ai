@@ -30,14 +30,17 @@ function apiSuccess<T>(data: T) {
   };
 }
 
-function apiFailure(message = "Request failed", status = 500) {
+function apiFailure(message = "Request failed", status = 500, errorCode?: string) {
   return {
     ok: false,
     status,
     json: async () => ({
       success: false,
+      status,
+      detail: message,
       message,
       errors: [message],
+      ...(errorCode ? { errorCode } : {}),
       correlationId: "cid"
     })
   };
@@ -262,6 +265,7 @@ function createHostFetchMock(
     failSuggestions?: boolean;
     emptySuggestions?: boolean;
     failGenerate?: boolean;
+    failHostReply?: boolean;
   }
 ) {
   return vi.fn().mockImplementation((url: string, options?: RequestInit) => {
@@ -347,6 +351,10 @@ function createHostFetchMock(
     }
 
     if (url.includes("/messages/host")) {
+      if (config?.failHostReply) {
+        return Promise.resolve(apiFailure("Subscription quota exceeded.", 429, "quota_exceeded"));
+      }
+
       return Promise.resolve(
         apiSuccess({
           id: "m-2",
@@ -924,5 +932,19 @@ describe("HostInboxPage via App route", () => {
     expect(copilotPanelTop).not.toBeNull();
     expect(copilotScroll.contains(copilotPanelTop as Node)).toBe(false);
     expect(copilotScroll.contains(copilotHeading)).toBe(false);
+  });
+
+  it("shows billing guidance for quota exhaustion without changing generic failures", async () => {
+    window.history.pushState({}, "", "/host/conversations");
+    vi.stubGlobal("fetch", createHostFetchMock([conversationRow()], { failHostReply: true }));
+
+    render(<App />);
+    const user = await signIn();
+    const replyInput = await screen.findByLabelText(/host reply/i, { selector: "textarea" });
+    await user.type(replyInput, "A reply that exceeds the limit");
+    await user.click(screen.getByRole("button", { name: /send host reply/i }));
+
+    expect(await screen.findByText("Your WhatsApp message limit has been reached for this billing period.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /review billing/i })).toHaveAttribute("href", "/host/settings/billing");
   });
 });

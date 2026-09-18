@@ -31,3 +31,9 @@ export function getConversationActionErrorMessage(error: unknown): string {
 
   return actionFallback;
 }
+
+export function isQuotaExceededError(error: unknown): boolean {
+  return error instanceof ApiError
+    && error.status === 429
+    && error.errorCode === "quota_exceeded";
+}

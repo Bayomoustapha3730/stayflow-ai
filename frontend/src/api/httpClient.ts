@@ -9,7 +9,8 @@ export class ApiError extends Error {
     public readonly errors: string[] = [],
     public readonly correlationId?: string,
     public readonly traceId?: string,
-    public readonly retryAfterSeconds?: number
+    public readonly retryAfterSeconds?: number,
+    public readonly errorCode?: string
   ) {
     super(correlationId ? `${message} (Reference: ${correlationId})` : message);
   }
@@ -94,7 +95,8 @@ export class HttpClient {
           payload?.errors ?? [],
           correlationId ?? undefined,
           problem?.traceId,
-          Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined
+          Number.isFinite(retryAfterSeconds) ? retryAfterSeconds : undefined,
+          problem?.errorCode
         );
       }
 
