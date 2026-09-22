@@ -9,7 +9,8 @@ namespace StayFlow.Api.Services;
 public sealed class ReservationService(
     IReservationRepository reservationRepository,
     ICurrentTenantContext currentTenantContext,
-    IReservationStatusTransitionPolicy statusTransitionPolicy) : IReservationService
+    IReservationStatusTransitionPolicy statusTransitionPolicy,
+    ISubscriptionEntitlementService subscriptionEntitlementService) : IReservationService
 {
     public async Task<ApiResponse<PagedResult<ReservationSummaryDto>>> GetAsync(ReservationQueryParameters query, CancellationToken cancellationToken)
     {
@@ -83,9 +84,15 @@ public sealed class ReservationService(
             IsActive = true
         };
 
-        await reservationRepository.AddAsync(reservation, cancellationToken);
-        await AddAuditLogAsync("Created", reservation, cancellationToken);
-        await reservationRepository.SaveChangesAsync(cancellationToken);
+        await subscriptionEntitlementService.AdmitReservationAsync(
+            companyId,
+            reservation.Id,
+            async token =>
+            {
+                await reservationRepository.AddAsync(reservation, token);
+                await AddAuditLogAsync("Created", reservation, token);
+            },
+            cancellationToken);
 
         return ApiResponse<ReservationDto>.Ok(MapToDto(reservation), "Reservation created successfully.");
     }

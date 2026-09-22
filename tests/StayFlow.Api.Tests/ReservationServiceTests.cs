@@ -707,7 +707,8 @@ public sealed class ReservationServiceTests
         return new ReservationService(
             repository,
             currentTenantContext ?? new FakeCurrentTenantContext(repository.CompanyId),
-            new ReservationStatusTransitionPolicy());
+            new ReservationStatusTransitionPolicy(),
+            NoOpSubscriptionEntitlementService.Instance);
     }
 
     private static async Task AssertTransitionSucceedsAsync(ReservationStatus currentStatus, ReservationStatus targetStatus)

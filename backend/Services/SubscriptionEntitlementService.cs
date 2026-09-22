@@ -105,12 +105,85 @@ public sealed class SubscriptionEntitlementService(
         cancellationToken);
     }
 
+    public async Task<UsageConsumptionResult> AdmitReservationAsync(
+        Guid companyId,
+        Guid reservationId,
+        Func<CancellationToken, Task> persistReservation,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(persistReservation);
+
+        if (!dbContext.Database.IsRelational())
+        {
+            try
+            {
+                var result = await ConsumeQuotaCoreAsync(
+                    companyId,
+                    UsageMetric.Reservations,
+                    1,
+                    $"reservation:{reservationId:N}",
+                    cancellationToken,
+                    saveChanges: false);
+                if (!result.WasIdempotentReplay)
+                {
+                    await persistReservation(cancellationToken);
+                }
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                dbContext.ChangeTracker.Clear();
+                throw;
+            }
+        }
+
+        return await QuotaAdmissionRetryPolicy.ExecuteAsync(
+            async _ =>
+            {
+                await using var transaction = await dbContext.Database.BeginTransactionAsync(
+                    IsolationLevel.Serializable,
+                    cancellationToken);
+
+                try
+                {
+                    var result = await ConsumeQuotaCoreAsync(
+                        companyId,
+                        UsageMetric.Reservations,
+                        1,
+                        $"reservation:{reservationId:N}",
+                        cancellationToken,
+                        saveChanges: false);
+                    if (!result.WasIdempotentReplay)
+                    {
+                        await persistReservation(cancellationToken);
+                    }
+
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch (Exception exception)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    throw;
+                }
+            },
+            static () => Task.CompletedTask,
+            IsRetryableQuotaRace,
+            cancellationToken);
+    }
+
+
     private async Task<UsageConsumptionResult> ConsumeQuotaCoreAsync(
         Guid companyId,
         UsageMetric metric,
         long quantity,
         string idempotencyKey,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool saveChanges = true)
     {
         if (quantity <= 0)
         {
@@ -210,7 +283,10 @@ public sealed class SubscriptionEntitlementService(
             Quantity = quantity
         }, cancellationToken);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        if (saveChanges)
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
 
         return new UsageConsumptionResult(metric, limit, previousUsage, updatedUsage, unlimited, false);
     }

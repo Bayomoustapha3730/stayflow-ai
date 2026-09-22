@@ -154,10 +154,103 @@ public sealed class SubscriptionEntitlementServiceQuotaTests
             harness.Service.ConsumeQuotaAsync(harness.CompanyId, UsageMetric.WhatsAppMessages, 1, "second-operation", CancellationToken.None));
     }
 
+    [Fact]
+    public async Task ReservationAdmission_PersistsReservationAndConsumesOneUnit()
+    {
+        var harness = await CreateHarnessAsync(limit: 2, metric: UsageMetric.Reservations);
+        var reservationId = Guid.NewGuid();
+        var persisted = false;
+
+        var result = await harness.Service.AdmitReservationAsync(
+            harness.CompanyId,
+            reservationId,
+            _ =>
+            {
+                persisted = true;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        Assert.True(persisted);
+        Assert.False(result.WasIdempotentReplay);
+        Assert.Equal(1, result.UpdatedUsage);
+        var usage = await harness.DbContext.UsageRecords.SingleAsync(record => record.Metric == UsageMetric.Reservations.ToStorageValue());
+        Assert.Equal(1, usage.QuantityUsed);
+        Assert.Equal(1, await harness.DbContext.UsageOperations.CountAsync(operation => operation.Metric == UsageMetric.Reservations.ToStorageValue()));
+    }
+
+    [Fact]
+    public async Task ReservationAdmission_RejectsWhenQuotaIsExhaustedBeforePersistence()
+    {
+        var harness = await CreateHarnessAsync(limit: 1, metric: UsageMetric.Reservations);
+        await harness.Service.ConsumeQuotaAsync(harness.CompanyId, UsageMetric.Reservations, 1, "existing", CancellationToken.None);
+        var persisted = false;
+
+        await Assert.ThrowsAsync<QuotaExceededException>(() => harness.Service.AdmitReservationAsync(
+            harness.CompanyId,
+            Guid.NewGuid(),
+            _ =>
+            {
+                persisted = true;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None));
+
+        Assert.False(persisted);
+        Assert.Equal(1, (await harness.DbContext.UsageRecords.SingleAsync(record => record.Metric == UsageMetric.Reservations.ToStorageValue())).QuantityUsed);
+    }
+
+    [Fact]
+    public async Task ReservationAdmission_ReplayDoesNotInvokePersistenceOrConsumeAgain()
+    {
+        var harness = await CreateHarnessAsync(limit: 2, metric: UsageMetric.Reservations);
+        var reservationId = Guid.NewGuid();
+        var persistenceCalls = 0;
+
+        await harness.Service.AdmitReservationAsync(
+            harness.CompanyId,
+            reservationId,
+            _ =>
+            {
+                persistenceCalls++;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+        var replay = await harness.Service.AdmitReservationAsync(
+            harness.CompanyId,
+            reservationId,
+            _ =>
+            {
+                persistenceCalls++;
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        Assert.True(replay.WasIdempotentReplay);
+        Assert.Equal(1, persistenceCalls);
+        Assert.Equal(1, (await harness.DbContext.UsageRecords.SingleAsync(record => record.Metric == UsageMetric.Reservations.ToStorageValue())).QuantityUsed);
+    }
+
+    [Fact]
+    public async Task ReservationAdmission_FailedPersistenceDoesNotConsumeQuota()
+    {
+        var harness = await CreateHarnessAsync(limit: 1, metric: UsageMetric.Reservations);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Service.AdmitReservationAsync(
+            harness.CompanyId,
+            Guid.NewGuid(),
+            _ => throw new InvalidOperationException("persistence failed"),
+            CancellationToken.None));
+
+        Assert.Empty(await harness.DbContext.UsageRecords.Where(record => record.Metric == UsageMetric.Reservations.ToStorageValue()).ToListAsync());
+        Assert.Empty(await harness.DbContext.UsageOperations.Where(operation => operation.Metric == UsageMetric.Reservations.ToStorageValue()).ToListAsync());
+    }
+
     private static async Task<Harness> CreateHarnessAsync(
         long? limit,
         bool unlimited = false,
-        string? databaseName = null)
+        string? databaseName = null,
+        UsageMetric metric = UsageMetric.WhatsAppMessages)
     {
         var companyId = Guid.NewGuid();
         var userId = Guid.NewGuid();
@@ -198,7 +291,7 @@ public sealed class SubscriptionEntitlementServiceQuotaTests
                 new PlanEntitlement
                 {
                     Id = Guid.NewGuid(),
-                    Key = "Quota.WhatsAppMessages",
+                    Key = metric.ToQuotaEntitlementKey(),
                     IsEnabled = true,
                     QuotaLimit = limit,
                     IsUnlimited = unlimited

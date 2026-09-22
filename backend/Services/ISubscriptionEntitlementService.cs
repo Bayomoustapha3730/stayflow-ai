@@ -8,6 +8,17 @@ public interface ISubscriptionEntitlementService
     Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken);
     Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken);
     Task<UsageConsumptionResult> ConsumeQuotaAsync(Guid companyId, UsageMetric metric, long quantity, string idempotencyKey, CancellationToken cancellationToken);
+    async Task<UsageConsumptionResult> AdmitReservationAsync(Guid companyId, Guid reservationId, Func<CancellationToken, Task> persistReservation, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(persistReservation);
+        await persistReservation(cancellationToken);
+        return await ConsumeQuotaAsync(
+            companyId,
+            UsageMetric.Reservations,
+            1,
+            $"reservation:{reservationId:N}",
+            cancellationToken);
+    }
     Task<SubscriptionSnapshot> UpdatePlanAsync(Guid companyId, Guid? planId, string? planName, string? notes, CancellationToken cancellationToken);
 }
 
