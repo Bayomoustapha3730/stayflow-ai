@@ -330,7 +330,7 @@ public sealed class SignalRTenantContextIntegrationTests : IClassFixture<SignalR
     }
 }
 
-public sealed class SignalRTestAppFactory : WebApplicationFactory<Program>
+public class SignalRTestAppFactory : WebApplicationFactory<Program>
 {
     public const string JwtIssuer = "StayFlow.Api";
     public const string JwtAudience = "StayFlow.Clients";

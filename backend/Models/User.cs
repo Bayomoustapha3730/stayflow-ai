@@ -28,6 +28,7 @@ public sealed class User : AuditableEntity
     public ICollection<OrganizationMember> OrganizationMemberships { get; set; } = [];
     public ICollection<OrganizationMember> OrganizationInvitesSent { get; set; } = [];
     public ICollection<Conversation> AssignedConversations { get; set; } = [];
+    public ICollection<CopilotOperation> CopilotOperations { get; set; } = [];
     public ICollection<PropertyKnowledgeArticle> ApprovedKnowledgeArticles { get; set; } = [];
     public ICollection<PropertyKnowledgeArticle> CreatedKnowledgeArticles { get; set; } = [];
     public ICollection<PropertyKnowledgeArticle> UpdatedKnowledgeArticles { get; set; } = [];

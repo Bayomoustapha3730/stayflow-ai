@@ -74,6 +74,7 @@ public sealed class CopilotServiceTests
 
         var response = await fixture.Service.GetSuggestedRepliesAsync(
             conversation.Id,
+            Guid.NewGuid(),
             "professional",
             CancellationToken.None);
 

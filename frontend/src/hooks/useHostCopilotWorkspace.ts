@@ -100,7 +100,7 @@ export function useHostCopilotWorkspace({ accessToken, onUnauthorized, propertyI
 
   const generateDraft = useCallback(async (conversationId: string, tone?: string, hostInstruction?: string) => {
     try {
-      const response = await api.generateDraft(conversationId, { tone, hostInstruction });
+      const response = await api.generateDraft(conversationId, { operationId: crypto.randomUUID(), tone, hostInstruction });
       setDraftResult(response);
       setValidationResult(response.validation);
     } catch (failure) {

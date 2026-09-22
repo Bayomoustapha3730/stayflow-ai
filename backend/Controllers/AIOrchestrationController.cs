@@ -30,12 +30,7 @@ public sealed class AIOrchestrationController(IAIOrchestrator aiOrchestrator) : 
         [FromBody] AIOrchestrationRequest request,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.GuestMessage))
-        {
-            return BadRequest(ApiResponse<AIOrchestrationResult>.Fail("Guest message is required.", ["GuestMessage is required."]));
-        }
-
-        var result = await aiOrchestrator.ProcessAsync(request, cancellationToken);
-        return Ok(ApiResponse<AIOrchestrationResult>.Ok(result, "AI orchestration completed."));
+        return StatusCode(StatusCodes.Status410Gone,
+            ApiResponse<AIOrchestrationResult>.Fail("The legacy AI orchestration endpoint is no longer available."));
     }
 }

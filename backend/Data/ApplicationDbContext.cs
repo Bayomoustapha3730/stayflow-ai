@@ -39,6 +39,7 @@ public sealed class ApplicationDbContext(
     public DbSet<KnowledgeBaseItem> KnowledgeBaseItems => Set<KnowledgeBaseItem>();
     public DbSet<PropertyKnowledgeArticle> PropertyKnowledgeArticles => Set<PropertyKnowledgeArticle>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<CopilotOperation> CopilotOperations => Set<CopilotOperation>();
     public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
     public DbSet<ConversationMessageKnowledgeSource> ConversationMessageKnowledgeSources => Set<ConversationMessageKnowledgeSource>();
     public DbSet<ConversationMessageFeedback> ConversationMessageFeedback => Set<ConversationMessageFeedback>();

@@ -105,6 +105,139 @@ public sealed class SubscriptionEntitlementService(
         cancellationToken);
     }
 
+    public async Task<AIRequestAdmissionResult> AdmitCopilotOperationAsync(
+        Guid companyId,
+        Guid operationId,
+        Guid conversationId,
+        Guid actorUserId,
+        CopilotOperationType operationType,
+        CancellationToken cancellationToken)
+    {
+        if (operationId == Guid.Empty || conversationId == Guid.Empty || actorUserId == Guid.Empty)
+        {
+            throw new DomainValidationException("Copilot operation identity is required.", "copilot_operation_identity_required");
+        }
+
+        if (!dbContext.Database.IsRelational())
+        {
+            try
+            {
+                var result = await AdmitCopilotOperationCoreAsync(
+                    companyId,
+                    operationId,
+                    conversationId,
+                    actorUserId,
+                    operationType,
+                    cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                dbContext.ChangeTracker.Clear();
+                throw;
+            }
+        }
+
+        return await QuotaAdmissionRetryPolicy.ExecuteAsync(
+            async _ =>
+            {
+                await using var transaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    var result = await AdmitCopilotOperationCoreAsync(
+                        companyId,
+                        operationId,
+                        conversationId,
+                        actorUserId,
+                        operationType,
+                        cancellationToken);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    throw;
+                }
+            },
+            static () => Task.CompletedTask,
+            IsRetryableQuotaRace,
+            cancellationToken);
+    }
+
+    public async Task MarkCopilotOperationCompletedAsync(Guid companyId, Guid operationId, CancellationToken cancellationToken)
+    {
+        var operation = await dbContext.CopilotOperations.FirstOrDefaultAsync(item => item.Id == operationId && item.CompanyId == companyId, cancellationToken);
+        if (operation is null)
+        {
+            return;
+        }
+
+        operation.Status = CopilotOperationStatus.Completed;
+        operation.CompletedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task MarkCopilotOperationFailedAsync(Guid companyId, Guid operationId, CancellationToken cancellationToken)
+    {
+        var operation = await dbContext.CopilotOperations.FirstOrDefaultAsync(item => item.Id == operationId && item.CompanyId == companyId, cancellationToken);
+        if (operation is null)
+        {
+            return;
+        }
+
+        operation.Status = CopilotOperationStatus.Failed;
+        operation.CompletedAt = null;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task<AIRequestAdmissionResult> AdmitCopilotOperationCoreAsync(
+        Guid companyId,
+        Guid operationId,
+        Guid conversationId,
+        Guid actorUserId,
+        CopilotOperationType operationType,
+        CancellationToken cancellationToken)
+    {
+        var operation = await dbContext.CopilotOperations.FirstOrDefaultAsync(item => item.Id == operationId, cancellationToken);
+        var wasReplay = operation is not null;
+        if (operation is not null)
+        {
+            if (operation.CompanyId != companyId
+                || operation.ConversationId != conversationId
+                || operation.ActorUserId != actorUserId
+                || operation.OperationType != operationType)
+            {
+                throw new ConflictException("Copilot operation identity is not valid for this request.", "copilot_operation_conflict");
+            }
+        }
+        else
+        {
+            operation = new CopilotOperation
+            {
+                Id = operationId,
+                CompanyId = companyId,
+                ConversationId = conversationId,
+                ActorUserId = actorUserId,
+                OperationType = operationType,
+                Status = CopilotOperationStatus.Pending
+            };
+            await dbContext.CopilotOperations.AddAsync(operation, cancellationToken);
+        }
+
+        var consumption = await ConsumeQuotaCoreAsync(
+            companyId,
+            UsageMetric.AiRequests,
+            1,
+            $"ai-request:copilot-operation:{operationId:N}",
+            cancellationToken,
+            saveChanges: false);
+        return new AIRequestAdmissionResult(consumption, wasReplay || consumption.WasIdempotentReplay);
+    }
+
     public async Task<UsageConsumptionResult> AdmitReservationAsync(
         Guid companyId,
         Guid reservationId,

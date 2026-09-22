@@ -8,6 +8,28 @@ public interface ISubscriptionEntitlementService
     Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken);
     Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken);
     Task<UsageConsumptionResult> ConsumeQuotaAsync(Guid companyId, UsageMetric metric, long quantity, string idempotencyKey, CancellationToken cancellationToken);
+    async Task<AIRequestAdmissionResult> AdmitCopilotOperationAsync(
+        Guid companyId,
+        Guid operationId,
+        Guid conversationId,
+        Guid actorUserId,
+        CopilotOperationType operationType,
+        CancellationToken cancellationToken)
+    {
+        var result = await ConsumeQuotaAsync(
+            companyId,
+            UsageMetric.AiRequests,
+            1,
+            $"ai-request:copilot-operation:{operationId:N}",
+            cancellationToken);
+        return new AIRequestAdmissionResult(result, result.WasIdempotentReplay);
+    }
+
+    Task MarkCopilotOperationCompletedAsync(Guid companyId, Guid operationId, CancellationToken cancellationToken)
+        => Task.CompletedTask;
+
+    Task MarkCopilotOperationFailedAsync(Guid companyId, Guid operationId, CancellationToken cancellationToken)
+        => Task.CompletedTask;
     async Task<UsageConsumptionResult> AdmitReservationAsync(Guid companyId, Guid reservationId, Func<CancellationToken, Task> persistReservation, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(persistReservation);
@@ -55,3 +77,7 @@ public sealed record UsageConsumptionResult(
     long UpdatedUsage,
     bool IsUnlimited,
     bool WasIdempotentReplay);
+
+public sealed record AIRequestAdmissionResult(
+    UsageConsumptionResult Consumption,
+    bool WasReplay);

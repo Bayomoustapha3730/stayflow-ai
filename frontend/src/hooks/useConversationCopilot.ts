@@ -150,7 +150,8 @@ export function useConversationCopilot({
     setSuggestionsError(null);
     const requestId = ++suggestionsRequestIdRef.current;
     try {
-      const response: ConversationCopilotSuggestionsResponse = await api.getSuggestedReplies(conversationId, tone);
+      const operationId = crypto.randomUUID();
+      const response: ConversationCopilotSuggestionsResponse = await api.getSuggestedReplies(conversationId, tone, operationId);
       if (requestId !== suggestionsRequestIdRef.current) {
         return;
       }
@@ -202,7 +203,9 @@ export function useConversationCopilot({
     const requestId = ++generatedRequestIdRef.current;
 
     try {
+      const operationId = request?.operationId ?? crypto.randomUUID();
       const response = await api.suggestReply(conversationId, {
+        operationId,
         tone,
         hostDraft: generatedReplyDraft,
         includeInternalNotes: false,

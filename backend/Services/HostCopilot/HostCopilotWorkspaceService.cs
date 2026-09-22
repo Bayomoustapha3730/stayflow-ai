@@ -16,6 +16,7 @@ public sealed class HostCopilotWorkspaceService(
     IConversationService conversationService,
     IConciergeHostActionService hostActionService,
     IAIReplyOrchestrator replyOrchestrator,
+    ISubscriptionEntitlementService subscriptionEntitlementService,
     IConversationRealtimePublisher realtimePublisher,
     IOptions<HostCopilotOptions> options) : IHostCopilotWorkspaceService
 {
@@ -227,6 +228,14 @@ public sealed class HostCopilotWorkspaceService(
             return ApiResponse<HostCopilotDraftResponse>.Fail("No guest message is available for draft generation.");
         }
 
+        await subscriptionEntitlementService.AdmitCopilotOperationAsync(
+            companyId,
+            request.OperationId,
+            conversationId,
+            tenantContext.UserId ?? Guid.Empty,
+            CopilotOperationType.WorkspaceDraft,
+            cancellationToken);
+
         string draft;
         var deterministicFallback = false;
         var mode = "llm";
@@ -234,18 +243,37 @@ public sealed class HostCopilotWorkspaceService(
 
         if (options.Value.EnableLlmWording)
         {
-            var orchestrated = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+            AIReplyOrchestrationResult? orchestrated;
+            try
             {
-                ConversationId = conversationId,
-                Operation = AIReplyOperation.GeneratedHostReply,
-                RequestedTone = request.Tone,
-                HostInstruction = request.HostInstruction,
-                CorrelationId = tenantContext.CorrelationId
-            }, cancellationToken);
+                orchestrated = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+                {
+                    ConversationId = conversationId,
+                    Operation = AIReplyOperation.GeneratedHostReply,
+                    RequestedTone = request.Tone,
+                    HostInstruction = request.HostInstruction,
+                    CorrelationId = tenantContext.CorrelationId
+                }, cancellationToken);
+            }
+            catch
+            {
+                await subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
+                throw;
+            }
 
             if (orchestrated is null)
             {
+                await subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
                 return ApiResponse<HostCopilotDraftResponse>.Fail("Conversation was not found.");
+            }
+
+            if (orchestrated.FallbackUsed)
+            {
+                await subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
+            }
+            else
+            {
+                await subscriptionEntitlementService.MarkCopilotOperationCompletedAsync(companyId, request.OperationId, cancellationToken);
             }
 
             deterministicFallback = orchestrated.FallbackUsed || string.IsNullOrWhiteSpace(orchestrated.Output);
@@ -261,6 +289,7 @@ public sealed class HostCopilotWorkspaceService(
         }
         else
         {
+            await subscriptionEntitlementService.MarkCopilotOperationCompletedAsync(companyId, request.OperationId, cancellationToken);
             deterministicFallback = true;
             mode = "deterministic";
             rationale = "LLM wording is disabled by configuration. Deterministic wording was used.";

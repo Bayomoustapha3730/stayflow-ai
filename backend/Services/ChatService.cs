@@ -204,7 +204,7 @@ public sealed class ChatService(
                 companyId,
                 UsageMetric.AiRequests,
                 1,
-                $"chat:ai-reply:{conversation.Id:D}:{guestMessage.Data.Id:D}",
+                $"ai-request:guest-message:{guestMessage.Data.Id:N}",
                 cancellationToken);
 
             replyResult = await aiReplyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest

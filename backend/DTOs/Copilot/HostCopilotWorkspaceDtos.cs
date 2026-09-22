@@ -74,6 +74,7 @@ public sealed class HostCopilotPendingActionDto
 
 public sealed class HostCopilotDraftGenerateRequest
 {
+    public Guid OperationId { get; init; }
     public string? Tone { get; init; }
     public string? HostInstruction { get; init; }
 }

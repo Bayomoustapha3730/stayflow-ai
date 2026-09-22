@@ -52,6 +52,7 @@ public sealed class CopilotService(
 
     public async Task<ApiResponse<ConversationCopilotSuggestionsResponse>> GetSuggestedRepliesAsync(
         Guid conversationId,
+        Guid operationId,
         string? tone,
         CancellationToken cancellationToken)
     {
@@ -61,21 +62,39 @@ public sealed class CopilotService(
         }
 
         await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.HostCopilot, cancellationToken);
-        await _subscriptionEntitlementService.ConsumeQuotaAsync(
+        await _subscriptionEntitlementService.AdmitCopilotOperationAsync(
             companyId,
-            UsageMetric.AiRequests,
-            1,
-            $"copilot:suggestions:{conversationId:D}:{currentTenantContext.CorrelationId ?? "none"}",
+            operationId,
+            conversationId,
+            currentTenantContext.UserId ?? Guid.Empty,
+            CopilotOperationType.CopilotSuggestion,
             cancellationToken);
 
-        var result = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+        AIReplyOrchestrationResult? result;
+        try
         {
-            ConversationId = conversationId,
-            Operation = AIReplyOperation.SuggestedHostReplies,
-            RequestedTone = tone,
-            RequestedSuggestionCount = 3,
-            CorrelationId = currentTenantContext.CorrelationId
-        }, cancellationToken);
+            result = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+            {
+                ConversationId = conversationId,
+                Operation = AIReplyOperation.SuggestedHostReplies,
+                RequestedTone = tone,
+                RequestedSuggestionCount = 3,
+                CorrelationId = currentTenantContext.CorrelationId
+            }, cancellationToken);
+            if (result is null || result.FallbackUsed)
+            {
+                await _subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, operationId, cancellationToken);
+            }
+            else
+            {
+                await _subscriptionEntitlementService.MarkCopilotOperationCompletedAsync(companyId, operationId, cancellationToken);
+            }
+        }
+        catch
+        {
+            await _subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, operationId, cancellationToken);
+            throw;
+        }
 
         if (result is null)
         {
@@ -111,22 +130,40 @@ public sealed class CopilotService(
         }
 
         await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.HostCopilot, cancellationToken);
-        await _subscriptionEntitlementService.ConsumeQuotaAsync(
+        await _subscriptionEntitlementService.AdmitCopilotOperationAsync(
             companyId,
-            UsageMetric.AiRequests,
-            1,
-            $"copilot:draft:{conversationId:D}:{currentTenantContext.CorrelationId ?? "none"}",
+            request.OperationId,
+            conversationId,
+            currentTenantContext.UserId ?? Guid.Empty,
+            CopilotOperationType.CopilotGeneratedReply,
             cancellationToken);
 
-        var result = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+        AIReplyOrchestrationResult? result;
+        try
         {
-            ConversationId = conversationId,
-            Operation = AIReplyOperation.GeneratedHostReply,
-            RequestedTone = request.Tone,
-            HostDraft = request.HostDraft,
-            HostInstruction = request.Guidance,
-            CorrelationId = currentTenantContext.CorrelationId
-        }, cancellationToken);
+            result = await replyOrchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+            {
+                ConversationId = conversationId,
+                Operation = AIReplyOperation.GeneratedHostReply,
+                RequestedTone = request.Tone,
+                HostDraft = request.HostDraft,
+                HostInstruction = request.Guidance,
+                CorrelationId = currentTenantContext.CorrelationId
+            }, cancellationToken);
+            if (result is null || result.FallbackUsed)
+            {
+                await _subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
+            }
+            else
+            {
+                await _subscriptionEntitlementService.MarkCopilotOperationCompletedAsync(companyId, request.OperationId, cancellationToken);
+            }
+        }
+        catch
+        {
+            await _subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
+            throw;
+        }
 
         if (result is null)
         {

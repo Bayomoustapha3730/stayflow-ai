@@ -184,7 +184,7 @@ public sealed class HostCopilotControllerIntegrationTests : IClassFixture<Signal
 
         using var response = await client.PostAsync(
             $"/host/copilot/conversations/{ConversationA:D}/draft",
-            JsonContent(new { tone = "professional", hostInstruction = "Be concise" }));
+            JsonContent(new { operationId = Guid.NewGuid(), tone = "professional", hostInstruction = "Be concise" }));
 
         var payload = await ParseJsonAsync(response);
 
@@ -208,6 +208,7 @@ public sealed class HostCopilotControllerIntegrationTests : IClassFixture<Signal
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        db.Database.EnsureCreated();
 
         EnsureHostCopilotSubscription(db, CompanyA, CompanyASubscriptionId);
         EnsureHostCopilotSubscription(db, CompanyB, CompanyBSubscriptionId);

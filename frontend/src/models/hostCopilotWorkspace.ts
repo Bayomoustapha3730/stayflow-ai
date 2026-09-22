@@ -64,6 +64,7 @@ export interface HostCopilotPendingAction {
 }
 
 export interface HostCopilotDraftGenerateRequest {
+  operationId: string;
   tone?: string;
   hostInstruction?: string;
 }

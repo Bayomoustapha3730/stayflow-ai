@@ -1,4 +1,5 @@
 export interface CopilotSuggestReplyRequest {
+  operationId?: string;
   guidance?: string;
   tone?: CopilotTone;
   hostDraft?: string;

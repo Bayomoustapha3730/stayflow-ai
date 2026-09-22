@@ -13,8 +13,8 @@ export function createHostCopilotApi(http: HttpClient) {
       return http.get<ConversationCopilotSummaryResponse>(`/copilot/conversations/${conversationId}/summary`);
     },
 
-    getSuggestedReplies(conversationId: string, tone: CopilotTone) {
-      const params = new URLSearchParams({ tone });
+    getSuggestedReplies(conversationId: string, tone: CopilotTone, operationId: string) {
+      const params = new URLSearchParams({ tone, operationId });
       return http.get<ConversationCopilotSuggestionsResponse>(
         `/copilot/conversations/${conversationId}/suggested-replies?${params.toString()}`
       );

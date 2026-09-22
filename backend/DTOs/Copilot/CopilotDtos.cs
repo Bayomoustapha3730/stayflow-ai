@@ -56,6 +56,7 @@ public sealed class ConversationCopilotSuggestionsResponse
 
 public sealed class CopilotSuggestReplyRequest
 {
+    public Guid OperationId { get; init; }
     public string? Guidance { get; init; }
     public string? Tone { get; init; }
     public string? HostDraft { get; init; }
