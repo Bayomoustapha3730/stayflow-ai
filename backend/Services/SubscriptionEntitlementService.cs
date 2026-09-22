@@ -307,11 +307,24 @@ public sealed class SubscriptionEntitlementService(
             record => record.QuantityUsed,
             StringComparer.Ordinal);
 
+        var activeUsers = await dbContext.OrganizationMembers
+            .AsNoTracking()
+            .LongCountAsync(member => member.CompanyId == subscription.CompanyId
+                && member.Status == OrganizationMemberStatus.Active.ToStorageValue(), cancellationToken);
+        var activeProperties = await dbContext.Properties
+            .AsNoTracking()
+            .LongCountAsync(property => property.CompanyId == subscription.CompanyId && !property.IsDeleted, cancellationToken);
+
         var quotas = metricEntitlements
             .Select(entitlement =>
             {
                 var metric = metricByEntitlement[entitlement.Key];
-                var used = usageByMetric.GetValueOrDefault(metric.ToStorageValue(), 0);
+                var used = metric switch
+                {
+                    UsageMetric.Users => activeUsers,
+                    UsageMetric.Properties => activeProperties,
+                    _ => usageByMetric.GetValueOrDefault(metric.ToStorageValue(), 0)
+                };
                 var unlimited = entitlement.IsUnlimited || entitlement.QuotaLimit is null;
                 var remaining = unlimited
                     ? (long?)null

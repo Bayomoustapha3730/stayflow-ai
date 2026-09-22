@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Organizations;
+using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services;
 
@@ -48,6 +49,24 @@ public sealed class OrganizationServiceTests
 
         Assert.True(response.Success);
         Assert.Equal("Manager", response.Data?.Role);
+    }
+
+    [Fact]
+    public async Task RemoveMemberAsync_RestoresCapacityForAnotherAdmission()
+    {
+        var fixture = await CreateFixtureAsync();
+        var organizationService = new OrganizationService(fixture.DbContext, fixture.TenantContext);
+        var removed = await organizationService.RemoveMemberAsync(fixture.TargetUserId, CancellationToken.None);
+
+        Assert.True(removed.Success);
+
+        var capacityService = new ResourceCapacityService(
+            fixture.DbContext,
+            new FixedCapacityEntitlementService(fixture.CompanyId, UsageMetric.Users, 2));
+
+        await capacityService.EnsureCapacityAsync(fixture.CompanyId, UsageMetric.Users, CancellationToken.None);
+        Assert.Equal(OrganizationMemberStatus.Removed.ToStorageValue(),
+            (await fixture.DbContext.OrganizationMembers.SingleAsync(member => member.UserId == fixture.TargetUserId)).Status);
     }
 
     private static async Task<Fixture> CreateFixtureAsync(
@@ -126,10 +145,36 @@ public sealed class OrganizationServiceTests
 
         await dbContext.SaveChangesAsync();
 
-        return new Fixture(dbContext, tenantContext, actorUserId, targetUserId);
+        return new Fixture(dbContext, tenantContext, companyId, actorUserId, targetUserId);
     }
 
-    private sealed record Fixture(ApplicationDbContext DbContext, ITenantContext TenantContext, Guid OwnerUserId, Guid TargetUserId);
+    private sealed record Fixture(ApplicationDbContext DbContext, ITenantContext TenantContext, Guid CompanyId, Guid OwnerUserId, Guid TargetUserId);
+
+    private sealed class FixedCapacityEntitlementService(Guid companyId, UsageMetric metric, long limit) : ISubscriptionEntitlementService
+    {
+        public Task<SubscriptionSnapshot> GetCurrentSnapshotAsync(Guid requestedCompanyId, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new SubscriptionSnapshot(
+                companyId,
+                Guid.Empty,
+                Guid.Empty,
+                "Test",
+                "Test",
+                SubscriptionStatus.Active.ToStorageValue(),
+                false,
+                DateTimeOffset.UtcNow.AddDays(-1),
+                DateTimeOffset.UtcNow.AddDays(30),
+                [],
+                [new QuotaSnapshot(metric, metric.ToQuotaEntitlementKey(), limit, 0, limit, false, "count", DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30))]));
+        }
+
+        public Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid requestedCompanyId, CancellationToken cancellationToken)
+            => GetCurrentSnapshotAsync(requestedCompanyId, cancellationToken).ContinueWith(task => (SubscriptionSnapshot?)task.Result, cancellationToken);
+
+        public Task EnsureFeatureEnabledAsync(Guid requestedCompanyId, string featureKey, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<UsageConsumptionResult> ConsumeQuotaAsync(Guid requestedCompanyId, UsageMetric requestedMetric, long quantity, string idempotencyKey, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<SubscriptionSnapshot> UpdatePlanAsync(Guid requestedCompanyId, Guid? planId, string? planName, string? notes, CancellationToken cancellationToken) => GetCurrentSnapshotAsync(requestedCompanyId, cancellationToken);
+    }
 
     private sealed class FakeTenantContext(Guid? companyId, Guid? userId, bool isAuthenticated) : ITenantContext
     {

@@ -24,13 +24,13 @@ public sealed class ChatService(
     IAIReplyOrchestrator aiReplyOrchestrator,
     ICurrentTenantContext currentTenantContext,
     IOptions<ConversationOptions> options,
+    ISubscriptionEntitlementService subscriptionEntitlementService,
     IConciergeActionOrchestrator? conciergeActionOrchestrator = null,
-    ILogger<ChatService>? logger = null,
-    ISubscriptionEntitlementService? subscriptionEntitlementService = null) : IChatService
+    ILogger<ChatService>? logger = null) : IChatService
 {
     private const string HostWillRespondMessage = "Thanks, your message has been received. A host or support team member will respond shortly.";
     private readonly ILogger<ChatService> logger = logger ?? NullLogger<ChatService>.Instance;
-    private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService ?? NoOpSubscriptionEntitlementService.Instance;
+    private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService;
 
     public async Task<ApiResponse<ChatMessageResponse>> SendGuestMessageAsync(SendChatMessageRequest request, CancellationToken cancellationToken, Guid? whatsAppIntegrationId = null)
     {

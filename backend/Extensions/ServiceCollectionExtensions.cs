@@ -203,6 +203,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.ICompanyService, Services.CompanyService>();
         services.AddScoped<Services.IOrganizationService, Services.OrganizationService>();
         services.AddScoped<Services.ISubscriptionEntitlementService, Services.SubscriptionEntitlementService>();
+        services.AddScoped<Services.IResourceCapacityService, Services.ResourceCapacityService>();
         services.AddScoped<Services.IOnboardingService, Services.OnboardingService>();
         services.AddScoped<Services.IOrganizationInvitationService, Services.OrganizationInvitationService>();
         services.AddScoped<Services.ITenantApiKeyService, Services.TenantApiKeyService>();

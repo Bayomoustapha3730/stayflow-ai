@@ -381,6 +381,7 @@ public sealed class AuthServiceTests
             new FakeIdentityEmailService(repository),
             dbContext,
             new NoOpSubscriptionEntitlementService(),
+            new AllowingResourceCapacityService(),
             new TenantExecutionContextAccessor());
     }
 
@@ -610,5 +611,11 @@ public sealed class AuthServiceTests
 
         public Task<SubscriptionSnapshot> UpdatePlanAsync(Guid companyId, Guid? planId, string? planName, string? notes, CancellationToken cancellationToken)
             => GetCurrentSnapshotAsync(companyId, cancellationToken);
+    }
+
+    private sealed class AllowingResourceCapacityService : IResourceCapacityService
+    {
+        public Task EnsureCapacityAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<long> GetCurrentCountAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken) => Task.FromResult(0L);
     }
 }

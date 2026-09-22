@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,7 @@ public sealed class AuthService(
     IIdentityEmailService identityEmailService,
     ApplicationDbContext dbContext,
     ISubscriptionEntitlementService subscriptionEntitlementService,
+    IResourceCapacityService resourceCapacityService,
     ITenantExecutionContextAccessor tenantExecutionContextAccessor) : IAuthService
 {
     private const int MaxFailedAttempts = 5;
@@ -291,7 +293,7 @@ public sealed class AuthService(
         {
             if (dbContext.Database.IsRelational())
             {
-                transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                transaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             }
 
             OrganizationInvitation? invitation;
@@ -353,6 +355,7 @@ public sealed class AuthService(
                 JoinedAt = now,
                 InvitedByUserId = invitation.InvitedByUserId
             };
+            await resourceCapacityService.EnsureCapacityAsync(invitation.CompanyId, UsageMetric.Users, cancellationToken);
             user.OrganizationMemberships.Add(membership);
             invitation.AcceptedAtUtc = now;
             invitation.AcceptedByUserId = user.Id;
@@ -1003,39 +1006,67 @@ public sealed class AuthService(
 
     private async Task BootstrapLegacyCurrentCompanyMembershipAsync(User user, Company company, CancellationToken cancellationToken)
     {
-        var existingMembership = await dbContext.OrganizationMembers
-            .FirstOrDefaultAsync(item => item.CompanyId == user.CompanyId && item.UserId == user.Id, cancellationToken);
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            : null;
 
-        if (existingMembership is not null)
+        try
         {
-            existingMembership.Role = DetermineLegacyMembershipRole(user, company, existingMembership.Role);
-            existingMembership.Status = OrganizationMemberStatus.Active.ToStorageValue();
-            if (existingMembership.JoinedAt == default)
+            var existingMembership = await dbContext.OrganizationMembers
+                .FirstOrDefaultAsync(item => item.CompanyId == user.CompanyId && item.UserId == user.Id, cancellationToken);
+
+            if (existingMembership is null
+                || existingMembership.Status != OrganizationMemberStatus.Active.ToStorageValue())
             {
-                existingMembership.JoinedAt = DateTimeOffset.UtcNow;
+                await resourceCapacityService.EnsureCapacityAsync(user.CompanyId, UsageMetric.Users, cancellationToken);
             }
-            return;
+
+            if (existingMembership is not null)
+            {
+                existingMembership.Role = DetermineLegacyMembershipRole(user, company, existingMembership.Role);
+                existingMembership.Status = OrganizationMemberStatus.Active.ToStorageValue();
+                if (existingMembership.JoinedAt == default)
+                {
+                    existingMembership.JoinedAt = DateTimeOffset.UtcNow;
+                }
+            }
+            else
+            {
+                var role = DetermineLegacyMembershipRole(user, company, null);
+                var membership = new OrganizationMember
+                {
+                    Id = Guid.NewGuid(),
+                    CompanyId = user.CompanyId,
+                    UserId = user.Id,
+                    Role = role,
+                    Status = OrganizationMemberStatus.Active.ToStorageValue(),
+                    JoinedAt = DateTimeOffset.UtcNow
+                };
+
+                if (company.OwnerUserId is null && string.Equals(role, OrganizationRole.Owner.ToStorageValue(), StringComparison.OrdinalIgnoreCase))
+                {
+                    company.OwnerUserId = user.Id;
+                }
+
+                user.OrganizationMemberships.Add(membership);
+                await dbContext.OrganizationMembers.AddAsync(membership, cancellationToken);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
         }
-
-        var role = DetermineLegacyMembershipRole(user, company, null);
-        var membership = new OrganizationMember
+        catch
         {
-            Id = Guid.NewGuid(),
-            CompanyId = user.CompanyId,
-            UserId = user.Id,
-            Role = role,
-            Status = OrganizationMemberStatus.Active.ToStorageValue(),
-            JoinedAt = DateTimeOffset.UtcNow
-        };
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
 
-        if (company.OwnerUserId is null && string.Equals(role, OrganizationRole.Owner.ToStorageValue(), StringComparison.OrdinalIgnoreCase))
-        {
-            company.OwnerUserId = user.Id;
+            throw;
         }
-
-        user.OrganizationMemberships.Add(membership);
-        await dbContext.OrganizationMembers.AddAsync(membership, cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     private static string DetermineLegacyMembershipRole(User user, Company company, string? currentValue)

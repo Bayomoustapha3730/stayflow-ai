@@ -1,5 +1,8 @@
+using System.Data;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using StayFlow.Api.Common;
+using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Properties;
 using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
@@ -10,9 +13,11 @@ namespace StayFlow.Api.Services;
 public sealed class PropertyService(
     IPropertyRepository propertyRepository,
     ICurrentTenantContext currentTenantContext,
-    ISubscriptionEntitlementService? subscriptionEntitlementService = null) : IPropertyService
+    ISubscriptionEntitlementService subscriptionEntitlementService,
+    IResourceCapacityService resourceCapacityService,
+    ApplicationDbContext dbContext) : IPropertyService
 {
-    private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService ?? NoOpSubscriptionEntitlementService.Instance;
+    private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService;
 
     public async Task<ApiResponse<PagedResult<PropertySummaryDto>>> GetAsync(PropertyQueryParameters query, CancellationToken cancellationToken)
     {
@@ -65,46 +70,62 @@ public sealed class PropertyService(
 
         await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.MultiProperty, cancellationToken);
 
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            : null;
+
         try
         {
-            await _subscriptionEntitlementService.ConsumeQuotaAsync(
-                companyId,
-                UsageMetric.Properties,
-                1,
-                $"property:create:{companyId:D}:{currentTenantContext.CorrelationId ?? "none"}:{request.Name.Trim().ToUpperInvariant()}",
-                cancellationToken);
-        }
-        catch (QuotaExceededException)
-        {
-            if (await IsFreePlanPropertyLimitAsync(companyId, cancellationToken))
+            try
             {
-                return ApiResponse<PropertyDto>.Fail("You've reached the 1-property limit on the Free plan. Upgrade to Starter to add more properties.");
+                await resourceCapacityService.EnsureCapacityAsync(companyId, UsageMetric.Properties, cancellationToken);
+            }
+            catch (QuotaExceededException)
+            {
+                if (await IsFreePlanPropertyLimitAsync(companyId, cancellationToken))
+                {
+                    return ApiResponse<PropertyDto>.Fail("You've reached the 1-property limit on the Free plan. Upgrade to Starter to add more properties.");
+                }
+
+                throw;
+            }
+
+            var property = new Property
+            {
+                Id = Guid.NewGuid(),
+                CompanyId = companyId,
+                Name = request.Name.Trim(),
+                AddressLine1 = request.AddressLine1.Trim(),
+                AddressLine2 = NormalizeOptional(request.AddressLine2),
+                City = request.City.Trim(),
+                CountryCode = request.CountryCode.Trim().ToUpperInvariant(),
+                TimeZone = request.TimeZone.Trim(),
+                Description = NormalizeOptional(request.Description),
+                IsActive = true
+            };
+
+            ReplaceChildren(property, request.PropertyAmenities, request.PropertyHouseRules, request.PropertyRecommendations, request.PropertyEmergencyContacts, request.PropertyKnowledgeArticles);
+
+            await propertyRepository.AddAsync(property, cancellationToken);
+            await AddAuditLogAsync("Created", property, cancellationToken);
+            await propertyRepository.SaveChangesAsync(cancellationToken);
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return ApiResponse<PropertyDto>.Ok(MapToDto(property), "Property created successfully.");
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
             }
 
             throw;
         }
-
-        var property = new Property
-        {
-            Id = Guid.NewGuid(),
-            CompanyId = companyId,
-            Name = request.Name.Trim(),
-            AddressLine1 = request.AddressLine1.Trim(),
-            AddressLine2 = NormalizeOptional(request.AddressLine2),
-            City = request.City.Trim(),
-            CountryCode = request.CountryCode.Trim().ToUpperInvariant(),
-            TimeZone = request.TimeZone.Trim(),
-            Description = NormalizeOptional(request.Description),
-            IsActive = true
-        };
-
-        ReplaceChildren(property, request.PropertyAmenities, request.PropertyHouseRules, request.PropertyRecommendations, request.PropertyEmergencyContacts, request.PropertyKnowledgeArticles);
-
-        await propertyRepository.AddAsync(property, cancellationToken);
-        await AddAuditLogAsync("Created", property, cancellationToken);
-        await propertyRepository.SaveChangesAsync(cancellationToken);
-
-        return ApiResponse<PropertyDto>.Ok(MapToDto(property), "Property created successfully.");
     }
 
     public async Task<ApiResponse<PropertyDto>> UpdateAsync(Guid id, UpdatePropertyRequest request, CancellationToken cancellationToken)

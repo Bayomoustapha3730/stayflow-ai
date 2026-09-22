@@ -447,9 +447,9 @@ public sealed class ChatServiceTests
             fixture.ReplyOrchestrator,
             fixture.TenantContext,
             Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
+            new AllowingSubscriptionEntitlementService(),
             new FakeConciergeActionOrchestrator(),
-            NullLogger<ChatService>.Instance,
-            null);
+            NullLogger<ChatService>.Instance);
 
         var response = await fixture.ChatService.ConfirmPendingActionAsync(
             conversation.Id,
@@ -502,6 +502,7 @@ public sealed class ChatServiceTests
             fixture.ReplyOrchestrator,
             fixture.TenantContext,
             Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
+            new AllowingSubscriptionEntitlementService(),
             actionOrchestrator);
 
         var proposal = await fixture.ChatService.SendGuestMessageAsync(fixture.Request("Send me an M-PESA request."), CancellationToken.None);
@@ -558,7 +559,8 @@ public sealed class ChatServiceTests
                 ConversationService,
                 ReplyOrchestrator,
                 TenantContext,
-                Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
+                Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
+                new AllowingSubscriptionEntitlementService());
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();

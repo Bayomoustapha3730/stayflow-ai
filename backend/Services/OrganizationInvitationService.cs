@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Cryptography;
 using System.Security.Claims;
 using System.Text;
@@ -22,7 +23,8 @@ public sealed class OrganizationInvitationService(
     IIdentityEmailService identityEmailService,
     IJwtTokenService jwtTokenService,
     IHttpContextAccessor httpContextAccessor,
-    ITenantExecutionContextAccessor tenantExecutionContextAccessor) : IOrganizationInvitationService
+    ITenantExecutionContextAccessor tenantExecutionContextAccessor,
+    IResourceCapacityService resourceCapacityService) : IOrganizationInvitationService
 {
     private static readonly TimeSpan DefaultExpiry = TimeSpan.FromDays(7);
     private static readonly TimeSpan ResendCooldown = TimeSpan.FromMinutes(1);
@@ -201,7 +203,7 @@ public sealed class OrganizationInvitationService(
         {
             if (dbContext.Database.IsRelational())
             {
-                transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                transaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             }
 
             OrganizationInvitation? invitation;
@@ -254,6 +256,7 @@ public sealed class OrganizationInvitationService(
 
             if (existingMembership is null)
             {
+                await resourceCapacityService.EnsureCapacityAsync(invitation.CompanyId, UsageMetric.Users, cancellationToken);
                 await dbContext.OrganizationMembers.AddAsync(new OrganizationMember
                 {
                     Id = Guid.NewGuid(),
@@ -268,7 +271,11 @@ public sealed class OrganizationInvitationService(
             else
             {
                 existingMembership.Role = invitation.Role;
-                existingMembership.Status = OrganizationMemberStatus.Active.ToStorageValue();
+                if (existingMembership.Status != OrganizationMemberStatus.Active.ToStorageValue())
+                {
+                    await resourceCapacityService.EnsureCapacityAsync(invitation.CompanyId, UsageMetric.Users, cancellationToken);
+                    existingMembership.Status = OrganizationMemberStatus.Active.ToStorageValue();
+                }
             }
 
             invitation.AcceptedAtUtc = DateTimeOffset.UtcNow;

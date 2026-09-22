@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using StayFlow.Api.Data;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.Properties;
 using StayFlow.Api.Exceptions;
@@ -10,6 +12,23 @@ namespace StayFlow.Api.Tests;
 
 public sealed class PropertyServiceTests
 {
+    private static PropertyService CreateService(
+        FakePropertyRepository repository,
+        FakeCurrentTenantContext tenantContext,
+        ISubscriptionEntitlementService? entitlementService = null,
+        IResourceCapacityService? resourceCapacityService = null)
+    {
+        var dbContext = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"property-service-{Guid.NewGuid():N}")
+            .Options);
+        return new PropertyService(
+            repository,
+            tenantContext,
+            entitlementService ?? new AllowingSubscriptionEntitlementService(),
+            resourceCapacityService ?? new AllowingResourceCapacityService(),
+            dbContext);
+    }
+
     [Fact]
     public void PropertyRequestDtos_DoNotExposeCompanyIdTenantSelector()
     {
@@ -23,7 +42,7 @@ public sealed class PropertyServiceTests
     {
         var repository = new FakePropertyRepository();
         var tenantContext = new FakeCurrentTenantContext(repository.CompanyId);
-        var service = new PropertyService(repository, tenantContext);
+        var service = CreateService(repository, tenantContext);
 
         var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
@@ -55,7 +74,7 @@ public sealed class PropertyServiceTests
     {
         var repository = new FakePropertyRepository();
         var tenantCompanyId = repository.CompanyId;
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(tenantCompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(tenantCompanyId));
 
         var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
@@ -67,7 +86,7 @@ public sealed class PropertyServiceTests
     public async Task CreateAsync_WithMissingCompany_ReturnsFailure()
     {
         var repository = new FakePropertyRepository { CompanyExists = false };
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
@@ -80,7 +99,7 @@ public sealed class PropertyServiceTests
     public async Task CreateAsync_WithInvalidRequest_ReturnsValidationErrors()
     {
         var repository = new FakePropertyRepository();
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.CreateAsync(new CreatePropertyRequest(), CancellationToken.None);
 
@@ -93,7 +112,7 @@ public sealed class PropertyServiceTests
     public async Task CreateAsync_WithMissingTenantContext_ReturnsFailure()
     {
         var repository = new FakePropertyRepository();
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(null, isAuthenticated: true));
+        var service = CreateService(repository, new FakeCurrentTenantContext(null, isAuthenticated: true));
 
         var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
@@ -106,7 +125,7 @@ public sealed class PropertyServiceTests
     public async Task CreateAsync_WithInvalidTenantContext_ReturnsFailure()
     {
         var repository = new FakePropertyRepository();
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(Guid.Empty));
+        var service = CreateService(repository, new FakeCurrentTenantContext(Guid.Empty));
 
         var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
@@ -119,7 +138,7 @@ public sealed class PropertyServiceTests
     public async Task CreateAsync_WithoutAuthenticatedTenantContext_ReturnsFailure()
     {
         var repository = new FakePropertyRepository();
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId, isAuthenticated: false));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId, isAuthenticated: false));
 
         var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
@@ -136,7 +155,7 @@ public sealed class PropertyServiceTests
         repository.Properties.Add(NewProperty(repository.CompanyId, "Nairobi Loft"));
         repository.Properties.Add(NewProperty(repository.CompanyId, "Coast Studio", isActive: false));
         repository.Properties.Add(NewProperty(Guid.NewGuid(), "Coast Other Tenant"));
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.GetAsync(new PropertyQueryParameters
         {
@@ -157,7 +176,7 @@ public sealed class PropertyServiceTests
         var repository = new FakePropertyRepository();
         var property = NewProperty(repository.CompanyId, "Inactive Property", isActive: false);
         repository.Properties.Add(property);
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.GetByIdAsync(property.Id, CancellationToken.None);
 
@@ -172,7 +191,7 @@ public sealed class PropertyServiceTests
         var repository = new FakePropertyRepository();
         var property = NewProperty(repository.CompanyId, "Deleted Property", isDeleted: true);
         repository.Properties.Add(property);
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.GetByIdAsync(property.Id, CancellationToken.None);
 
@@ -190,7 +209,7 @@ public sealed class PropertyServiceTests
         property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle { Id = Guid.NewGuid(), CompanyId = repository.CompanyId, PropertyId = property.Id, Title = "Active FAQ", Content = "Answer", IsActive = true });
         property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle { Id = Guid.NewGuid(), CompanyId = repository.CompanyId, PropertyId = property.Id, Title = "Inactive FAQ", Content = "Old answer", IsActive = false });
         repository.Properties.Add(property);
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.GetByIdAsync(property.Id, CancellationToken.None);
 
@@ -209,7 +228,7 @@ public sealed class PropertyServiceTests
         var property = NewProperty(repository.CompanyId, "Old Name");
         property.PropertyAmenities.Add(new PropertyAmenity { Id = Guid.NewGuid(), PropertyId = property.Id, Name = "WiFi", IsActive = true });
         repository.Properties.Add(property);
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.UpdateAsync(property.Id, new UpdatePropertyRequest
         {
@@ -235,7 +254,7 @@ public sealed class PropertyServiceTests
         var repository = new FakePropertyRepository();
         var property = NewProperty(Guid.NewGuid(), "Other Tenant Property");
         repository.Properties.Add(property);
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.UpdateAsync(property.Id, new UpdatePropertyRequest
         {
@@ -256,7 +275,7 @@ public sealed class PropertyServiceTests
         var repository = new FakePropertyRepository();
         var property = NewProperty(Guid.NewGuid(), "Other Tenant Property");
         repository.Properties.Add(property);
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.GetByIdAsync(property.Id, CancellationToken.None);
 
@@ -270,7 +289,7 @@ public sealed class PropertyServiceTests
         var repository = new FakePropertyRepository();
         var property = NewProperty(Guid.NewGuid(), "Other Tenant Property");
         repository.Properties.Add(property);
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
 
         var response = await service.DeleteAsync(property.Id, CancellationToken.None);
 
@@ -288,7 +307,7 @@ public sealed class PropertyServiceTests
         property.PropertyAmenities.Add(new PropertyAmenity { Id = Guid.NewGuid(), PropertyId = property.Id, Name = "WiFi", IsActive = true });
         property.PropertyKnowledgeArticles.Add(new PropertyKnowledgeArticle { Id = Guid.NewGuid(), CompanyId = repository.CompanyId, PropertyId = property.Id, Title = "FAQ", Content = "Answer", IsActive = true });
         repository.Properties.Add(property);
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId, userId: userId));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId, userId: userId));
 
         var response = await service.DeleteAsync(property.Id, CancellationToken.None);
 
@@ -308,7 +327,7 @@ public sealed class PropertyServiceTests
         var userId = Guid.NewGuid();
         var property = NewProperty(repository.CompanyId, "Delete Me");
         repository.Properties.Add(property);
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId, userId: userId, correlationId: "test-correlation"));
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId, userId: userId, correlationId: "test-correlation"));
 
         var response = await service.DeleteAsync(property.Id, CancellationToken.None);
 
@@ -330,13 +349,67 @@ public sealed class PropertyServiceTests
     {
         var repository = new FakePropertyRepository();
         var entitlementService = new FreePlanPropertyLimitEntitlementService();
-        var service = new PropertyService(repository, new FakeCurrentTenantContext(repository.CompanyId), entitlementService);
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId), entitlementService, new RejectingResourceCapacityService());
 
         var response = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
 
         Assert.False(response.Success);
         Assert.Equal("You've reached the 1-property limit on the Free plan. Upgrade to Starter to add more properties.", response.Message);
         Assert.Empty(repository.Properties);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_RestoresPropertyCapacityForReplacementCreation()
+    {
+        var repository = new FakePropertyRepository();
+        var existing = NewProperty(repository.CompanyId, "Existing");
+        repository.Properties.Add(existing);
+        var service = CreateService(
+            repository,
+            new FakeCurrentTenantContext(repository.CompanyId),
+            resourceCapacityService: new RepositoryPropertyCapacityService(repository, 1));
+
+        await Assert.ThrowsAsync<QuotaExceededException>(() => service.CreateAsync(ValidCreateRequest(), CancellationToken.None));
+        Assert.Single(repository.Properties);
+
+        var deleted = await service.DeleteAsync(existing.Id, CancellationToken.None);
+        Assert.True(deleted.Success);
+
+        var replacement = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
+        Assert.True(replacement.Success);
+        Assert.Equal(2, repository.Properties.Count);
+        Assert.True(existing.IsDeleted);
+        Assert.False(repository.Properties.Single(property => property.Id == replacement.Data!.Id).IsDeleted);
+    }
+
+    [Fact]
+    public async Task CreateAsync_AllowsUnlimitedPropertyCapacity()
+    {
+        var repository = new FakePropertyRepository();
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+
+        var first = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
+        var second = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
+
+        Assert.True(first.Success);
+        Assert.True(second.Success);
+        Assert.Equal(2, repository.Properties.Count);
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenPersistenceFailsAfterAdmission_DoesNotConsumePropertySlot()
+    {
+        var repository = new FakePropertyRepository { ThrowOnAdd = true };
+        var service = CreateService(repository, new FakeCurrentTenantContext(repository.CompanyId));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(ValidCreateRequest(), CancellationToken.None));
+        Assert.Empty(repository.Properties);
+
+        repository.ThrowOnAdd = false;
+        var retry = await service.CreateAsync(ValidCreateRequest(), CancellationToken.None);
+
+        Assert.True(retry.Success, retry.Message);
+        Assert.Single(repository.Properties);
     }
 
     private static CreatePropertyRequest ValidCreateRequest()
@@ -390,6 +463,7 @@ public sealed class PropertyServiceTests
     {
         public Guid CompanyId { get; } = Guid.NewGuid();
         public bool CompanyExists { get; init; } = true;
+        public bool ThrowOnAdd { get; set; }
         public List<Property> Properties { get; } = [];
         public List<AuditLog> AuditLogs { get; } = [];
 
@@ -425,6 +499,11 @@ public sealed class PropertyServiceTests
 
         public Task AddAsync(Property property, CancellationToken cancellationToken)
         {
+            if (ThrowOnAdd)
+            {
+                throw new InvalidOperationException("Simulated property persistence failure.");
+            }
+
             Properties.Add(property);
             return Task.CompletedTask;
         }
@@ -468,5 +547,45 @@ public sealed class PropertyServiceTests
 
         public Task<SubscriptionSnapshot> UpdatePlanAsync(Guid companyId, Guid? planId, string? planName, string? notes, CancellationToken cancellationToken)
             => GetCurrentSnapshotAsync(companyId, cancellationToken);
+    }
+
+    private sealed class AllowingSubscriptionEntitlementService : ISubscriptionEntitlementService
+    {
+        public Task<SubscriptionSnapshot> GetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken)
+            => Task.FromResult(new SubscriptionSnapshot(companyId, Guid.NewGuid(), Guid.NewGuid(), "Starter", "Starter", "Active", false, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMonths(1), [], []));
+        public Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken) => Task.FromResult<SubscriptionSnapshot?>(null);
+        public Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<UsageConsumptionResult> ConsumeQuotaAsync(Guid companyId, UsageMetric metric, long quantity, string idempotencyKey, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<SubscriptionSnapshot> UpdatePlanAsync(Guid companyId, Guid? planId, string? planName, string? notes, CancellationToken cancellationToken) => throw new NotSupportedException();
+    }
+
+    private sealed class AllowingResourceCapacityService : IResourceCapacityService
+    {
+        public Task EnsureCapacityAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<long> GetCurrentCountAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken) => Task.FromResult(0L);
+    }
+
+    private sealed class RejectingResourceCapacityService : IResourceCapacityService
+    {
+        public Task EnsureCapacityAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken)
+            => throw new QuotaExceededException(metric.ToStorageValue(), 1, 1, 1);
+        public Task<long> GetCurrentCountAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken) => Task.FromResult(1L);
+    }
+
+    private sealed class RepositoryPropertyCapacityService(FakePropertyRepository repository, long limit) : IResourceCapacityService
+    {
+        public Task EnsureCapacityAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken)
+        {
+            var count = repository.Properties.LongCount(property => property.CompanyId == companyId && !property.IsDeleted);
+            if (count >= limit)
+            {
+                throw new QuotaExceededException(metric.ToStorageValue(), limit, 1, count);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task<long> GetCurrentCountAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken)
+            => Task.FromResult(repository.Properties.LongCount(property => property.CompanyId == companyId && !property.IsDeleted));
     }
 }

@@ -216,7 +216,8 @@ public sealed class CopilotServiceTests
                     NullLogger<ConversationContextBuilder>.Instance),
                 new ContextConfidenceEvaluator(),
                 new FakeCurrentTenantContext(CompanyId),
-                new FakeReplyOrchestrator());
+                new FakeReplyOrchestrator(),
+                new AllowingSubscriptionEntitlementService());
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();

@@ -109,6 +109,41 @@ public sealed class SubscriptionEntitlementServiceQuotaTests
     }
 
     [Fact]
+    public async Task CurrentSnapshot_UsesActiveResourcesAndIgnoresHistoricalResourceUsage()
+    {
+        var harness = await CreateResourceHarnessAsync();
+
+        var snapshot = await harness.Service.GetCurrentSnapshotAsync(harness.CompanyId, CancellationToken.None);
+        var users = Assert.Single(snapshot.Quotas.Where(quota => quota.Metric == UsageMetric.Users));
+        var properties = Assert.Single(snapshot.Quotas.Where(quota => quota.Metric == UsageMetric.Properties));
+
+        Assert.Equal(2, users.Used);
+        Assert.Equal(1, users.Remaining);
+        Assert.Equal(1, properties.Used);
+        Assert.Equal(1, properties.Remaining);
+    }
+
+    [Fact]
+    public async Task CurrentSnapshot_WhenCurrentCountExceedsDowngradedLimit_ClampsRemainingToZero()
+    {
+        var harness = await CreateResourceHarnessAsync();
+        var propertyEntitlement = await harness.DbContext.PlanEntitlements
+            .SingleAsync(entitlement => entitlement.Key == UsageMetric.Properties.ToQuotaEntitlementKey());
+        propertyEntitlement.QuotaLimit = 0;
+        await harness.DbContext.SaveChangesAsync();
+
+        var snapshot = await harness.Service.GetCurrentSnapshotAsync(harness.CompanyId, CancellationToken.None);
+        var properties = Assert.Single(snapshot.Quotas.Where(quota => quota.Metric == UsageMetric.Properties));
+
+        Assert.Equal(1, properties.Used);
+        Assert.Equal(0, properties.Remaining);
+
+        var capacityService = new ResourceCapacityService(harness.DbContext, harness.Service);
+        await Assert.ThrowsAsync<QuotaExceededException>(() =>
+            capacityService.EnsureCapacityAsync(harness.CompanyId, UsageMetric.Properties, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task FiniteLimit_RejectsNewOperationAfterLimitIsReached()
     {
         var harness = await CreateHarnessAsync(limit: 1);
@@ -190,6 +225,71 @@ public sealed class SubscriptionEntitlementServiceQuotaTests
             resolvedDatabaseName);
     }
 
+    private static async Task<ResourceHarness> CreateResourceHarnessAsync()
+    {
+        var companyId = Guid.NewGuid();
+        var planId = Guid.NewGuid();
+        var periodStartUtc = new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+        var periodEndUtc = periodStartUtc.AddMonths(1).AddTicks(-1);
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"resource-snapshot-tests-{Guid.NewGuid():N}")
+            .Options;
+        var dbContext = new ApplicationDbContext(options, new FakeTenantContext(companyId, Guid.NewGuid()));
+
+        dbContext.Companies.Add(new Company
+        {
+            Id = companyId,
+            Name = "Resource Snapshot Tenant",
+            Slug = $"resource-{companyId:N}",
+            NormalizedSlug = $"RESOURCE-{companyId:N}",
+            Status = "Active",
+            Email = $"{companyId:N}@resource.test",
+            PhoneNumber = "+254700000000",
+            CountryCode = "KE",
+            TimeZone = "Africa/Nairobi",
+            IsActive = true
+        });
+        dbContext.SubscriptionPlans.Add(new SubscriptionPlan
+        {
+            Id = planId,
+            Name = "ResourceTest",
+            DisplayName = "ResourceTest",
+            Description = "Resource snapshot test plan",
+            IsActive = true,
+            Entitlements =
+            [
+                new PlanEntitlement { Id = Guid.NewGuid(), Key = UsageMetric.Users.ToQuotaEntitlementKey(), IsEnabled = true, QuotaLimit = 3, Unit = "seats" },
+                new PlanEntitlement { Id = Guid.NewGuid(), Key = UsageMetric.Properties.ToQuotaEntitlementKey(), IsEnabled = true, QuotaLimit = 2, Unit = "properties" },
+                new PlanEntitlement { Id = Guid.NewGuid(), Key = UsageMetric.AiRequests.ToQuotaEntitlementKey(), IsEnabled = true, QuotaLimit = 100, Unit = "requests" }
+            ]
+        });
+        dbContext.TenantSubscriptions.Add(new TenantSubscription
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = companyId,
+            SubscriptionPlanId = planId,
+            Status = SubscriptionStatus.Active.ToStorageValue(),
+            CurrentPeriodStartUtc = periodStartUtc,
+            CurrentPeriodEndUtc = periodEndUtc
+        });
+        dbContext.OrganizationMembers.AddRange(
+            new OrganizationMember { Id = Guid.NewGuid(), CompanyId = companyId, UserId = Guid.NewGuid(), Status = OrganizationMemberStatus.Active.ToStorageValue() },
+            new OrganizationMember { Id = Guid.NewGuid(), CompanyId = companyId, UserId = Guid.NewGuid(), Status = OrganizationMemberStatus.Active.ToStorageValue() },
+            new OrganizationMember { Id = Guid.NewGuid(), CompanyId = companyId, UserId = Guid.NewGuid(), Status = OrganizationMemberStatus.Removed.ToStorageValue() });
+        dbContext.Properties.AddRange(
+            new Property { Id = Guid.NewGuid(), CompanyId = companyId, Name = "Active", IsDeleted = false },
+            new Property { Id = Guid.NewGuid(), CompanyId = companyId, Name = "Deleted", IsDeleted = true });
+        dbContext.UsageRecords.AddRange(
+            new UsageRecord { Id = Guid.NewGuid(), CompanyId = companyId, Metric = UsageMetric.Users.ToStorageValue(), PeriodStartUtc = periodStartUtc, PeriodEndUtc = periodEndUtc, QuantityUsed = 99 },
+            new UsageRecord { Id = Guid.NewGuid(), CompanyId = companyId, Metric = UsageMetric.Properties.ToStorageValue(), PeriodStartUtc = periodStartUtc, PeriodEndUtc = periodEndUtc, QuantityUsed = 99 });
+        await dbContext.SaveChangesAsync();
+
+        return new ResourceHarness(
+            new SubscriptionEntitlementService(dbContext, NullLogger<SubscriptionEntitlementService>.Instance),
+            dbContext,
+            companyId);
+    }
+
     private sealed record Harness(
         SubscriptionEntitlementService Service,
         ApplicationDbContext DbContext,
@@ -197,6 +297,11 @@ public sealed class SubscriptionEntitlementServiceQuotaTests
         DateTimeOffset PeriodStartUtc,
         DateTimeOffset PeriodEndUtc,
         string DatabaseName);
+
+    private sealed record ResourceHarness(
+        SubscriptionEntitlementService Service,
+        ApplicationDbContext DbContext,
+        Guid CompanyId);
 
     private sealed class FakeTenantContext(Guid? companyId, Guid? userId) : ITenantContext
     {

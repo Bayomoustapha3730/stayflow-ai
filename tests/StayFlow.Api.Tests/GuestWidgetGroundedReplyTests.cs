@@ -525,7 +525,8 @@ public sealed class GuestWidgetGroundedReplyTests
                 ConversationService,
                 replyOrchestrator,
                 tenant,
-                Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }));
+                Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
+                new AllowingSubscriptionEntitlementService());
 
             CopilotService = new CopilotService(
                 new ConversationContextBuilder(
@@ -535,7 +536,8 @@ public sealed class GuestWidgetGroundedReplyTests
                     NullLogger<ConversationContextBuilder>.Instance),
                 new ContextConfidenceEvaluator(),
                 tenant,
-                replyOrchestrator);
+                replyOrchestrator,
+                new AllowingSubscriptionEntitlementService());
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();

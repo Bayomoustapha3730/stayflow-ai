@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Auth;
 using StayFlow.Api.DTOs.Organizations;
+using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
 using StayFlow.Api.Services;
@@ -27,6 +28,7 @@ public sealed class SelfServiceIdentityAndInvitationTests
         var subscriptions = new RecordingSubscriptionEntitlementService(dbContext);
         var service = new AuthService(new AuthRepository(dbContext), new JwtTokenService(configuration, hasher), hasher, configuration,
             new HttpContextAccessor { HttpContext = new DefaultHttpContext() }, new NoOpIdentityEmailService(), dbContext, subscriptions,
+            new AllowingResourceCapacityService(),
             new TenantExecutionContextAccessor());
 
         var response = await service.RegisterAsync(new RegisterRequest
@@ -104,6 +106,56 @@ public sealed class SelfServiceIdentityAndInvitationTests
         Assert.Contains("Sign in to accept", response.Message, StringComparison.Ordinal);
         Assert.Equal(1, await fixture.DbContext.Users.CountAsync(item => item.NormalizedEmail == "INVITED@EXAMPLE.COM"));
         Assert.Null((await fixture.DbContext.OrganizationInvitations.SingleAsync(item => item.Id == fixture.InvitationId)).AcceptedAtUtc);
+    }
+
+    [Fact]
+    public async Task RegisterAsync_WhenUserCapacityIsExhausted_LeavesInvitationAndAccountUnchanged()
+    {
+        var fixture = await CreateInvitationRegistrationFixtureAsync(
+            OnboardingStep.Completed.ToStorageValue(),
+            capacityService: new RejectingResourceCapacityService());
+
+        await Assert.ThrowsAsync<QuotaExceededException>(() => fixture.Service.RegisterAsync(
+            NewInvitationRegistrationRequest(fixture.Token, "invited@example.com"),
+            CancellationToken.None));
+
+        Assert.Empty(await fixture.DbContext.Users.Where(item => item.NormalizedEmail == "INVITED@EXAMPLE.COM").ToListAsync());
+        Assert.Empty(await fixture.DbContext.OrganizationMembers.Where(item => item.CompanyId == fixture.CompanyId && item.Status == OrganizationMemberStatus.Active.ToStorageValue()).ToListAsync());
+        Assert.Null((await fixture.DbContext.OrganizationInvitations.SingleAsync(item => item.Id == fixture.InvitationId)).AcceptedAtUtc);
+    }
+
+    [Fact]
+    public async Task InvitationAccept_WhenCapacityIsRejected_DoesNotChangeCompanyOrInvitation()
+    {
+        await using var fixture = await CreateAcceptanceFixtureAsync(
+            OrganizationMemberStatus.Removed,
+            new RejectingResourceCapacityService());
+
+        await Assert.ThrowsAsync<QuotaExceededException>(() => fixture.Service.AcceptAsync(
+            new AcceptOrganizationInvitationRequest { Token = fixture.Token },
+            CancellationToken.None));
+
+        var user = await fixture.DbContext.Users.SingleAsync(item => item.Id == fixture.UserId);
+        var membership = await fixture.DbContext.OrganizationMembers.SingleAsync(item => item.CompanyId == fixture.TargetCompanyId && item.UserId == fixture.UserId);
+        var invitation = await fixture.DbContext.OrganizationInvitations.SingleAsync(item => item.Id == fixture.InvitationId);
+        Assert.Equal(fixture.SourceCompanyId, user.CompanyId);
+        Assert.Equal(OrganizationMemberStatus.Removed.ToStorageValue(), membership.Status);
+        Assert.Null(invitation.AcceptedAtUtc);
+    }
+
+    [Fact]
+    public async Task InvitationAccept_WithAlreadyActiveMembership_DoesNotRequireAnotherSeat()
+    {
+        await using var fixture = await CreateAcceptanceFixtureAsync(
+            OrganizationMemberStatus.Active,
+            new RejectingResourceCapacityService());
+
+        var accepted = await fixture.Service.AcceptAsync(
+            new AcceptOrganizationInvitationRequest { Token = fixture.Token },
+            CancellationToken.None);
+
+        Assert.True(accepted.Success, accepted.Message);
+        Assert.Single(await fixture.DbContext.OrganizationMembers.Where(item => item.CompanyId == fixture.TargetCompanyId && item.UserId == fixture.UserId && item.Status == OrganizationMemberStatus.Active.ToStorageValue()).ToListAsync());
     }
 
     [Fact]
@@ -204,7 +256,8 @@ public sealed class SelfServiceIdentityAndInvitationTests
             new NoOpIdentityEmailService(),
             new JwtTokenService(configuration, hasher),
             new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
-            new TenantExecutionContextAccessor());
+            new TenantExecutionContextAccessor(),
+            new AllowingResourceCapacityService());
 
         var accepted = await invitationService.AcceptAsync(
             new AcceptOrganizationInvitationRequest { Token = invitationToken },
@@ -226,6 +279,7 @@ public sealed class SelfServiceIdentityAndInvitationTests
             new NoOpIdentityEmailService(),
             dbContext,
             NoOpSubscriptionEntitlementService.Instance,
+            new AllowingResourceCapacityService(),
             new TenantExecutionContextAccessor());
 
         var oldRefresh = await authService.RefreshAsync(new RefreshTokenRequest { RefreshToken = oldRefreshToken }, CancellationToken.None);
@@ -298,7 +352,11 @@ public sealed class SelfServiceIdentityAndInvitationTests
         };
     }
 
-    private static async Task<InvitationRegistrationFixture> CreateInvitationRegistrationFixtureAsync(string onboardingState, bool expired = false, bool revoked = false)
+    private static async Task<InvitationRegistrationFixture> CreateInvitationRegistrationFixtureAsync(
+        string onboardingState,
+        bool expired = false,
+        bool revoked = false,
+        IResourceCapacityService? capacityService = null)
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase($"invitation-registration-{Guid.NewGuid():N}")
@@ -333,11 +391,92 @@ public sealed class SelfServiceIdentityAndInvitationTests
             dbContext,
             new AuthService(new AuthRepository(dbContext), new JwtTokenService(configuration, hasher), hasher, configuration,
                 new HttpContextAccessor { HttpContext = new DefaultHttpContext() }, new NoOpIdentityEmailService(),
-                dbContext, NoOpSubscriptionEntitlementService.Instance, new TenantExecutionContextAccessor()),
+                dbContext, NoOpSubscriptionEntitlementService.Instance, capacityService ?? new AllowingResourceCapacityService(), new TenantExecutionContextAccessor()),
             companyId, invitationId, token, startedAt, await dbContext.Companies.CountAsync());
     }
 
     private sealed record InvitationRegistrationFixture(ApplicationDbContext DbContext, AuthService Service, Guid CompanyId, Guid InvitationId, string Token, DateTimeOffset StartedAt, int InitialCompanyCount);
+
+    private static async Task<AcceptanceFixture> CreateAcceptanceFixtureAsync(
+        OrganizationMemberStatus targetMembershipStatus,
+        IResourceCapacityService capacityService)
+    {
+        var sourceCompanyId = Guid.NewGuid();
+        var targetCompanyId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var inviterUserId = Guid.NewGuid();
+        var invitationId = Guid.NewGuid();
+        const string token = "capacity-acceptance-token";
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"capacity-acceptance-{Guid.NewGuid():N}")
+            .Options;
+        var configuration = CreateConfiguration();
+        var hasher = new Pbkdf2PasswordHasher();
+        await using var seedContext = new ApplicationDbContext(options);
+        seedContext.Companies.AddRange(NewCompany(sourceCompanyId, "source-company"), NewCompany(targetCompanyId, "target-company"));
+        seedContext.Users.AddRange(NewUser(sourceCompanyId, "member@example.com", userId), NewUser(targetCompanyId, "inviter@example.com", inviterUserId));
+        seedContext.OrganizationMembers.Add(new OrganizationMember
+        {
+            Id = Guid.NewGuid(),
+            CompanyId = targetCompanyId,
+            UserId = userId,
+            Role = OrganizationRole.Host.ToStorageValue(),
+            Status = targetMembershipStatus.ToStorageValue(),
+            JoinedAt = DateTimeOffset.UtcNow
+        });
+        seedContext.OrganizationInvitations.Add(new OrganizationInvitation
+        {
+            Id = invitationId,
+            CompanyId = targetCompanyId,
+            InvitedByUserId = inviterUserId,
+            Email = "member@example.com",
+            NormalizedEmail = "MEMBER@EXAMPLE.COM",
+            Role = OrganizationRole.Host.ToStorageValue(),
+            TokenHash = hasher.HashToken($"{configuration["Jwt:SigningKey"]}:{token}"),
+            ExpiresAtUtc = DateTimeOffset.UtcNow.AddDays(1)
+        });
+        await seedContext.SaveChangesAsync();
+
+        var dbContext = new ApplicationDbContext(options);
+        var service = new OrganizationInvitationService(
+            dbContext,
+            new TestTenantContext(sourceCompanyId, userId),
+            hasher,
+            configuration,
+            new NoOpIdentityEmailService(),
+            new JwtTokenService(configuration, hasher),
+            new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
+            new TenantExecutionContextAccessor(),
+            capacityService);
+        return new AcceptanceFixture(dbContext, service, sourceCompanyId, targetCompanyId, userId, invitationId, token);
+    }
+
+    private sealed record AcceptanceFixture(
+        ApplicationDbContext DbContext,
+        OrganizationInvitationService Service,
+        Guid SourceCompanyId,
+        Guid TargetCompanyId,
+        Guid UserId,
+        Guid InvitationId,
+        string Token) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => DbContext.DisposeAsync();
+    }
+
+    private sealed class AllowingResourceCapacityService : IResourceCapacityService
+    {
+        public Task EnsureCapacityAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<long> GetCurrentCountAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken) => Task.FromResult(0L);
+    }
+
+    private sealed class RejectingResourceCapacityService : IResourceCapacityService
+    {
+        public Task EnsureCapacityAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken)
+            => throw new QuotaExceededException(metric.ToStorageValue(), 1, 1, 1);
+
+        public Task<long> GetCurrentCountAsync(Guid companyId, UsageMetric metric, CancellationToken cancellationToken)
+            => Task.FromResult(1L);
+    }
 
     private sealed class TestTenantContext(Guid companyId, Guid userId) : ICurrentTenantContext, ITenantContext
     {

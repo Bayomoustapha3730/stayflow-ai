@@ -11,9 +11,9 @@ public sealed class CopilotService(
     IContextConfidenceEvaluator confidenceEvaluator,
     ICurrentTenantContext currentTenantContext,
     IAIReplyOrchestrator replyOrchestrator,
-    ISubscriptionEntitlementService? subscriptionEntitlementService = null) : ICopilotService
+    ISubscriptionEntitlementService subscriptionEntitlementService) : ICopilotService
 {
-    private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService ?? NoOpSubscriptionEntitlementService.Instance;
+    private readonly ISubscriptionEntitlementService _subscriptionEntitlementService = subscriptionEntitlementService;
 
     public async Task<ApiResponse<ConversationCopilotSummaryResponse>> GetSummaryAsync(
         Guid conversationId,
