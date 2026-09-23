@@ -33,17 +33,17 @@ public sealed class OpenAIAIProvider(
 
             if (providerResponse.IsIncomplete)
             {
-                return Failure(AIProviderOutcome.Failed, OpenAIProviderFailureCategories.UnexpectedResponse, openAIOptions.Model, providerResponse.RequestId, stopwatch.ElapsedMilliseconds);
+                return Failure(AIProviderOutcome.Failed, OpenAIProviderFailureCategories.UnexpectedResponse, openAIOptions.Model, providerResponse.RequestId, stopwatch.ElapsedMilliseconds, providerResponse.TokenUsage);
             }
 
             if (providerResponse.IsRefusal)
             {
-                return Failure(AIProviderOutcome.Failed, OpenAIProviderFailureCategories.UnexpectedResponse, openAIOptions.Model, providerResponse.RequestId, stopwatch.ElapsedMilliseconds);
+                return Failure(AIProviderOutcome.Failed, OpenAIProviderFailureCategories.UnexpectedResponse, openAIOptions.Model, providerResponse.RequestId, stopwatch.ElapsedMilliseconds, providerResponse.TokenUsage);
             }
 
             if (string.IsNullOrWhiteSpace(providerResponse.ResponseText))
             {
-                return Failure(AIProviderOutcome.Failed, OpenAIProviderFailureCategories.EmptyResponse, openAIOptions.Model, providerResponse.RequestId, stopwatch.ElapsedMilliseconds);
+                return Failure(AIProviderOutcome.Failed, OpenAIProviderFailureCategories.EmptyResponse, openAIOptions.Model, providerResponse.RequestId, stopwatch.ElapsedMilliseconds, providerResponse.TokenUsage);
             }
 
             logger.LogInformation(
@@ -57,7 +57,8 @@ public sealed class OpenAIAIProvider(
                 ProviderName,
                 providerResponse.ModelName ?? openAIOptions.Model,
                 providerResponse.RequestId,
-                stopwatch.ElapsedMilliseconds);
+                stopwatch.ElapsedMilliseconds,
+                providerResponse.TokenUsage);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -130,7 +131,13 @@ public sealed class OpenAIAIProvider(
             or OpenAIProviderFailureCategories.Cancelled;
     }
 
-    private static AIProviderResult Failure(AIProviderOutcome outcome, string failureCategory, string? modelName, string? requestId, long durationMs)
+    private static AIProviderResult Failure(
+        AIProviderOutcome outcome,
+        string failureCategory,
+        string? modelName,
+        string? requestId,
+        long durationMs,
+        AiTokenUsage? tokenUsage = null)
     {
         return new AIProviderResult
         {
@@ -139,6 +146,7 @@ public sealed class OpenAIAIProvider(
             ModelName = modelName,
             RequestId = requestId,
             DurationMs = durationMs,
+            TokenUsage = tokenUsage,
             FailureCategory = failureCategory
         };
     }

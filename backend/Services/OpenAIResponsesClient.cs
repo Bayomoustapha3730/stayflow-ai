@@ -1,6 +1,7 @@
 using OpenAI.Responses;
 using System.ClientModel;
 using Microsoft.Extensions.Options;
+using StayFlow.Api.DTOs.AIProvider;
 
 namespace StayFlow.Api.Services;
 
@@ -43,6 +44,7 @@ public sealed class OpenAIResponsesClient : IOpenAIResponsesClient
                 ResponseText = response.GetOutputText(),
                 RequestId = response.Id,
                 ModelName = request.Model,
+                TokenUsage = MapTokenUsage(response.Usage),
                 IsIncomplete = status.Contains("Incomplete", StringComparison.OrdinalIgnoreCase),
                 IsRefusal = status.Contains("Refusal", StringComparison.OrdinalIgnoreCase)
             };
@@ -55,6 +57,16 @@ public sealed class OpenAIResponsesClient : IOpenAIResponsesClient
         {
             throw new OpenAIProviderException(OpenAIProviderFailureCategories.Network, exception);
         }
+    }
+
+    internal static AiTokenUsage? MapTokenUsage(ResponseTokenUsage? usage)
+    {
+        return usage is null
+            ? null
+            : new AiTokenUsage(
+                usage.InputTokenCount,
+                usage.OutputTokenCount,
+                usage.TotalTokenCount);
     }
 
     private static ResponseItem MapMessage(OpenAIProviderMessage message)

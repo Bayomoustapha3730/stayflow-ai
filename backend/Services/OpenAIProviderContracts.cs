@@ -1,3 +1,5 @@
+using StayFlow.Api.DTOs.AIProvider;
+
 namespace StayFlow.Api.Services;
 
 public interface IOpenAIResponsesClient
@@ -23,6 +25,7 @@ public sealed class OpenAIProviderResponse
     public string? ResponseText { get; init; }
     public string? RequestId { get; init; }
     public string? ModelName { get; init; }
+    public AiTokenUsage? TokenUsage { get; init; }
     public bool IsIncomplete { get; init; }
     public bool IsRefusal { get; init; }
 }

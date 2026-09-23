@@ -1,14 +1,38 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using OpenAI.Responses;
 using StayFlow.Api.DTOs.AIPrompt;
 using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Tests;
 
+#pragma warning disable OPENAI001
 public sealed class OpenAIAIProviderTests
 {
+    [Fact]
+    public void OpenAIResponsesClient_MapsActualSdkResponseUsage()
+    {
+        var response = new ResponseResult
+        {
+            Usage = new ResponseTokenUsage
+            {
+                InputTokenCount = 137,
+                OutputTokenCount = 41,
+                TotalTokenCount = 178
+            }
+        };
+
+        var usage = OpenAIResponsesClient.MapTokenUsage(response.Usage);
+
+        Assert.NotNull(usage);
+        Assert.Equal(137, usage.InputTokens);
+        Assert.Equal(41, usage.OutputTokens);
+        Assert.Equal(178, usage.TotalTokens);
+        Assert.Null(OpenAIResponsesClient.MapTokenUsage(null));
+    }
+
     [Fact]
     public async Task GenerateAsync_MapsRenderedMessagesInOrder()
     {
@@ -89,7 +113,8 @@ public sealed class OpenAIAIProviderTests
         {
             ResponseText = "Safe response",
             RequestId = "resp_123",
-            ModelName = "gpt-test"
+            ModelName = "gpt-test",
+            TokenUsage = new AiTokenUsage(100, 25, 125)
         };
 
         var result = await fixture.Provider.GenerateAsync(ProviderRequest(), CancellationToken.None);
@@ -99,6 +124,62 @@ public sealed class OpenAIAIProviderTests
         Assert.Equal("Safe response", result.ResponseText);
         Assert.Equal("resp_123", result.RequestId);
         Assert.Equal("gpt-test", result.ModelName);
+        Assert.Equal(new AiTokenUsage(100, 25, 125), result.TokenUsage);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_LeavesUsageUnknownWhenProviderDoesNotReturnIt()
+    {
+        var fixture = new Fixture();
+        fixture.Client.Response = new OpenAIProviderResponse { ResponseText = "Safe response" };
+
+        var result = await fixture.Provider.GenerateAsync(ProviderRequest(), CancellationToken.None);
+
+        Assert.Null(result.TokenUsage);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_PreservesKnownZeroUsage()
+    {
+        var fixture = new Fixture();
+        fixture.Client.Response = new OpenAIProviderResponse
+        {
+            ResponseText = "Safe response",
+            TokenUsage = new AiTokenUsage(0, 0, 0)
+        };
+
+        var result = await fixture.Provider.GenerateAsync(ProviderRequest(), CancellationToken.None);
+
+        Assert.NotNull(result.TokenUsage);
+        Assert.Equal(new AiTokenUsage(0, 0, 0), result.TokenUsage);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_PreservesUsageOnProviderResponseFailure()
+    {
+        var fixture = new Fixture();
+        fixture.Client.Response = new OpenAIProviderResponse
+        {
+            ResponseText = " ",
+            TokenUsage = new AiTokenUsage(100, 25, 125)
+        };
+
+        var result = await fixture.Provider.GenerateAsync(ProviderRequest(), CancellationToken.None);
+
+        Assert.Equal(AIProviderOutcome.Failed, result.Outcome);
+        Assert.Equal(OpenAIProviderFailureCategories.EmptyResponse, result.FailureCategory);
+        Assert.Equal(new AiTokenUsage(100, 25, 125), result.TokenUsage);
+    }
+
+    [Fact]
+    public async Task FakeProviderCanReturnSyntheticUsageWithoutChangingContent()
+    {
+        var fakeProvider = new SyntheticProvider();
+
+        var result = await fakeProvider.GenerateAsync(ProviderRequest(), CancellationToken.None);
+
+        Assert.Equal("Synthetic response", result.ResponseText);
+        Assert.Equal(new AiTokenUsage(100, 25, 125), result.TokenUsage);
     }
 
     [Theory]
@@ -270,6 +351,20 @@ public sealed class OpenAIAIProviderTests
         }
     }
 
+    private sealed class SyntheticProvider : IAIProvider
+    {
+        public Task<AIProviderResult> GenerateAsync(AIProviderRequest request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(AIProviderResult.Success(
+                "Synthetic response",
+                "Synthetic",
+                "synthetic-model",
+                "synthetic-request",
+                1,
+                new AiTokenUsage(100, 25, 125)));
+        }
+    }
+
     private sealed class CapturingLogger<T> : ILogger<T>
     {
         public List<string> Messages { get; } = [];
@@ -288,3 +383,4 @@ public sealed class OpenAIAIProviderTests
         }
     }
 }
+#pragma warning restore OPENAI001
