@@ -17,6 +17,40 @@ namespace StayFlow.Api.Tests;
 public sealed class AIReplyOrchestratorGroundingTests
 {
     [Fact]
+    public async Task OrchestrateAsync_ForwardsCommercialOuterIdentityAndProviderCallId()
+    {
+        var selected = new ConversationContextKnowledgeItem(
+            "identity-source-1",
+            "Guest Wi-Fi",
+            "Network: StayFlowGuest\nPassword: DemoStay2026",
+            PropertyKnowledgeCategory.WiFi,
+            DateTimeOffset.UtcNow,
+            10,
+            true,
+            ["wifi"],
+            "Approved identity test knowledge");
+        var context = BuildContext([selected], [selected]);
+        var provider = new SpyDevelopmentProvider();
+        var outerOperationId = Guid.NewGuid();
+        var orchestrator = BuildOrchestrator(context, provider, selectedItems: [selected]);
+
+        var result = await orchestrator.OrchestrateAsync(Guid.NewGuid(), new AIReplyOrchestrationRequest
+        {
+            ConversationId = context.ConversationId,
+            Operation = AIReplyOperation.FutureGuestReply,
+            OuterOperationType = OuterOperationType.GuestMessage,
+            OuterOperationId = outerOperationId
+        }, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.NotNull(provider.LastRequest);
+        Assert.Equal(OuterOperationType.GuestMessage, provider.LastRequest!.OuterOperationType);
+        Assert.Equal(outerOperationId, provider.LastRequest.OuterOperationId);
+        Assert.NotNull(provider.LastRequest.ProviderCallId);
+        Assert.NotEqual(outerOperationId.ToString("N"), provider.LastRequest.ProviderCallId.Value);
+    }
+
+    [Fact]
     public async Task OrchestrateAsync_WiFiReply_UsesSelectedApprovedKnowledgeAndSource()
     {
         var selected = new ConversationContextKnowledgeItem(

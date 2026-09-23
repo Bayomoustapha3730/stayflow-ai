@@ -10,6 +10,9 @@ public sealed class AIProviderResult
     public long DurationMs { get; init; }
     public AiTokenUsage? TokenUsage { get; init; }
     public string? FailureCategory { get; init; }
+    public ProviderCallId? ProviderCallId { get; init; }
+    public OuterOperationType? OuterOperationType { get; init; }
+    public Guid? OuterOperationId { get; init; }
 
     public static AIProviderResult Success(
         string responseText,
@@ -17,7 +20,10 @@ public sealed class AIProviderResult
         string? modelName,
         string? requestId,
         long durationMs,
-        AiTokenUsage? tokenUsage = null)
+        AiTokenUsage? tokenUsage = null,
+        ProviderCallId? providerCallId = null,
+        OuterOperationType? outerOperationType = null,
+        Guid? outerOperationId = null)
     {
         return new AIProviderResult
         {
@@ -27,7 +33,10 @@ public sealed class AIProviderResult
             ModelName = modelName,
             RequestId = requestId,
             DurationMs = durationMs,
-            TokenUsage = tokenUsage
+            TokenUsage = tokenUsage,
+            ProviderCallId = providerCallId,
+            OuterOperationType = outerOperationType,
+            OuterOperationId = outerOperationId
         };
     }
 }

@@ -1,3 +1,5 @@
+using StayFlow.Api.DTOs.AIProvider;
+
 namespace StayFlow.Api.Services.AI.Orchestration;
 
 public sealed class AIReplyOrchestrationRequest
@@ -9,4 +11,6 @@ public sealed class AIReplyOrchestrationRequest
     public string? HostInstruction { get; init; }
     public int? RequestedSuggestionCount { get; init; }
     public string? CorrelationId { get; init; }
+    public OuterOperationType? OuterOperationType { get; init; }
+    public Guid? OuterOperationId { get; init; }
 }

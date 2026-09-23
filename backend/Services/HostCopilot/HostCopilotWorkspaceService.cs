@@ -5,6 +5,7 @@ using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.DTOs.Conversations;
 using StayFlow.Api.DTOs.Copilot;
+using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services.AI.Orchestration;
 using StayFlow.Api.Services.ConciergeActions;
@@ -252,7 +253,9 @@ public sealed class HostCopilotWorkspaceService(
                     Operation = AIReplyOperation.GeneratedHostReply,
                     RequestedTone = request.Tone,
                     HostInstruction = request.HostInstruction,
-                    CorrelationId = tenantContext.CorrelationId
+                    CorrelationId = tenantContext.CorrelationId,
+                    OuterOperationType = OuterOperationType.CopilotOperation,
+                    OuterOperationId = request.OperationId
                 }, cancellationToken);
             }
             catch

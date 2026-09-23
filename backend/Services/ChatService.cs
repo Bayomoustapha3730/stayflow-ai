@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.AIOrchestration;
+using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.DTOs.Chat;
 using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.DTOs.Conversations;
@@ -211,7 +212,9 @@ public sealed class ChatService(
             {
                 ConversationId = conversation.Id,
                 Operation = AIReplyOperation.FutureGuestReply,
-                CorrelationId = currentTenantContext.CorrelationId
+                CorrelationId = currentTenantContext.CorrelationId,
+                OuterOperationType = OuterOperationType.GuestMessage,
+                OuterOperationId = guestMessage.Data.Id
             }, cancellationToken);
         }
         catch (QuotaExceededException)

@@ -329,6 +329,9 @@ public sealed class AIOrchestrator(
             ProviderName = providerResult.ProviderName,
             ModelName = providerResult.ModelName,
             RequestId = providerResult.RequestId,
+            ProviderCallId = providerResult.ProviderCallId?.Value,
+            OuterOperationType = providerResult.OuterOperationType?.ToString(),
+            OuterOperationId = providerResult.OuterOperationId,
             DurationMs = providerResult.DurationMs
         };
     }

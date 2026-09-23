@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using StayFlow.Api.Data;
+using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services.AI.Orchestration;
 
@@ -51,6 +52,9 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         Assert.Equal(1, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
         Assert.Equal(1, factory.Recorder.InvocationCount);
+        Assert.Equal(OuterOperationType.CopilotOperation, factory.Recorder.LastRequest!.OuterOperationType);
+        Assert.Equal(operationId, factory.Recorder.LastRequest.OuterOperationId);
+        Assert.NotEqual(Guid.Empty, factory.Recorder.LastRequest.OuterOperationId);
     }
 
     [Fact]
@@ -121,6 +125,9 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         Assert.Equal(CopilotOperationStatus.Completed, operation.Status);
         Assert.Equal(1, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
+        Assert.Equal(OuterOperationType.CopilotOperation, factory.Recorder.LastRequest!.OuterOperationType);
+        Assert.Equal(operationId, factory.Recorder.LastRequest.OuterOperationId);
+        Assert.NotEqual(Guid.Empty, factory.Recorder.LastRequest.OuterOperationId);
     }
 
     [Fact]
@@ -190,6 +197,9 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         Assert.Equal(CopilotOperationStatus.Completed, operation.Status);
         Assert.Equal(1, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
+        Assert.Equal(OuterOperationType.CopilotOperation, factory.Recorder.LastRequest!.OuterOperationType);
+        Assert.Equal(operationId, factory.Recorder.LastRequest.OuterOperationId);
+        Assert.NotEqual(Guid.Empty, factory.Recorder.LastRequest.OuterOperationId);
     }
 
     [Fact]
@@ -524,10 +534,12 @@ public sealed class RecordingAIReplyOrchestrator : IAIReplyOrchestrator
 {
     public int InvocationCount { get; private set; }
     public bool Fail { get; set; }
+    public AIReplyOrchestrationRequest? LastRequest { get; private set; }
 
     public Task<AIReplyOrchestrationResult?> OrchestrateAsync(Guid companyId, AIReplyOrchestrationRequest request, CancellationToken cancellationToken)
     {
         InvocationCount++;
+        LastRequest = request;
         if (Fail)
         {
             throw new InvalidOperationException("simulated provider failure");

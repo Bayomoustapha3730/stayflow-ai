@@ -13,4 +13,7 @@ public sealed class AIProviderRequest
     public string? DetectedIntent { get; init; }
     public string? RequestedTone { get; init; }
     public string? CorrelationId { get; init; }
+    public ProviderCallId ProviderCallId { get; init; } = ProviderCallId.New();
+    public OuterOperationType? OuterOperationType { get; init; }
+    public Guid? OuterOperationId { get; init; }
 }

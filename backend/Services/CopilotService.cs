@@ -1,4 +1,5 @@
 using StayFlow.Api.Common;
+using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.DTOs.Copilot;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services.AI.Context;
@@ -79,7 +80,9 @@ public sealed class CopilotService(
                 Operation = AIReplyOperation.SuggestedHostReplies,
                 RequestedTone = tone,
                 RequestedSuggestionCount = 3,
-                CorrelationId = currentTenantContext.CorrelationId
+                CorrelationId = currentTenantContext.CorrelationId,
+                OuterOperationType = OuterOperationType.CopilotOperation,
+                OuterOperationId = operationId
             }, cancellationToken);
             if (result is null || result.FallbackUsed)
             {
@@ -148,7 +151,9 @@ public sealed class CopilotService(
                 RequestedTone = request.Tone,
                 HostDraft = request.HostDraft,
                 HostInstruction = request.Guidance,
-                CorrelationId = currentTenantContext.CorrelationId
+                CorrelationId = currentTenantContext.CorrelationId,
+                OuterOperationType = OuterOperationType.CopilotOperation,
+                OuterOperationId = request.OperationId
             }, cancellationToken);
             if (result is null || result.FallbackUsed)
             {

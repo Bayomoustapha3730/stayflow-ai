@@ -319,6 +319,8 @@ public sealed class AIReplyOrchestrator(
                     intent.Intent.ToString(),
                     request.RequestedTone,
                     request.CorrelationId,
+                    request.OuterOperationType,
+                    request.OuterOperationId,
                     orchestratorOptions.ProviderTimeoutSeconds,
                     cancellationToken);
                 completedStages.Add(AIReplyOrchestrationStage.ProviderInvoked);
@@ -763,6 +765,8 @@ public sealed class AIReplyOrchestrator(
         string detectedIntent,
         string? requestedTone,
         string? correlationId,
+        OuterOperationType? outerOperationType,
+        Guid? outerOperationId,
         int timeoutSeconds,
         CancellationToken cancellationToken)
     {
@@ -788,7 +792,9 @@ public sealed class AIReplyOrchestrator(
                 SelectedKnowledgeItems = selectedKnowledge,
                 DetectedIntent = detectedIntent,
                 RequestedTone = requestedTone,
-                CorrelationId = correlationId
+                CorrelationId = correlationId,
+                OuterOperationType = outerOperationType,
+                OuterOperationId = outerOperationId
             }, linked.Token);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
