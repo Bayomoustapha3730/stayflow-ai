@@ -508,6 +508,7 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
 public sealed class CopilotBoundaryTestFactory : SignalRTestAppFactory
 {
     private static readonly InMemoryDatabaseRoot DatabaseRoot = new();
+    protected override InMemoryDatabaseRoot SeedDatabaseRoot => DatabaseRoot;
     public RecordingAIReplyOrchestrator Recorder { get; } = new();
 
     protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)

@@ -46,6 +46,16 @@ public sealed record ProviderCallContext(
     }
 }
 
+public sealed record AiTokenUsageSnapshot(
+    OuterOperationType OuterOperationType,
+    Guid OuterOperationId,
+    int ProviderCallCount,
+    int KnownCallCount,
+    long InputTokens,
+    long OutputTokens,
+    long TotalTokens,
+    AiTokenUsageCompleteness Completeness);
+
 public sealed class AiTokenUsageAggregation
 {
     private readonly Dictionary<string, AiTokenUsage> knownUsage = new(StringComparer.Ordinal);
@@ -89,6 +99,16 @@ public sealed class AiTokenUsageAggregation
     public IReadOnlyDictionary<string, AiTokenUsage> KnownUsageByProviderCallId => knownUsage;
 
     public IReadOnlyCollection<string> UnknownProviderCallIds => unknownProviderCallIds;
+
+    public AiTokenUsageSnapshot Snapshot() => new(
+        OuterOperationType,
+        OuterOperationId,
+        ProviderCallCount,
+        knownUsage.Count,
+        checked(knownUsage.Values.Sum(item => item.InputTokens)),
+        checked(knownUsage.Values.Sum(item => item.OutputTokens)),
+        checked(knownUsage.Values.Sum(item => item.TotalTokens)),
+        Completeness);
 
     public AiTokenUsage? Total
     {

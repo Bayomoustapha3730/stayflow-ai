@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.DTOs.AIOrchestration;
+using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.DTOs.Chat;
 using StayFlow.Api.DTOs.ConciergeActions;
 using StayFlow.Api.DTOs.Conversations;
@@ -29,6 +30,13 @@ public sealed class ChatServiceTests
         Assert.Equal(2, fixture.Repository.Messages.Count);
         Assert.True(fixture.ReplyOrchestrator.WasCalled);
         Assert.Equal(AIReplyOperation.FutureGuestReply, fixture.ReplyOrchestrator.LastOperation);
+        var guestMessage = Assert.Single(fixture.Repository.Messages, message => message.SenderType == ConversationSenderType.Guest);
+        Assert.Equal(guestMessage.Id, response.Data!.GuestMessage.Id);
+        Assert.Equal(OuterOperationType.GuestMessage, fixture.ReplyOrchestrator.LastRequest!.OuterOperationType);
+        Assert.Equal(guestMessage.Id, fixture.ReplyOrchestrator.LastRequest.OuterOperationId);
+        Assert.Equal(UsageMetric.AiRequests, fixture.Entitlements.LastMetric);
+        Assert.Equal(1, fixture.Entitlements.LastQuantity);
+        Assert.Equal($"ai-request:guest-message:{guestMessage.Id:N}", fixture.Entitlements.LastKey);
         Assert.Equal(ConversationSenderType.AI, response.Data!.AssistantMessage!.SenderType);
         Assert.Equal("Development", response.Data.ProviderMetadata!.ProviderName);
     }
@@ -554,13 +562,14 @@ public sealed class ChatServiceTests
                 Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
                 new ReservationLifecycleService(TimeProvider.System, Options.Create(new ReservationContextOptions())));
             ReplyOrchestrator = new FakeAIReplyOrchestrator();
+            Entitlements = new RecordingEntitlementService();
             ChatService = new ChatService(
                 Repository,
                 ConversationService,
                 ReplyOrchestrator,
                 TenantContext,
                 Options.Create(new ConversationOptions { MaxMessageCharacters = 2000, ReuseOpenConversationMinutes = 120, MaxHistoryMessages = 100 }),
-                new AllowingSubscriptionEntitlementService());
+                Entitlements);
         }
 
         public Guid CompanyId { get; } = Guid.NewGuid();
@@ -570,6 +579,7 @@ public sealed class ChatServiceTests
         public FakeCurrentTenantContext TenantContext { get; }
         public ConversationService ConversationService { get; }
         public FakeAIReplyOrchestrator ReplyOrchestrator { get; }
+        public RecordingEntitlementService Entitlements { get; }
         public ChatService ChatService { get; set; }
 
         public SendChatMessageRequest Request(string message)
@@ -612,6 +622,7 @@ public sealed class ChatServiceTests
     private sealed class FakeAIReplyOrchestrator : IAIReplyOrchestrator
     {
         public bool WasCalled { get; set; }
+        public AIReplyOrchestrationRequest? LastRequest { get; private set; }
         public bool ShouldThrow { get; set; }
         public AIReplyOperation? LastOperation { get; private set; }
         public AIReplyOrchestrationResult Result { get; set; } = new()
@@ -630,6 +641,7 @@ public sealed class ChatServiceTests
         public Task<AIReplyOrchestrationResult?> OrchestrateAsync(Guid companyId, AIReplyOrchestrationRequest request, CancellationToken cancellationToken)
         {
             WasCalled = true;
+            LastRequest = request;
             LastOperation = request.Operation;
 
             if (ShouldThrow)
@@ -658,6 +670,36 @@ public sealed class ChatServiceTests
                 RequiresHumanReview = Result.RequiresHumanReview
             });
         }
+    }
+
+    private sealed class RecordingEntitlementService : ISubscriptionEntitlementService
+    {
+        private readonly AllowingSubscriptionEntitlementService inner = new();
+        public UsageMetric? LastMetric { get; private set; }
+        public long? LastQuantity { get; private set; }
+        public string? LastKey { get; private set; }
+
+        public Task<SubscriptionSnapshot> GetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken)
+            => inner.GetCurrentSnapshotAsync(companyId, cancellationToken);
+
+        public Task<SubscriptionSnapshot?> TryGetCurrentSnapshotAsync(Guid companyId, CancellationToken cancellationToken)
+            => inner.TryGetCurrentSnapshotAsync(companyId, cancellationToken);
+
+        public Task EnsureFeatureEnabledAsync(Guid companyId, string featureKey, CancellationToken cancellationToken)
+            => inner.EnsureFeatureEnabledAsync(companyId, featureKey, cancellationToken);
+
+        public Task<UsageConsumptionResult> ConsumeQuotaAsync(Guid companyId, UsageMetric metric, long quantity,
+            string idempotencyKey, CancellationToken cancellationToken)
+        {
+            LastMetric = metric;
+            LastQuantity = quantity;
+            LastKey = idempotencyKey;
+            return inner.ConsumeQuotaAsync(companyId, metric, quantity, idempotencyKey, cancellationToken);
+        }
+
+        public Task<SubscriptionSnapshot> UpdatePlanAsync(Guid companyId, Guid? planId, string? planName,
+            string? notes, CancellationToken cancellationToken)
+            => inner.UpdatePlanAsync(companyId, planId, planName, notes, cancellationToken);
     }
 
     private sealed class FakeCurrentTenantContext(Guid companyId) : ICurrentTenantContext

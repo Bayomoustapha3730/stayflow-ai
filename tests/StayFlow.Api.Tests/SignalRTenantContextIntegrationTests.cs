@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
@@ -336,8 +337,8 @@ public class SignalRTestAppFactory : WebApplicationFactory<Program>
     public const string JwtAudience = "StayFlow.Clients";
     public const string JwtSigningKey = "development-only-secret-key-change-before-production";
     private static readonly InMemoryDatabaseRoot DatabaseRoot = new();
-    private static int _seeded;
-    private static readonly ManualResetEventSlim _seedCompleted = new(false);
+    private static readonly ConcurrentDictionary<InMemoryDatabaseRoot, Lazy<bool>> SeededRoots = new();
+    protected virtual InMemoryDatabaseRoot SeedDatabaseRoot => DatabaseRoot;
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -379,7 +380,7 @@ public class SignalRTestAppFactory : WebApplicationFactory<Program>
 
     public void EnsureSeeded()
     {
-        if (Interlocked.Exchange(ref _seeded, 1) == 0)
+        _ = SeededRoots.GetOrAdd(SeedDatabaseRoot, root => new Lazy<bool>(() =>
         {
             _ = Server;
 
@@ -387,12 +388,8 @@ public class SignalRTestAppFactory : WebApplicationFactory<Program>
             var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
             dbContext.Database.EnsureCreated();
             SeedConversations(dbContext);
-            _seedCompleted.Set();
-        }
-        else
-        {
-            _seedCompleted.Wait();
-        }
+            return true;
+        }, LazyThreadSafetyMode.ExecutionAndPublication)).Value;
     }
 
     private static void SeedConversations(ApplicationDbContext dbContext)

@@ -1,3 +1,4 @@
+using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.Services.AI.Context;
 using StayFlow.Api.Services.AI.Intent;
 
@@ -23,4 +24,5 @@ public sealed class AIReplyOrchestrationResult
     public long DurationMilliseconds { get; init; }
     public bool RequiresHumanReview { get; init; }
     public RetrievalDiagnosticsSnapshot? RetrievalDiagnostics { get; init; }
+    public AiTokenUsageSnapshot? TokenUsage { get; init; }
 }

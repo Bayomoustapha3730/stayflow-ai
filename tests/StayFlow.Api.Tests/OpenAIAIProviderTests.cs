@@ -117,7 +117,11 @@ public sealed class OpenAIAIProviderTests
             TokenUsage = new AiTokenUsage(100, 25, 125)
         };
 
-        var result = await fixture.Provider.GenerateAsync(ProviderRequest(), CancellationToken.None);
+        var request = ProviderRequest(
+            providerCallId: new ProviderCallId("success-call"),
+            outerOperationType: OuterOperationType.GuestMessage,
+            outerOperationId: Guid.NewGuid());
+        var result = await fixture.Provider.GenerateAsync(request, CancellationToken.None);
 
         Assert.Equal(AIProviderOutcome.Success, result.Outcome);
         Assert.Equal("OpenAI", result.ProviderName);
@@ -125,6 +129,25 @@ public sealed class OpenAIAIProviderTests
         Assert.Equal("resp_123", result.RequestId);
         Assert.Equal("gpt-test", result.ModelName);
         Assert.Equal(new AiTokenUsage(100, 25, 125), result.TokenUsage);
+        Assert.Equal(request.ProviderCallId, result.ProviderCallId);
+        Assert.Equal(request.OuterOperationType, result.OuterOperationType);
+        Assert.Equal(request.OuterOperationId, result.OuterOperationId);
+    }
+
+    [Fact]
+    public async Task DevelopmentProvider_PreservesIdentityWithoutFabricatingUsage()
+    {
+        var request = ProviderRequest(
+            providerCallId: new ProviderCallId("development-call"),
+            outerOperationType: OuterOperationType.CopilotOperation,
+            outerOperationId: Guid.NewGuid());
+
+        var result = await new DevelopmentAIProvider().GenerateAsync(request, CancellationToken.None);
+
+        Assert.Equal(request.ProviderCallId, result.ProviderCallId);
+        Assert.Equal(request.OuterOperationType, result.OuterOperationType);
+        Assert.Equal(request.OuterOperationId, result.OuterOperationId);
+        Assert.Null(result.TokenUsage);
     }
 
     [Fact]
@@ -193,10 +216,17 @@ public sealed class OpenAIAIProviderTests
         var fixture = new Fixture();
         fixture.Client.Exception = new OpenAIProviderException(failureCategory);
 
-        var result = await fixture.Provider.GenerateAsync(ProviderRequest(), CancellationToken.None);
+        var request = ProviderRequest(
+            providerCallId: new ProviderCallId("failure-call"),
+            outerOperationType: OuterOperationType.CopilotOperation,
+            outerOperationId: Guid.NewGuid());
+        var result = await fixture.Provider.GenerateAsync(request, CancellationToken.None);
 
         Assert.Equal(expectedOutcome, result.Outcome);
         Assert.Equal(failureCategory, result.FailureCategory);
+        Assert.Equal(request.ProviderCallId, result.ProviderCallId);
+        Assert.Equal(request.OuterOperationType, result.OuterOperationType);
+        Assert.Equal(request.OuterOperationId, result.OuterOperationId);
     }
 
     [Fact]
@@ -285,7 +315,12 @@ public sealed class OpenAIAIProviderTests
         Assert.True(result.Failed);
     }
 
-    private static AIProviderRequest ProviderRequest(IReadOnlyCollection<AIPromptMessage>? messages = null, Guid? companyId = null)
+    private static AIProviderRequest ProviderRequest(
+        IReadOnlyCollection<AIPromptMessage>? messages = null,
+        Guid? companyId = null,
+        ProviderCallId? providerCallId = null,
+        OuterOperationType? outerOperationType = null,
+        Guid? outerOperationId = null)
     {
         var contextText = companyId.HasValue ? "tenant context was resolved internally" : "approved context";
         return new AIProviderRequest
@@ -298,7 +333,10 @@ public sealed class OpenAIAIProviderTests
                 ]
             },
             RenderedMessages = messages ?? [new AIPromptMessage { Role = "user", Content = "Hello" }],
-            CorrelationId = "provider-test"
+            CorrelationId = "provider-test",
+            ProviderCallId = providerCallId ?? ProviderCallId.New(),
+            OuterOperationType = outerOperationType,
+            OuterOperationId = outerOperationId
         };
     }
 

@@ -45,6 +45,10 @@ public sealed class AIReplyOrchestrator(
         AIProviderResult? providerResult = null;
         var fallbackUsed = false;
 
+        var tokenUsage = request.OuterOperationType is { } outerType && request.OuterOperationId is { } outerId
+            ? new AiTokenUsageAggregation(outerType, outerId)
+            : null;
+
         ValidateRequest(request);
         completedStages.Add(AIReplyOrchestrationStage.RequestValidated);
 
@@ -321,6 +325,7 @@ public sealed class AIReplyOrchestrator(
                     request.CorrelationId,
                     request.OuterOperationType,
                     request.OuterOperationId,
+                    tokenUsage,
                     orchestratorOptions.ProviderTimeoutSeconds,
                     cancellationToken);
                 completedStages.Add(AIReplyOrchestrationStage.ProviderInvoked);
@@ -506,6 +511,7 @@ public sealed class AIReplyOrchestrator(
             CompletedStages = completedStages,
             DurationMilliseconds = stopwatch.ElapsedMilliseconds,
             RequiresHumanReview = conflictRequiresReview || safetyAfterFallback.RequiresHumanReview,
+            TokenUsage = tokenUsage?.Snapshot(),
             RetrievalDiagnostics = new RetrievalDiagnosticsSnapshot
             {
                 DetectedIntent = intent.Intent.ToString(),
@@ -767,58 +773,93 @@ public sealed class AIReplyOrchestrator(
         string? correlationId,
         OuterOperationType? outerOperationType,
         Guid? outerOperationId,
+        AiTokenUsageAggregation? tokenUsage,
         int timeoutSeconds,
         CancellationToken cancellationToken)
     {
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 3, 60)));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+        var mappedCategories = MapCategories(detectedIntent);
+        logger.LogInformation(
+            "AI reply trace: provider request. DetectedIntent={DetectedIntent} Categories={Categories} SelectedKnowledgeCount={SelectedKnowledgeCount} PromptMessageCount={PromptMessageCount}",
+            detectedIntent,
+            mappedCategories.Select(category => category.ToString()).ToArray(),
+            selectedKnowledge.Count,
+            prompt.RenderedMessages.Count);
+
+        var providerRequest = new AIProviderRequest
+        {
+            PromptPackage = prompt,
+            RenderedMessages = prompt.RenderedMessages,
+            ResponseConstraints = prompt.ResponseConstraints,
+            QuestionCategories = mappedCategories,
+            SelectedKnowledgeItems = selectedKnowledge,
+            DetectedIntent = detectedIntent,
+            RequestedTone = requestedTone,
+            CorrelationId = correlationId,
+            ProviderCallId = ProviderCallId.New(),
+            OuterOperationType = outerOperationType,
+            OuterOperationId = outerOperationId
+        };
+
+        void Observe(AiTokenUsage? usage)
+        {
+            if (usage is not null)
+            {
+                tokenUsage?.AddKnownUsage(providerRequest.ProviderCallId, usage);
+            }
+            else
+            {
+                tokenUsage?.AddUnknownUsage(providerRequest.ProviderCallId);
+            }
+
+            var snapshot = tokenUsage?.Snapshot();
+            logger.LogInformation(
+                "AI provider call observed. OuterOperationType={OuterOperationType} OuterOperationId={OuterOperationId} ProviderCallId={ProviderCallId} UsageKnown={UsageKnown} InputTokens={InputTokens} OutputTokens={OutputTokens} TotalTokens={TotalTokens} Completeness={Completeness} ProviderCallCount={ProviderCallCount}",
+                outerOperationType, outerOperationId, providerRequest.ProviderCallId.Value, usage is not null,
+                usage?.InputTokens, usage?.OutputTokens, usage?.TotalTokens, snapshot?.Completeness, snapshot?.ProviderCallCount);
+        }
+
+        AIProviderResult result;
         try
         {
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 3, 60)));
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-
-            var mappedCategories = MapCategories(detectedIntent);
-            logger.LogInformation(
-                "AI reply trace: provider request. DetectedIntent={DetectedIntent} Categories={Categories} SelectedKnowledgeCount={SelectedKnowledgeCount} PromptMessageCount={PromptMessageCount}",
-                detectedIntent,
-                mappedCategories.Select(category => category.ToString()).ToArray(),
-                selectedKnowledge.Count,
-                prompt.RenderedMessages.Count);
-
-            return await aiProvider.GenerateAsync(new AIProviderRequest
-            {
-                PromptPackage = prompt,
-                RenderedMessages = prompt.RenderedMessages,
-                ResponseConstraints = prompt.ResponseConstraints,
-                QuestionCategories = mappedCategories,
-                SelectedKnowledgeItems = selectedKnowledge,
-                DetectedIntent = detectedIntent,
-                RequestedTone = requestedTone,
-                CorrelationId = correlationId,
-                OuterOperationType = outerOperationType,
-                OuterOperationId = outerOperationId
-            }, linked.Token);
+            result = await aiProvider.GenerateAsync(providerRequest, linked.Token);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            Observe(null);
             throw;
         }
         catch (OperationCanceledException)
         {
+            Observe(null);
             return new AIProviderResult
             {
                 Outcome = AIProviderOutcome.Unavailable,
                 ProviderName = "TimedOut",
-                FailureCategory = "Timeout"
+                FailureCategory = "Timeout",
+                ProviderCallId = providerRequest.ProviderCallId,
+                OuterOperationType = outerOperationType,
+                OuterOperationId = outerOperationId
             };
         }
         catch (Exception)
         {
+            Observe(null);
             return new AIProviderResult
             {
                 Outcome = AIProviderOutcome.Failed,
                 ProviderName = "Exception",
-                FailureCategory = "ProviderException"
+                FailureCategory = "ProviderException",
+                ProviderCallId = providerRequest.ProviderCallId,
+                OuterOperationType = outerOperationType,
+                OuterOperationId = outerOperationId
             };
         }
+
+        Observe(result.TokenUsage);
+        return result;
     }
 
     private static void ValidateRequest(AIReplyOrchestrationRequest request)

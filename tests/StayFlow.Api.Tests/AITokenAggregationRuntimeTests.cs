@@ -56,6 +56,13 @@ public sealed class AITokenAggregationRuntimeTests
 
         Assert.Equal(AiTokenUsageCompleteness.Partial, aggregation.Completeness);
         Assert.Null(aggregation.Total);
+        var snapshot = aggregation.Snapshot();
+        Assert.Equal(2, snapshot.ProviderCallCount);
+        Assert.Equal(1, snapshot.KnownCallCount);
+        Assert.Equal(100, snapshot.InputTokens);
+        Assert.Equal(50, snapshot.OutputTokens);
+        Assert.Equal(150, snapshot.TotalTokens);
+        Assert.Equal(AiTokenUsageCompleteness.Partial, snapshot.Completeness);
     }
 
     [Fact]

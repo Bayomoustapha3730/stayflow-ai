@@ -36,7 +36,10 @@ public sealed class DevelopmentAIProvider(ILogger<DevelopmentAIProvider>? logger
             providerName: "Development",
             modelName: "stayflow-development-deterministic",
             requestId: Guid.NewGuid().ToString("N"),
-            durationMs: stopwatch.ElapsedMilliseconds));
+            durationMs: stopwatch.ElapsedMilliseconds,
+            providerCallId: request.ProviderCallId,
+            outerOperationType: request.OuterOperationType,
+            outerOperationId: request.OuterOperationId));
     }
 
     private static string BuildResponse(IReadOnlyCollection<QuestionContextCategory> categories, AIProviderRequest request)
