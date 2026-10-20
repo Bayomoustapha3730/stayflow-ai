@@ -173,4 +173,21 @@ public sealed class AITokenAggregationRuntimeTests
         Assert.Equal(AiTokenUsageCompleteness.Complete, aggregation.Completeness);
         Assert.Equal(new AiTokenUsage(8, 2, 10), aggregation.Total);
     }
+
+    [Fact]
+    public void KnownZeroOnlyUsage_IsCompleteKnownZero()
+    {
+        var aggregation = AiTokenUsageAggregation.Empty(OuterOperationType.GuestMessage, Guid.NewGuid());
+
+        aggregation.AddKnownUsage(new ProviderCallId("known-zero-only"), new AiTokenUsage(0, 0, 0));
+
+        Assert.Equal(1, aggregation.ProviderCallCount);
+        Assert.Equal(AiTokenUsageCompleteness.Complete, aggregation.Completeness);
+        Assert.Single(aggregation.KnownUsageByProviderCallId);
+
+        var total = Assert.IsType<AiTokenUsage>(aggregation.Total);
+        Assert.Equal(0, total.InputTokens);
+        Assert.Equal(0, total.OutputTokens);
+        Assert.Equal(0, total.TotalTokens);
+    }
 }
