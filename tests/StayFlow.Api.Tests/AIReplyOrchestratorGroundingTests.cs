@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.EntityFrameworkCore;
+using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.AIContext;
 using StayFlow.Api.DTOs.AIPrompt;
 using StayFlow.Api.DTOs.AIProvider;
@@ -33,10 +35,12 @@ public sealed class AIReplyOrchestratorGroundingTests
         var context = BuildContext([selected], [selected]);
         var provider = new SpyDevelopmentProvider { Mode = mode };
         var outerId = Guid.NewGuid();
+        var companyId = Guid.NewGuid();
         var logger = new RecordingLogger();
-        var orchestrator = BuildOrchestrator(context, provider, [selected], logger);
+        var telemetryStore = new CapturingTelemetryStore();
+        var orchestrator = BuildOrchestrator(context, provider, [selected], logger, telemetryStore);
 
-        var result = await orchestrator.OrchestrateAsync(Guid.NewGuid(), new AIReplyOrchestrationRequest
+        var result = await orchestrator.OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
         {
             ConversationId = context.ConversationId,
             Operation = AIReplyOperation.FutureGuestReply,
@@ -57,6 +61,21 @@ public sealed class AIReplyOrchestratorGroundingTests
         Assert.Equal(completeness, snapshot.Completeness);
         Assert.Equal(fallbackExpected, result.FallbackUsed);
         Assert.Contains(logger.Messages, message => message.Contains(provider.LastRequest.ProviderCallId.Value, StringComparison.Ordinal));
+        var observation = Assert.Single(telemetryStore.Observations);
+        Assert.Equal(provider.LastRequest.ProviderCallId, observation.ProviderCallId);
+        Assert.Equal(companyId, observation.CompanyId);
+        Assert.Equal(OuterOperationType.GuestMessage, observation.OuterOperationType);
+        Assert.Equal(outerId, observation.OuterOperationId);
+        Assert.Equal(mode is "structured-failure" or "exception" ? AIProviderOutcome.Failed
+            : mode == "timeout" ? AIProviderOutcome.Unavailable
+            : AIProviderOutcome.Success, observation.Outcome);
+        Assert.Equal(mode switch
+        {
+            "known" => new AiTokenUsage(12, 3, 15),
+            "zero" => new AiTokenUsage(0, 0, 0),
+            _ => null
+        }, observation.TokenUsage);
+        Assert.False(telemetryStore.CancellationToken.CanBeCanceled);
     }
 
     [Fact]
@@ -69,20 +88,29 @@ public sealed class AIReplyOrchestratorGroundingTests
         using var cancellation = new CancellationTokenSource();
         var provider = new SpyDevelopmentProvider { Mode = "cancel", OnEnter = cancellation.Cancel };
         var logger = new RecordingLogger();
-        var orchestrator = BuildOrchestrator(context, provider, [selected], logger);
+        var telemetryStore = new CapturingTelemetryStore();
+        var outerId = Guid.NewGuid();
+        var orchestrator = BuildOrchestrator(context, provider, [selected], logger, telemetryStore);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => orchestrator.OrchestrateAsync(Guid.NewGuid(), new AIReplyOrchestrationRequest
         {
             ConversationId = context.ConversationId,
             Operation = AIReplyOperation.FutureGuestReply,
             OuterOperationType = OuterOperationType.GuestMessage,
-            OuterOperationId = Guid.NewGuid()
+            OuterOperationId = outerId
         }, cancellation.Token));
 
         Assert.NotNull(provider.LastRequest);
         Assert.Contains(logger.Messages, message => message.Contains(provider.LastRequest!.ProviderCallId.Value, StringComparison.Ordinal)
             && message.Contains("UsageKnown=False", StringComparison.Ordinal)
             && message.Contains("ProviderCallCount=1", StringComparison.Ordinal));
+        var observation = Assert.Single(telemetryStore.Observations);
+        Assert.Equal(provider.LastRequest.ProviderCallId, observation.ProviderCallId);
+        Assert.Equal(OuterOperationType.GuestMessage, observation.OuterOperationType);
+        Assert.Equal(outerId, observation.OuterOperationId);
+        Assert.Equal(AIProviderOutcome.Unavailable, observation.Outcome);
+        Assert.Null(observation.TokenUsage);
+        Assert.False(telemetryStore.CancellationToken.CanBeCanceled);
     }
 
     [Fact]
@@ -146,6 +174,222 @@ public sealed class AIReplyOrchestratorGroundingTests
         Assert.Equal(outerOperationId, provider.LastRequest.OuterOperationId);
         Assert.NotNull(provider.LastRequest.ProviderCallId);
         Assert.NotEqual(outerOperationId.ToString("N"), provider.LastRequest.ProviderCallId.Value);
+    }
+
+    [Fact]
+    public async Task OrchestrateAsync_PersistsKnownProviderUsageAtCommercialBoundary()
+    {
+        var companyId = Guid.NewGuid();
+        var outerId = Guid.NewGuid();
+        var selected = new ConversationContextKnowledgeItem(
+            "telemetry-source", "Guest Wi-Fi", "Password: DemoStay2026",
+            PropertyKnowledgeCategory.WiFi, DateTimeOffset.UtcNow, 10, true, ["wifi"], null);
+        var context = BuildContext([selected], [selected]);
+        var provider = new SpyDevelopmentProvider { Mode = "known" };
+        var dbOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"orchestrator-telemetry-{Guid.NewGuid():N}")
+            .Options;
+        var database = new ApplicationDbContext(dbOptions);
+        await using (database)
+        {
+            await SeedTelemetryBoundaryAsync(database, companyId, outerId);
+            var store = new AiProviderCallTelemetryStore(dbOptions);
+            var result = await BuildOrchestrator(context, provider, [selected], telemetryStore: store)
+                .OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+                {
+                    ConversationId = context.ConversationId,
+                    Operation = AIReplyOperation.FutureGuestReply,
+                    OuterOperationType = OuterOperationType.GuestMessage,
+                    OuterOperationId = outerId
+                }, CancellationToken.None);
+
+            Assert.NotNull(result);
+            var saved = await database.AiProviderCallTelemetries.SingleAsync();
+            Assert.Equal(provider.LastRequest!.ProviderCallId.Value, saved.ProviderCallId);
+            Assert.Equal(companyId, saved.CompanyId);
+            Assert.Equal(OuterOperationType.GuestMessage, saved.OuterOperationType);
+            Assert.Equal(outerId, saved.OuterOperationId);
+            Assert.Equal("Development", saved.Provider);
+            Assert.Equal("stayflow-development-deterministic", saved.Model);
+            Assert.True(saved.UsageKnown);
+            Assert.Equal(12, saved.InputTokens);
+            Assert.Equal(3, saved.OutputTokens);
+            Assert.Equal(15, saved.TotalTokens);
+            Assert.Equal(AIProviderOutcome.Success, saved.Outcome);
+        }
+    }
+
+    [Fact]
+    public async Task OrchestrateAsync_TelemetryPersistenceFailureDoesNotReplaceProviderSuccess()
+    {
+        var selected = new ConversationContextKnowledgeItem(
+            "telemetry-best-effort-source", "Guest Wi-Fi", "Password: DemoStay2026",
+            PropertyKnowledgeCategory.WiFi, DateTimeOffset.UtcNow, 10, true, ["wifi"], null);
+        var context = BuildContext([selected], [selected]);
+        var provider = new SpyDevelopmentProvider { Mode = "known" };
+        var logger = new RecordingLogger();
+
+        var result = await BuildOrchestrator(
+                context,
+                provider,
+                [selected],
+                logger,
+                new FailingTelemetryStore())
+            .OrchestrateAsync(Guid.NewGuid(), new AIReplyOrchestrationRequest
+            {
+                ConversationId = context.ConversationId,
+                Operation = AIReplyOperation.FutureGuestReply
+            }, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.False(result!.FallbackUsed);
+        Assert.Contains("DemoStay2026", result.Output);
+        Assert.Contains(logger.Messages, message => message.Contains("AI provider telemetry persistence failed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task OrchestrateAsync_PersistsKnownUsageBeforeDownstreamValidationFailure()
+    {
+        var companyId = Guid.NewGuid();
+        var outerId = Guid.NewGuid();
+        var selected = new ConversationContextKnowledgeItem(
+            "telemetry-order-source", "Guest Wi-Fi", "Password: DemoStay2026",
+            PropertyKnowledgeCategory.WiFi, DateTimeOffset.UtcNow, 10, true, ["wifi"], null);
+        var context = BuildContext([selected], [selected]);
+        var provider = new SpyDevelopmentProvider { Mode = "known" };
+        var dbOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"orchestrator-telemetry-order-{Guid.NewGuid():N}")
+            .Options;
+        await using var database = new ApplicationDbContext(dbOptions);
+        await SeedTelemetryBoundaryAsync(database, companyId, outerId);
+        var store = new AiProviderCallTelemetryStore(dbOptions);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => BuildOrchestrator(
+                context,
+                provider,
+                [selected],
+                telemetryStore: store,
+                outputValidator: new ThrowingOutputValidator())
+            .OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+            {
+                ConversationId = context.ConversationId,
+                Operation = AIReplyOperation.FutureGuestReply,
+                OuterOperationType = OuterOperationType.GuestMessage,
+                OuterOperationId = outerId
+            }, CancellationToken.None));
+
+        var saved = await database.AiProviderCallTelemetries.SingleAsync();
+        Assert.Equal(provider.LastRequest!.ProviderCallId.Value, saved.ProviderCallId);
+        Assert.True(saved.UsageKnown);
+        Assert.Equal(12, saved.InputTokens);
+        Assert.Equal(3, saved.OutputTokens);
+        Assert.Equal(15, saved.TotalTokens);
+    }
+
+    [Fact]
+    public async Task OrchestrateAsync_PersistsFailedProviderAttemptBeforeFallback()
+    {
+        var companyId = Guid.NewGuid();
+        var outerId = Guid.NewGuid();
+        var selected = new ConversationContextKnowledgeItem(
+            "telemetry-failure-source", "Guest Wi-Fi", "Password: DemoStay2026",
+            PropertyKnowledgeCategory.WiFi, DateTimeOffset.UtcNow, 10, true, ["wifi"], null);
+        var context = BuildContext([selected], [selected]);
+        var provider = new SpyDevelopmentProvider { Mode = "exception" };
+        var dbOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"orchestrator-telemetry-failure-{Guid.NewGuid():N}")
+            .Options;
+        var database = new ApplicationDbContext(dbOptions);
+        await using (database)
+        {
+            await SeedTelemetryBoundaryAsync(database, companyId, outerId);
+            var store = new AiProviderCallTelemetryStore(dbOptions);
+            var result = await BuildOrchestrator(context, provider, [selected], telemetryStore: store)
+                .OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+                {
+                    ConversationId = context.ConversationId,
+                    Operation = AIReplyOperation.FutureGuestReply,
+                    OuterOperationType = OuterOperationType.GuestMessage,
+                    OuterOperationId = outerId
+                }, CancellationToken.None);
+
+            Assert.NotNull(result);
+            var saved = await database.AiProviderCallTelemetries.SingleAsync();
+            Assert.Equal(provider.LastRequest!.ProviderCallId.Value, saved.ProviderCallId);
+            Assert.Equal(AIProviderOutcome.Failed, saved.Outcome);
+            Assert.False(saved.UsageKnown);
+            Assert.Null(saved.InputTokens);
+            Assert.Null(saved.OutputTokens);
+            Assert.Null(saved.TotalTokens);
+            Assert.True(result!.FallbackUsed);
+        }
+    }
+
+    [Theory]
+    [InlineData(CopilotOperationType.CopilotSuggestion, AIReplyOperation.SuggestedHostReplies)]
+    [InlineData(CopilotOperationType.CopilotGeneratedReply, AIReplyOperation.GeneratedHostReply)]
+    [InlineData(CopilotOperationType.WorkspaceDraft, AIReplyOperation.GeneratedHostReply)]
+    public async Task OrchestrateAsync_PersistsCopilotProviderCallForCommercialOperation(
+        CopilotOperationType copilotOperationType,
+        AIReplyOperation replyOperation)
+    {
+        var companyId = Guid.NewGuid();
+        var outerId = Guid.NewGuid();
+        var selected = new ConversationContextKnowledgeItem(
+            "copilot-telemetry-source", "Guest Wi-Fi", "Password: DemoStay2026",
+            PropertyKnowledgeCategory.WiFi, DateTimeOffset.UtcNow, 10, true, ["wifi"], null);
+        var context = BuildContext([selected], [selected]);
+        var provider = new SpyDevelopmentProvider { Mode = "known" };
+        var dbOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"copilot-orchestrator-telemetry-{Guid.NewGuid():N}")
+            .Options;
+        var database = new ApplicationDbContext(dbOptions);
+        await using (database)
+        {
+            var conversationId = Guid.NewGuid();
+            var actorUserId = Guid.NewGuid();
+            database.Companies.Add(new Company
+            {
+                Id = companyId,
+                Name = "Telemetry test company",
+                Slug = $"telemetry-{companyId:N}",
+                NormalizedSlug = $"TELEMETRY-{companyId:N}",
+                Status = "Active",
+                Email = "telemetry@example.test",
+                PhoneNumber = "0000000000",
+                CountryCode = "US",
+                TimeZone = "UTC"
+            });
+            database.CopilotOperations.Add(new CopilotOperation
+            {
+                Id = outerId,
+                CompanyId = companyId,
+                ConversationId = conversationId,
+                ActorUserId = actorUserId,
+                OperationType = copilotOperationType
+            });
+            await database.SaveChangesAsync();
+
+            var store = new AiProviderCallTelemetryStore(dbOptions);
+            await BuildOrchestrator(context, provider, [selected], telemetryStore: store)
+                .OrchestrateAsync(companyId, new AIReplyOrchestrationRequest
+                {
+                    ConversationId = context.ConversationId,
+                    Operation = replyOperation,
+                    OuterOperationType = OuterOperationType.CopilotOperation,
+                    OuterOperationId = outerId
+                }, CancellationToken.None);
+
+            var saved = await database.AiProviderCallTelemetries.SingleAsync();
+            Assert.Equal(provider.LastRequest!.ProviderCallId.Value, saved.ProviderCallId);
+            Assert.Equal(companyId, saved.CompanyId);
+            Assert.Equal(OuterOperationType.CopilotOperation, saved.OuterOperationType);
+            Assert.Equal(outerId, saved.OuterOperationId);
+            Assert.True(saved.UsageKnown);
+            Assert.Equal(12, saved.InputTokens);
+            Assert.Equal(3, saved.OutputTokens);
+            Assert.Equal(15, saved.TotalTokens);
+        }
     }
 
     [Fact]
@@ -303,14 +547,16 @@ public sealed class AIReplyOrchestratorGroundingTests
         ConversationContext context,
         SpyDevelopmentProvider provider,
         IReadOnlyCollection<ConversationContextKnowledgeItem> selectedItems,
-        ILogger<AIReplyOrchestrator>? logger = null)
+        ILogger<AIReplyOrchestrator>? logger = null,
+        IAiProviderCallTelemetryStore? telemetryStore = null,
+        IAIReplyOutputValidator? outputValidator = null)
     {
         return new AIReplyOrchestrator(
             new FakeConversationContextBuilder(context),
             new FakeRanker(selectedItems),
             new AIPromptBuilder(Options.Create(new AIPromptOptions())),
             provider,
-            new AIReplyOutputValidator(),
+            outputValidator ?? new AIReplyOutputValidator(),
             new AIReplySafetyEvaluator(),
             new ContextConfidenceEvaluator(),
             new AIReplyFallbackProvider(),
@@ -322,7 +568,33 @@ public sealed class AIReplyOrchestratorGroundingTests
                 MaximumSelectedKnowledgeCharacters = 10000,
                 ProviderTimeoutSeconds = 10
             }),
-            logger ?? NullLogger<AIReplyOrchestrator>.Instance);
+            logger ?? NullLogger<AIReplyOrchestrator>.Instance,
+            providerCallTelemetryStore: telemetryStore);
+    }
+
+    private static async Task SeedTelemetryBoundaryAsync(
+        ApplicationDbContext database,
+        Guid companyId,
+        Guid outerId)
+    {
+        database.Companies.Add(new Company
+        {
+            Id = companyId,
+            Name = "Telemetry test company",
+            Slug = $"telemetry-{companyId:N}",
+            NormalizedSlug = $"TELEMETRY-{companyId:N}",
+            Status = "Active",
+            Email = "telemetry@example.test",
+            PhoneNumber = "0000000000",
+            CountryCode = "US",
+            TimeZone = "UTC"
+        });
+        database.ConversationMessages.Add(new ConversationMessage
+        {
+            Id = outerId,
+            CompanyId = companyId
+        });
+        await database.SaveChangesAsync();
     }
 
     private static ConversationContext BuildContext(
@@ -488,6 +760,41 @@ public sealed class AIReplyOrchestratorGroundingTests
             }
 
             return result;
+        }
+    }
+
+    private sealed class FailingTelemetryStore : IAiProviderCallTelemetryStore
+    {
+        public Task RecordAsync(AiProviderCallObservation observation, CancellationToken cancellationToken)
+        {
+            return Task.FromException(new InvalidOperationException("telemetry store unavailable"));
+        }
+    }
+
+    private sealed class CapturingTelemetryStore : IAiProviderCallTelemetryStore
+    {
+        public List<AiProviderCallObservation> Observations { get; } = [];
+        public CancellationToken CancellationToken { get; private set; }
+
+        public Task RecordAsync(AiProviderCallObservation observation, CancellationToken cancellationToken)
+        {
+            Observations.Add(observation);
+            CancellationToken = cancellationToken;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingOutputValidator : IAIReplyOutputValidator
+    {
+        public AIReplyValidationResult Validate(
+            AIReplyOperation operation,
+            string? output,
+            IReadOnlyCollection<string> suggestions,
+            int maxOutputCharacters,
+            int expectedSuggestionCount,
+            bool contextIncomplete)
+        {
+            throw new InvalidOperationException("simulated downstream validation failure");
         }
     }
 

@@ -361,6 +361,7 @@ public static class ServiceCollectionExtensions
                 : serviceProvider.GetRequiredService<Services.DevelopmentAIProvider>();
         });
         services.AddScoped<Services.IAIOrchestrator, Services.AIOrchestrator>();
+        services.AddScoped<Services.AI.Orchestration.IAiProviderCallTelemetryStore, Services.AI.Orchestration.AiProviderCallTelemetryStore>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();
         services.AddScoped<Services.IPasswordHasher, Services.Pbkdf2PasswordHasher>();
         services.AddScoped<Services.IJwtTokenService, Services.JwtTokenService>();

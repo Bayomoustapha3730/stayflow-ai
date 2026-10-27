@@ -18,6 +18,7 @@ public sealed class ApplicationDbContext(
     public DbSet<PlanEntitlement> PlanEntitlements => Set<PlanEntitlement>();
     public DbSet<UsageRecord> UsageRecords => Set<UsageRecord>();
     public DbSet<UsageOperation> UsageOperations => Set<UsageOperation>();
+    public DbSet<AiProviderCallTelemetry> AiProviderCallTelemetries => Set<AiProviderCallTelemetry>();
     public DbSet<User> Users => Set<User>();
     public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
     public DbSet<OrganizationInvitation> OrganizationInvitations => Set<OrganizationInvitation>();

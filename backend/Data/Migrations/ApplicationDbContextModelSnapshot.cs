@@ -75,6 +75,76 @@ namespace backend.Data.Migrations
                     b.ToTable("ActionNotificationOutbox", (string)null);
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.AiProviderCallTelemetry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<long?>("InputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<Guid?>("OuterOperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("OuterOperationType")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<long?>("OutputTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Provider")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("ProviderCallId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long?>("TotalTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("UsageKnown")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("ProviderCallId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_AiProviderCallTelemetries_ProviderCallId");
+
+                    b.HasIndex("CompanyId", "OuterOperationType", "OuterOperationId");
+
+                    b.ToTable("AiProviderCallTelemetries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AiProviderCallTelemetries_OuterOperation", "(\"OuterOperationType\" IS NULL AND \"OuterOperationId\" IS NULL) OR (\"OuterOperationType\" IS NOT NULL AND \"OuterOperationId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AiProviderCallTelemetries_Usage", "(\"UsageKnown\" = FALSE AND \"InputTokens\" IS NULL AND \"OutputTokens\" IS NULL AND \"TotalTokens\" IS NULL) OR (\"UsageKnown\" = TRUE AND \"InputTokens\" IS NOT NULL AND \"OutputTokens\" IS NOT NULL AND \"TotalTokens\" IS NOT NULL AND \"InputTokens\" >= 0 AND \"OutputTokens\" >= 0 AND \"TotalTokens\" >= 0)");
+                        });
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4481,6 +4551,17 @@ namespace backend.Data.Migrations
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.ActionNotificationOutbox", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.AiProviderCallTelemetry", b =>
                 {
                     b.HasOne("StayFlow.Api.Models.Company", "Company")
                         .WithMany()

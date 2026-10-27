@@ -31,7 +31,8 @@ public sealed class AIReplyOrchestrator(
     IPropertyKnowledgeRetriever? propertyKnowledgeRetriever = null,
     IConciergeResponseGenerator? conciergeResponseGenerator = null,
     IOptions<ConciergeIntelligenceOptions>? conciergeOptions = null,
-    IGroundedConciergeResponseGenerator? groundedConciergeResponseGenerator = null) : IAIReplyOrchestrator
+    IGroundedConciergeResponseGenerator? groundedConciergeResponseGenerator = null,
+    IAiProviderCallTelemetryStore? providerCallTelemetryStore = null) : IAIReplyOrchestrator
 {
     public async Task<AIReplyOrchestrationResult?> OrchestrateAsync(
         Guid companyId,
@@ -318,6 +319,7 @@ public sealed class AIReplyOrchestrator(
             if (!groundedGeneration)
             {
                 providerResult = await InvokeProviderWithTimeoutAsync(
+                    companyId,
                     prompt,
                     selectedKnowledge,
                     intent.Intent.ToString(),
@@ -766,6 +768,7 @@ public sealed class AIReplyOrchestrator(
     }
 
     private async Task<AIProviderResult> InvokeProviderWithTimeoutAsync(
+        Guid companyId,
         AIPromptPackage prompt,
         IReadOnlyCollection<AIProviderKnowledgeItem> selectedKnowledge,
         string detectedIntent,
@@ -829,12 +832,19 @@ public sealed class AIReplyOrchestrator(
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             Observe(null);
+            await PersistTelemetryAsync(companyId, providerRequest, new AIProviderResult
+            {
+                Outcome = AIProviderOutcome.Unavailable,
+                FailureCategory = "Cancelled",
+                ProviderCallId = providerRequest.ProviderCallId,
+                OuterOperationType = outerOperationType,
+                OuterOperationId = outerOperationId
+            });
             throw;
         }
         catch (OperationCanceledException)
         {
-            Observe(null);
-            return new AIProviderResult
+            result = new AIProviderResult
             {
                 Outcome = AIProviderOutcome.Unavailable,
                 ProviderName = "TimedOut",
@@ -846,8 +856,7 @@ public sealed class AIReplyOrchestrator(
         }
         catch (Exception)
         {
-            Observe(null);
-            return new AIProviderResult
+            result = new AIProviderResult
             {
                 Outcome = AIProviderOutcome.Failed,
                 ProviderName = "Exception",
@@ -859,7 +868,44 @@ public sealed class AIReplyOrchestrator(
         }
 
         Observe(result.TokenUsage);
+        await PersistTelemetryAsync(companyId, providerRequest, result);
         return result;
+    }
+
+    private async Task PersistTelemetryAsync(
+        Guid companyId,
+        AIProviderRequest request,
+        AIProviderResult result)
+    {
+        if (providerCallTelemetryStore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await providerCallTelemetryStore.RecordAsync(
+                new AiProviderCallObservation(
+                    request.ProviderCallId,
+                    companyId,
+                    request.OuterOperationType,
+                    request.OuterOperationId,
+                    result.ProviderName,
+                    result.ModelName,
+                    result.TokenUsage,
+                    result.Outcome),
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "AI provider telemetry persistence failed. ProviderCallId={ProviderCallId} CompanyId={CompanyId} OuterOperationType={OuterOperationType} OuterOperationId={OuterOperationId}",
+                request.ProviderCallId.Value,
+                companyId,
+                request.OuterOperationType,
+                request.OuterOperationId);
+        }
     }
 
     private static void ValidateRequest(AIReplyOrchestrationRequest request)
