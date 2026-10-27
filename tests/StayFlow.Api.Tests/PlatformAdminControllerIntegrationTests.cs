@@ -36,6 +36,45 @@ public sealed class PlatformAdminControllerIntegrationTests : IClassFixture<Sign
     }
 
     [Fact]
+    public async Task AiProviderCostEndpoints_RequirePlatformPermission()
+    {
+        using var client = CreateClientWithToken(TargetCompanyId, PlatformAdminUserId, ["conversations.read"]);
+
+        using var response = await client.GetAsync(
+            "/api/platform-admin/ai-provider-costs/summary?fromUtc=2026-10-01T00:00:00Z&toUtc=2026-10-02T00:00:00Z");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AiProviderCostEndpoints_ValidateRangeAndGroupBy()
+    {
+        using var client = CreateClientWithToken(TargetCompanyId, PlatformAdminUserId, ["platform.admin"]);
+
+        using var missingRangeResponse = await client.GetAsync("/api/platform-admin/ai-provider-costs/summary");
+        Assert.Equal(HttpStatusCode.BadRequest, missingRangeResponse.StatusCode);
+
+        using var invalidGroupResponse = await client.GetAsync(
+            "/api/platform-admin/ai-provider-costs/breakdown?fromUtc=2026-10-01T00:00:00Z&toUtc=2026-10-02T00:00:00Z&groupBy=Unknown");
+        Assert.Equal(HttpStatusCode.BadRequest, invalidGroupResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetAiProviderCostSummary_ReturnsReadOnlySummary()
+    {
+        using var client = CreateClientWithToken(TargetCompanyId, PlatformAdminUserId, ["platform.admin"]);
+
+        using var response = await client.GetAsync(
+            "/api/platform-admin/ai-provider-costs/summary?fromUtc=2026-10-01T00:00:00Z&toUtc=2026-10-02T00:00:00Z");
+        var payload = await ParseJsonAsync(response);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(payload.RootElement.GetProperty("success").GetBoolean());
+        Assert.Equal(0, payload.RootElement.GetProperty("data").GetProperty("totalCalls").GetInt64());
+        Assert.Equal("USD", payload.RootElement.GetProperty("data").GetProperty("currency").GetString());
+    }
+
+    [Fact]
     public async Task GetTenants_ReturnsPagedPayload()
     {
         using var client = CreateClientWithToken(TargetCompanyId, PlatformAdminUserId, ["platform.admin"]);

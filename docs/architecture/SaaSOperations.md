@@ -31,6 +31,7 @@ The operations APIs expose metrics for:
 - API usage
 - SignalR activity indicators
 - AI usage/provider state
+- Persisted AI provider-cost state and USD aggregates, available only to platform administrators through the read-only `/api/platform-admin/ai-provider-costs` endpoints.
 - Billing invoice/webhook health
 - Email token issuance indicators
 - WhatsApp usage/provider state
@@ -49,6 +50,8 @@ Mutating platform operations emit audit logs with:
 - safe metadata payload
 
 No secrets or raw credentials are serialized to audit payloads.
+
+Provider-cost reports aggregate persisted provider-call telemetry using UTC dispatch-time windows (`fromUtc` inclusive, `toUtc` exclusive). They sum only persisted calculated USD amounts and report Unknown and NotApplicable states separately; they do not recalculate costs from the current pricing catalog, expose prompts or responses, or charge customers.
 
 ## Tradeoffs
 
