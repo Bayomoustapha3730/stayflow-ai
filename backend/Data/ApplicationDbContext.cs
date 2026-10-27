@@ -19,6 +19,7 @@ public sealed class ApplicationDbContext(
     public DbSet<UsageRecord> UsageRecords => Set<UsageRecord>();
     public DbSet<UsageOperation> UsageOperations => Set<UsageOperation>();
     public DbSet<AiProviderCallTelemetry> AiProviderCallTelemetries => Set<AiProviderCallTelemetry>();
+    public DbSet<AiProviderPricingVersion> AiProviderPricingVersions => Set<AiProviderPricingVersion>();
     public DbSet<User> Users => Set<User>();
     public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
     public DbSet<OrganizationInvitation> OrganizationInvitations => Set<OrganizationInvitation>();
@@ -74,6 +75,7 @@ public sealed class ApplicationDbContext(
     public override int SaveChanges()
     {
         NormalizeUserEmails();
+        ValidateImmutablePricingVersions();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChanges();
@@ -82,6 +84,7 @@ public sealed class ApplicationDbContext(
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
         NormalizeUserEmails();
+        ValidateImmutablePricingVersions();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChangesAsync(cancellationToken);
@@ -132,6 +135,15 @@ public sealed class ApplicationDbContext(
             {
                 entry.Entity.NormalizedEmail = EmailIdentityNormalizer.Normalize(entry.Entity.Email);
             }
+        }
+    }
+
+    private void ValidateImmutablePricingVersions()
+    {
+        if (ChangeTracker.Entries<AiProviderPricingVersion>()
+            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("Published AI provider pricing versions are immutable.");
         }
     }
 

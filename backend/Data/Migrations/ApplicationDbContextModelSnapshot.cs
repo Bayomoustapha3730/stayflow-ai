@@ -167,6 +167,68 @@ namespace backend.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.AiProviderPricingVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTimeOffset>("EffectiveFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EffectiveTo")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("InputPrice")
+                        .HasPrecision(28, 12)
+                        .HasColumnType("numeric(28,12)");
+
+                    b.Property<decimal>("OutputPrice")
+                        .HasPrecision(28, 12)
+                        .HasColumnType("numeric(28,12)");
+
+                    b.Property<string>("PricingModelKey")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int>("UnitTokenCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider", "PricingModelKey", "EffectiveFrom");
+
+                    b.ToTable("AiProviderPricingVersions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AiProviderPricingVersions_Currency", "\"Currency\" = 'USD'");
+
+                            t.HasCheckConstraint("CK_AiProviderPricingVersions_EffectivePeriod", "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" > \"EffectiveFrom\"");
+
+                            t.HasCheckConstraint("CK_AiProviderPricingVersions_Identity", "length(\"Provider\") > 0 AND length(\"PricingModelKey\") > 0");
+
+                            t.HasCheckConstraint("CK_AiProviderPricingVersions_Prices", "\"InputPrice\" >= 0 AND \"OutputPrice\" >= 0");
+
+                            t.HasCheckConstraint("CK_AiProviderPricingVersions_UnitTokenCount", "\"UnitTokenCount\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")

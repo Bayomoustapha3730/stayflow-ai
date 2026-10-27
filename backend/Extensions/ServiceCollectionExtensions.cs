@@ -372,6 +372,8 @@ public static class ServiceCollectionExtensions
                 serviceProvider.GetRequiredService<TimeProvider>(),
                 serviceProvider.GetRequiredService<ILogger<Services.AccountingAIProvider>>());
         });
+        services.AddScoped<Services.IAiProviderPricingCatalog, Services.AiProviderPricingCatalog>();
+        services.AddScoped<Services.IAiProviderPricingResolver, Services.AiProviderPricingResolver>();
         services.AddScoped<Services.IAIOrchestrator, Services.AIOrchestrator>();
         services.AddScoped<Services.AI.Orchestration.IAiProviderCallTelemetryStore, Services.AI.Orchestration.AiProviderCallTelemetryStore>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();

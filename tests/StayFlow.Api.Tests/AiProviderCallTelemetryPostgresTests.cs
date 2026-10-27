@@ -4,6 +4,7 @@ using Npgsql;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.Models;
+using StayFlow.Api.Services;
 using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Tests;
@@ -104,6 +105,60 @@ public sealed class AiProviderCallTelemetryPostgresTests : IAsyncLifetime
         var saved = await verificationContext.AiProviderCallTelemetries.SingleAsync();
         Assert.Equal(AiProviderCallLifecycleState.DispatchStarted, saved.LifecycleState);
         Assert.Equal(dispatchStartedAt, saved.DispatchStartedAt);
+    }
+
+    [Fact]
+    public async Task AiProviderPricingCatalog_ConcurrentOverlappingPublicationsCannotBothSucceed()
+    {
+        var catalog = new AiProviderPricingCatalog(dbOptions);
+        var publications = await Task.WhenAll(
+            PublishAndCaptureAsync(catalog, new AiProviderPricingVersionDraft(
+                "SyntheticProvider", "synthetic-sku", DateTimeOffset.UtcNow, null, "USD", 1m, 2m, 1_000_000)),
+            PublishAndCaptureAsync(catalog, new AiProviderPricingVersionDraft(
+                "syntheticprovider", "synthetic-sku", DateTimeOffset.UtcNow.AddMinutes(1), null, "USD", 3m, 4m, 1_000_000)));
+
+        Assert.Single(publications, result => result.Exception is null);
+        Assert.Single(publications, result => result.Exception is not null);
+        await using var verificationContext = new ApplicationDbContext(dbOptions);
+        Assert.Equal(1, await verificationContext.AiProviderPricingVersions.CountAsync());
+    }
+
+    [Fact]
+    public async Task AiProviderPricingCatalog_PreservesHighPrecisionDecimalPrice()
+    {
+        const decimal expectedPrice = 0.123456789012m;
+        var catalog = new AiProviderPricingCatalog(dbOptions);
+        var versionId = await catalog.PublishAsync(new AiProviderPricingVersionDraft(
+            "SyntheticProvider",
+            "synthetic-precision-sku",
+            DateTimeOffset.UtcNow,
+            null,
+            "USD",
+            expectedPrice,
+            expectedPrice,
+            1_000_000), CancellationToken.None);
+
+        await using var verificationContext = new ApplicationDbContext(dbOptions);
+        var saved = await verificationContext.AiProviderPricingVersions
+            .AsNoTracking()
+            .SingleAsync(version => version.Id == versionId);
+
+        Assert.Equal(expectedPrice, saved.InputPrice);
+        Assert.Equal(expectedPrice, saved.OutputPrice);
+    }
+
+    private static async Task<(Guid? VersionId, Exception? Exception)> PublishAndCaptureAsync(
+        IAiProviderPricingCatalog catalog,
+        AiProviderPricingVersionDraft draft)
+    {
+        try
+        {
+            return (await catalog.PublishAsync(draft, CancellationToken.None), null);
+        }
+        catch (Exception exception)
+        {
+            return (null, exception);
+        }
     }
 
     [Fact]
