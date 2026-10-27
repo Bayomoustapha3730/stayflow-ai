@@ -28,6 +28,7 @@ public sealed class CopilotController(ICopilotService copilotService) : Controll
     [ProducesResponseType(
         typeof(ApiResponse<CopilotSuggestReplyResponse>),
         StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ApiResponse<CopilotSuggestReplyResponse>>> SuggestReply(
         Guid conversationId,
         [FromBody] CopilotSuggestReplyRequest request,
@@ -68,6 +69,7 @@ public sealed class CopilotController(ICopilotService copilotService) : Controll
     [ProducesResponseType(
         typeof(ApiResponse<ConversationCopilotSuggestionsResponse>),
         StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ApiResponse<ConversationCopilotSuggestionsResponse>>> GetSuggestedReplies(
         Guid conversationId,
         [FromQuery] Guid operationId,

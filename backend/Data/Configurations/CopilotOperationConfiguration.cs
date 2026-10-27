@@ -12,6 +12,10 @@ public sealed class CopilotOperationConfiguration : IEntityTypeConfiguration<Cop
         builder.HasKey(operation => operation.Id);
         builder.Property(operation => operation.OperationType).HasConversion<string>().HasMaxLength(60).IsRequired();
         builder.Property(operation => operation.Status).HasConversion<string>().HasMaxLength(30).IsRequired();
+        builder.Property(operation => operation.SemanticRequestFingerprint).HasMaxLength(64);
+        builder.Property(operation => operation.FailureCode).HasMaxLength(80);
+        builder.Property(operation => operation.FailureMessage).HasMaxLength(500);
+        builder.Property(operation => operation.BusinessResultJson);
 
         builder.HasOne(operation => operation.Company)
             .WithMany(company => company.CopilotOperations)

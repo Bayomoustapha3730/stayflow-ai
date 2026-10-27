@@ -25,6 +25,38 @@ public interface ISubscriptionEntitlementService
         return new AIRequestAdmissionResult(result, result.WasIdempotentReplay);
     }
 
+    async Task<CopilotOperationExecutionStart> BeginCopilotOperationAsync(
+        Guid companyId,
+        Guid operationId,
+        Guid conversationId,
+        Guid actorUserId,
+        CopilotOperationType operationType,
+        string semanticRequestFingerprint,
+        CancellationToken cancellationToken)
+    {
+        await AdmitCopilotOperationAsync(companyId, operationId, conversationId, actorUserId, operationType, cancellationToken);
+        return new CopilotOperationExecutionStart(CopilotOperationExecutionDisposition.DispatchOwned);
+    }
+
+    Task<CopilotOperationExecutionStart?> FindCopilotOperationReplayAsync(
+        Guid companyId,
+        Guid operationId,
+        Guid conversationId,
+        Guid actorUserId,
+        CopilotOperationType operationType,
+        string semanticRequestFingerprint,
+        CancellationToken cancellationToken)
+        => Task.FromResult<CopilotOperationExecutionStart?>(null);
+
+    Task CompleteCopilotOperationAsync(Guid companyId, Guid operationId, string businessResultJson, CancellationToken cancellationToken)
+        => MarkCopilotOperationCompletedAsync(companyId, operationId, cancellationToken);
+
+    Task FailCopilotOperationAsync(Guid companyId, Guid operationId, string failureCode, string failureMessage, CancellationToken cancellationToken)
+        => MarkCopilotOperationFailedAsync(companyId, operationId, cancellationToken);
+
+    Task MarkCopilotOperationIndeterminateAsync(Guid companyId, Guid operationId, CancellationToken cancellationToken)
+        => MarkCopilotOperationFailedAsync(companyId, operationId, cancellationToken);
+
     Task MarkCopilotOperationCompletedAsync(Guid companyId, Guid operationId, CancellationToken cancellationToken)
         => Task.CompletedTask;
 
@@ -81,3 +113,18 @@ public sealed record UsageConsumptionResult(
 public sealed record AIRequestAdmissionResult(
     UsageConsumptionResult Consumption,
     bool WasReplay);
+
+public enum CopilotOperationExecutionDisposition
+{
+    DispatchOwned,
+    Completed,
+    Failed,
+    InProgress,
+    Indeterminate
+}
+
+public sealed record CopilotOperationExecutionStart(
+    CopilotOperationExecutionDisposition Disposition,
+    string? BusinessResultJson = null,
+    string? FailureCode = null,
+    string? FailureMessage = null);

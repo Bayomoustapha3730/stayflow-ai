@@ -152,6 +152,30 @@ public sealed class AIReplyOrchestrator(
         }
 
         var generatedAt = DateTimeOffset.UtcNow;
+        if (request.RetrievalDiagnosticsOnly)
+        {
+            completedStages.Add(AIReplyOrchestrationStage.ResultAssembled);
+            stopwatch.Stop();
+            return new AIReplyOrchestrationResult
+            {
+                ConversationId = request.ConversationId,
+                Operation = request.Operation,
+                ContextMessageCount = context.VisibleMessages.Count,
+                Confidence = contextConfidence.Score,
+                Sources = context.Sources,
+                Warnings = warnings.Distinct().ToArray(),
+                DetectedIntent = intent,
+                Provider = "NotInvoked",
+                GeneratedAt = generatedAt,
+                ContextTruncated = context.Truncated,
+                FallbackUsed = false,
+                CompletedStages = completedStages,
+                DurationMilliseconds = stopwatch.ElapsedMilliseconds,
+                RequiresHumanReview = ranking.EscalationRecommended,
+                RetrievalDiagnostics = CreateRetrievalDiagnostics(intent, intentResult, ranking, warnings)
+            };
+        }
+
         var output = string.Empty;
         var suggestions = new List<string>();
         var conflictRequiresReview = false;
@@ -514,30 +538,39 @@ public sealed class AIReplyOrchestrator(
             DurationMilliseconds = stopwatch.ElapsedMilliseconds,
             RequiresHumanReview = conflictRequiresReview || safetyAfterFallback.RequiresHumanReview,
             TokenUsage = tokenUsage?.Snapshot(),
-            RetrievalDiagnostics = new RetrievalDiagnosticsSnapshot
-            {
-                DetectedIntent = intent.Intent.ToString(),
-                IntentAmbiguous = intentResult.IsAmbiguous,
-                IntentConfidenceScore = (int)Math.Round(intentResult.Confidence * 100),
-                SecondaryIntentCount = intentResult.SecondaryIntents.Count,
-                CandidateCount = ranking.Candidates.Count,
-                SelectedCount = ranking.SelectedItems.Count,
-                ConfidenceLevel = ranking.ConfidenceLevel,
-                ReasonCode = ranking.ReasonCode,
-                ClarificationRequired = ranking.RequiresClarification,
-                EscalationRecommended = ranking.EscalationRecommended,
-                SelectedCategories = ranking.SelectedItems
-                    .Select(item => item.Category.ToString())
-                    .Distinct(StringComparer.Ordinal)
-                    .ToArray(),
-                ClarificationChoices = ranking.ClarificationChoices,
-                WarningCodes = warnings
-                    .Select(item => item.Code)
-                    .Where(code => !string.IsNullOrWhiteSpace(code))
-                    .Distinct(StringComparer.Ordinal)
-                    .ToArray(),
-                EvaluationMetadata = ranking.EvaluationMetadata
-            }
+            RetrievalDiagnostics = CreateRetrievalDiagnostics(intent, intentResult, ranking, warnings)
+        };
+    }
+
+    private static RetrievalDiagnosticsSnapshot CreateRetrievalDiagnostics(
+        GuestIntentResult intent,
+        ConversationIntentResult intentResult,
+        KnowledgeRetrievalResult ranking,
+        IReadOnlyCollection<AIReplyOrchestrationWarning> warnings)
+    {
+        return new RetrievalDiagnosticsSnapshot
+        {
+            DetectedIntent = intent.Intent.ToString(),
+            IntentAmbiguous = intentResult.IsAmbiguous,
+            IntentConfidenceScore = (int)Math.Round(intentResult.Confidence * 100),
+            SecondaryIntentCount = intentResult.SecondaryIntents.Count,
+            CandidateCount = ranking.Candidates.Count,
+            SelectedCount = ranking.SelectedItems.Count,
+            ConfidenceLevel = ranking.ConfidenceLevel,
+            ReasonCode = ranking.ReasonCode,
+            ClarificationRequired = ranking.RequiresClarification,
+            EscalationRecommended = ranking.EscalationRecommended,
+            SelectedCategories = ranking.SelectedItems
+                .Select(item => item.Category.ToString())
+                .Distinct(StringComparer.Ordinal)
+                .ToArray(),
+            ClarificationChoices = ranking.ClarificationChoices,
+            WarningCodes = warnings
+                .Select(item => item.Code)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray(),
+            EvaluationMetadata = ranking.EvaluationMetadata
         };
     }
 

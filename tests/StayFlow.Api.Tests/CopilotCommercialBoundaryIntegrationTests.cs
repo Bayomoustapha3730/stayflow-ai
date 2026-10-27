@@ -14,6 +14,7 @@ using Microsoft.IdentityModel.Tokens;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.Models;
+using StayFlow.Api.Services;
 using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Tests;
@@ -39,9 +40,10 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
     {
         EnsureSubscription();
         var operationId = Guid.NewGuid();
+        var invocationsBefore = factory.Recorder.InvocationCount;
         var response = await GetSuggestionsAsync(operationId);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var operation = await GetOperationAsync(operationId);
         Assert.NotNull(operation);
         Assert.Equal(CompanyA, operation!.CompanyId);
@@ -51,7 +53,7 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         Assert.Equal(CopilotOperationStatus.Completed, operation.Status);
         Assert.Equal(1, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
-        Assert.Equal(1, factory.Recorder.InvocationCount);
+        Assert.Equal(invocationsBefore + 1, factory.Recorder.InvocationCount);
         Assert.Equal(OuterOperationType.CopilotOperation, factory.Recorder.LastRequest!.OuterOperationType);
         Assert.Equal(operationId, factory.Recorder.LastRequest.OuterOperationId);
         Assert.NotEqual(Guid.Empty, factory.Recorder.LastRequest.OuterOperationId);
@@ -62,15 +64,21 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
     {
         EnsureSubscription();
         var operationId = Guid.NewGuid();
+        var invocationsBefore = factory.Recorder.InvocationCount;
         var first = await GetSuggestionsAsync(operationId, "correlation-a");
         var usageAfterFirst = await UsageAsync();
+        var invocationsAfterFirst = factory.Recorder.InvocationCount;
         var second = await GetSuggestionsAsync(operationId, "correlation-b");
 
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(invocationsBefore + 1, invocationsAfterFirst);
+        Assert.Equal(invocationsAfterFirst, factory.Recorder.InvocationCount);
+        Assert.Equal(await ResponseDataAsync(first), await ResponseDataAsync(second));
         Assert.Equal(1, await OperationCountAsync(operationId, CopilotOperationType.CopilotSuggestion));
         Assert.Equal(usageAfterFirst, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
+        Assert.Equal(0, await TelemetryCountAsync(operationId));
     }
 
     [Fact]
@@ -101,11 +109,16 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         var operation = await GetOperationAsync(operationId);
         Assert.NotNull(operation);
-        Assert.Equal(CopilotOperationStatus.Failed, operation!.Status);
+        Assert.Equal(CopilotOperationStatus.Indeterminate, operation!.Status);
         Assert.Equal(1, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
         Assert.True(factory.Recorder.InvocationCount > 0);
+        var invocations = factory.Recorder.InvocationCount;
         factory.Recorder.Fail = false;
+        var replay = await GetSuggestionsAsync(operationId);
+        Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
+        Assert.Equal(invocations, factory.Recorder.InvocationCount);
+        Assert.Equal(0, await TelemetryCountAsync(operationId));
     }
 
     [Fact]
@@ -115,7 +128,7 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         var operationId = Guid.NewGuid();
         var response = await PostGeneratedReplyAsync(operationId);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.StatusCode == HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var operation = await GetOperationAsync(operationId);
         Assert.NotNull(operation);
         Assert.Equal(CompanyA, operation!.CompanyId);
@@ -137,12 +150,36 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         var operationId = Guid.NewGuid();
         var first = await PostGeneratedReplyAsync(operationId);
         var usageAfterFirst = await UsageAsync();
+        var invocationsAfterFirst = factory.Recorder.InvocationCount;
         var second = await PostGeneratedReplyAsync(operationId);
 
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(invocationsAfterFirst, factory.Recorder.InvocationCount);
+        Assert.Equal(await ResponseDataAsync(first), await ResponseDataAsync(second));
         Assert.Equal(usageAfterFirst, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
+        Assert.Equal(0, await TelemetryCountAsync(operationId));
+    }
+
+    [Fact]
+    public async Task GeneratedReply_NewOperationIdCreatesNewChargedOperation()
+    {
+        EnsureSubscription();
+        var firstOperationId = Guid.NewGuid();
+        var secondOperationId = Guid.NewGuid();
+        var invocationsBefore = factory.Recorder.InvocationCount;
+
+        var first = await PostGeneratedReplyAsync(firstOperationId);
+        var second = await PostGeneratedReplyAsync(secondOperationId);
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(invocationsBefore + 2, factory.Recorder.InvocationCount);
+        Assert.Equal(2, await UsageAsync());
+        Assert.Equal(1, await BillingOperationCountAsync(firstOperationId));
+        Assert.Equal(1, await BillingOperationCountAsync(secondOperationId));
+        Assert.Equal(2, await OperationCountForCompanyAsync());
     }
 
     [Fact]
@@ -174,10 +211,15 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         var operation = await GetOperationAsync(operationId);
         Assert.NotNull(operation);
-        Assert.Equal(CopilotOperationStatus.Failed, operation!.Status);
+        Assert.Equal(CopilotOperationStatus.Indeterminate, operation!.Status);
         Assert.Equal(1, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
+        var invocations = factory.Recorder.InvocationCount;
         factory.Recorder.Fail = false;
+        var replay = await PostGeneratedReplyAsync(operationId);
+        Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
+        Assert.Equal(invocations, factory.Recorder.InvocationCount);
+        Assert.Equal(0, await TelemetryCountAsync(operationId));
     }
 
     [Fact]
@@ -207,14 +249,28 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
     {
         EnsureSubscription();
         var operationId = Guid.NewGuid();
+        var invocationsBefore = factory.Recorder.InvocationCount;
         var first = await PostWorkspaceDraftAsync(operationId);
         var usageAfterFirst = await UsageAsync();
+        var invocationsAfterFirst = factory.Recorder.InvocationCount;
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            db.ConversationMessages.RemoveRange(db.ConversationMessages.Where(item =>
+                item.CompanyId == CompanyA && item.ConversationId == ConversationA
+                && item.SenderType == ConversationSenderType.Guest && !item.IsInternal));
+            await db.SaveChangesAsync();
+        }
         var second = await PostWorkspaceDraftAsync(operationId);
 
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(invocationsBefore + 1, invocationsAfterFirst);
+        Assert.Equal(invocationsAfterFirst, factory.Recorder.InvocationCount);
+        Assert.Equal(await ResponseDataAsync(first), await ResponseDataAsync(second));
         Assert.Equal(usageAfterFirst, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
+        Assert.Equal(0, await TelemetryCountAsync(operationId));
     }
 
     [Fact]
@@ -246,7 +302,7 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         var operation = await GetOperationAsync(operationId);
         Assert.NotNull(operation);
-        Assert.Equal(CopilotOperationStatus.Failed, operation!.Status);
+        Assert.Equal(CopilotOperationStatus.Indeterminate, operation!.Status);
         Assert.Equal(1, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
         factory.Recorder.Fail = false;
@@ -288,8 +344,173 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         Assert.Equal(1, await OperationCountAsync(operationId, CopilotOperationType.CopilotGeneratedReply));
         Assert.Equal(1, await UsageAsync());
         Assert.Equal(1, await BillingOperationCountAsync(operationId));
-        Assert.Equal(CopilotOperationStatus.Failed, await OperationStatusAsync(operationId));
+        Assert.Equal(CopilotOperationStatus.Indeterminate, await OperationStatusAsync(operationId));
         factory.Recorder.Fail = false;
+    }
+
+    [Fact]
+    public async Task GeneratedReply_SemanticMismatchConflictsWithoutDispatchOrQuota()
+    {
+        EnsureSubscription();
+        var operationId = Guid.NewGuid();
+        var first = await PostGeneratedReplyAsync(operationId);
+        var usageAfterFirst = await UsageAsync();
+        var invocations = factory.Recorder.InvocationCount;
+
+        var mismatch = await PostGeneratedReplyAsync(operationId, guidance: "Use a different instruction.");
+
+        Assert.Equal(HttpStatusCode.Conflict, mismatch.StatusCode);
+        Assert.Equal(invocations, factory.Recorder.InvocationCount);
+        Assert.Equal(usageAfterFirst, await UsageAsync());
+        Assert.Equal(1, await BillingOperationCountAsync(operationId));
+        Assert.Equal(0, await TelemetryCountAsync(operationId));
+    }
+
+    [Fact]
+    public async Task GeneratedReply_CompletedFallbackReplayReturnsPersistedResponseWithoutRedispatch()
+    {
+        EnsureSubscription();
+        var operationId = Guid.NewGuid();
+        factory.Recorder.Fallback = true;
+        var before = factory.Recorder.InvocationCount;
+
+        var first = await PostGeneratedReplyAsync(operationId);
+        var usageAfterFirst = await UsageAsync();
+        var second = await PostGeneratedReplyAsync(operationId);
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Equal(before + 1, factory.Recorder.InvocationCount);
+        Assert.Equal(await ResponseDataAsync(first), await ResponseDataAsync(second));
+        using var firstBody = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        Assert.True(firstBody.RootElement.GetProperty("data").GetProperty("fallbackUsed").GetBoolean());
+        Assert.Equal(CopilotOperationStatus.Completed, await OperationStatusAsync(operationId));
+        Assert.Equal(usageAfterFirst, await UsageAsync());
+        Assert.Equal(1, await BillingOperationCountAsync(operationId));
+        Assert.Equal(0, await TelemetryCountAsync(operationId));
+        factory.Recorder.Fallback = false;
+    }
+
+    [Fact]
+    public async Task GeneratedReply_InProgressReplayDoesNotRedispatch()
+    {
+        EnsureSubscription();
+        var operationId = Guid.NewGuid();
+        await SeedOperationAsync(
+            operationId,
+            CopilotOperationType.CopilotGeneratedReply,
+            CopilotOperationFingerprint.GeneratedReply(ConversationA, "professional", null, "Be concise"),
+            CopilotOperationStatus.InProgress);
+        var before = factory.Recorder.InvocationCount;
+        var usageBefore = await UsageAsync();
+
+        var response = await PostGeneratedReplyAsync(operationId);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(before, factory.Recorder.InvocationCount);
+        Assert.Equal(usageBefore, await UsageAsync());
+        Assert.Equal(0, await TelemetryCountAsync(operationId));
+    }
+
+    [Fact]
+    public async Task GeneratedReply_PendingReplayDoesNotBecomeASecondDispatchOwner()
+    {
+        EnsureSubscription();
+        var operationId = Guid.NewGuid();
+        await SeedOperationAsync(
+            operationId,
+            CopilotOperationType.CopilotGeneratedReply,
+            CopilotOperationFingerprint.GeneratedReply(ConversationA, "professional", null, "Be concise"),
+            CopilotOperationStatus.Pending);
+        var before = factory.Recorder.InvocationCount;
+
+        var response = await PostGeneratedReplyAsync(operationId);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(before, factory.Recorder.InvocationCount);
+        Assert.Equal(0, await UsageAsync());
+        Assert.Equal(0, await TelemetryCountAsync(operationId));
+    }
+
+    [Fact]
+    public async Task GeneratedReply_ConcurrentSameOperationHasOneDispatchOwner()
+    {
+        EnsureSubscription();
+        var operationId = Guid.NewGuid();
+        var invocationBefore = factory.Recorder.InvocationCount;
+        var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        factory.Recorder.DispatchEntered = entered;
+        factory.Recorder.ContinueDispatch = release;
+
+        try
+        {
+            var firstTask = PostGeneratedReplyAsync(operationId);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var second = await PostGeneratedReplyAsync(operationId);
+
+            Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+            Assert.Equal(invocationBefore + 1, factory.Recorder.InvocationCount);
+            Assert.Equal(1, await UsageAsync());
+            release.TrySetResult(true);
+            var first = await firstTask;
+            Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+            Assert.Equal(1, await BillingOperationCountAsync(operationId));
+        }
+        finally
+        {
+            release.TrySetResult(true);
+            factory.Recorder.DispatchEntered = null;
+            factory.Recorder.ContinueDispatch = null;
+        }
+    }
+
+    [Fact]
+    public async Task GeneratedReply_TerminalFailureReplayReturnsSameFailureWithoutRedispatch()
+    {
+        EnsureSubscription();
+        var operationId = Guid.NewGuid();
+        factory.Recorder.ReturnNull = true;
+        try
+        {
+            var first = await PostGeneratedReplyAsync(operationId);
+            var usageAfterFirst = await UsageAsync();
+            var invocations = factory.Recorder.InvocationCount;
+
+            var replay = await PostGeneratedReplyAsync(operationId);
+
+            Assert.Equal(HttpStatusCode.NotFound, first.StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, replay.StatusCode);
+            Assert.Equal(await FailureDataAsync(first), await FailureDataAsync(replay));
+            Assert.Equal(invocations, factory.Recorder.InvocationCount);
+            Assert.Equal(CopilotOperationStatus.Failed, await OperationStatusAsync(operationId));
+            Assert.Equal(usageAfterFirst, await UsageAsync());
+            Assert.Equal(1, await BillingOperationCountAsync(operationId));
+            Assert.Equal(0, await TelemetryCountAsync(operationId));
+        }
+        finally
+        {
+            factory.Recorder.ReturnNull = false;
+        }
+    }
+
+    [Fact]
+    public async Task RetrievalDiagnostics_AreInternalAndDoNotConsumeGenerationResources()
+    {
+        EnsureSubscription();
+        var usageBefore = await UsageAsync();
+        var telemetryBefore = await TelemetryCountAsync();
+        var invocationsBefore = factory.Recorder.InvocationCount;
+        using var client = CreateClient(["conversations.read"]);
+
+        var response = await client.GetAsync($"/copilot/conversations/{ConversationA:D}/retrieval-diagnostics");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(invocationsBefore + 1, factory.Recorder.InvocationCount);
+        Assert.True(factory.Recorder.LastRequest!.RetrievalDiagnosticsOnly);
+        Assert.Null(factory.Recorder.LastRequest.OuterOperationId);
+        Assert.Equal(usageBefore, await UsageAsync());
+        Assert.Equal(telemetryBefore, await TelemetryCountAsync());
     }
 
     private async Task<HttpResponseMessage> GetSuggestionsAsync(Guid operationId, string? correlationId = null)
@@ -298,12 +519,12 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         return await client.GetAsync($"/copilot/conversations/{ConversationA:D}/suggested-replies?tone=professional&operationId={operationId:D}");
     }
 
-    private async Task<HttpResponseMessage> PostGeneratedReplyAsync(Guid operationId)
+    private async Task<HttpResponseMessage> PostGeneratedReplyAsync(Guid operationId, string guidance = "Be concise")
     {
         using var client = CreateClient(["conversations.reply"]);
         return await client.PostAsync(
             $"/copilot/conversations/{ConversationA:D}/suggest-reply",
-            JsonContent(new { operationId, tone = "professional", guidance = "Be concise" }));
+            JsonContent(new { operationId, tone = "professional", guidance }));
     }
 
     private async Task<HttpResponseMessage> PostWorkspaceDraftAsync(Guid operationId)
@@ -468,6 +689,60 @@ public sealed class CopilotCommercialBoundaryIntegrationTests : IClassFixture<Co
         return await db.CopilotOperations.CountAsync(item => item.Id == operationId && item.OperationType == type);
     }
 
+    private async Task<int> OperationCountForCompanyAsync()
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        return await db.CopilotOperations.CountAsync(item => item.CompanyId == CompanyA);
+    }
+
+    private async Task<int> TelemetryCountAsync(Guid? operationId = null)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        var query = db.AiProviderCallTelemetries.Where(item => item.CompanyId == CompanyA);
+        if (operationId is { } id)
+        {
+            query = query.Where(item => item.OuterOperationId == id);
+        }
+
+        return await query.CountAsync();
+    }
+
+    private async Task<string> ResponseDataAsync(HttpResponseMessage response)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("data").GetRawText();
+    }
+
+    private async Task<string> FailureDataAsync(HttpResponseMessage response)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return $"{document.RootElement.GetProperty("message").GetString()}|{document.RootElement.GetProperty("errors").GetRawText()}";
+    }
+
+    private async Task SeedOperationAsync(
+        Guid operationId,
+        CopilotOperationType operationType,
+        string fingerprint,
+        CopilotOperationStatus status)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        db.CopilotOperations.Add(new CopilotOperation
+        {
+            Id = operationId,
+            CompanyId = CompanyA,
+            ConversationId = ConversationA,
+            ActorUserId = UserA,
+            OperationType = operationType,
+            Status = status,
+            SemanticRequestFingerprint = fingerprint,
+            DispatchStartedAt = status == CopilotOperationStatus.InProgress ? DateTimeOffset.UtcNow : null
+        });
+        await db.SaveChangesAsync();
+    }
+
     private async Task<CopilotOperation?> GetOperationAsync(Guid operationId)
     {
         using var scope = factory.Services.CreateScope();
@@ -535,9 +810,13 @@ public sealed class RecordingAIReplyOrchestrator : IAIReplyOrchestrator
 {
     public int InvocationCount { get; private set; }
     public bool Fail { get; set; }
+    public bool Fallback { get; set; }
+    public bool ReturnNull { get; set; }
+    public TaskCompletionSource<bool>? DispatchEntered { get; set; }
+    public TaskCompletionSource<bool>? ContinueDispatch { get; set; }
     public AIReplyOrchestrationRequest? LastRequest { get; private set; }
 
-    public Task<AIReplyOrchestrationResult?> OrchestrateAsync(Guid companyId, AIReplyOrchestrationRequest request, CancellationToken cancellationToken)
+    public async Task<AIReplyOrchestrationResult?> OrchestrateAsync(Guid companyId, AIReplyOrchestrationRequest request, CancellationToken cancellationToken)
     {
         InvocationCount++;
         LastRequest = request;
@@ -546,14 +825,26 @@ public sealed class RecordingAIReplyOrchestrator : IAIReplyOrchestrator
             throw new InvalidOperationException("simulated provider failure");
         }
 
-        return Task.FromResult<AIReplyOrchestrationResult?>(new AIReplyOrchestrationResult
+        if (ReturnNull)
+        {
+            return null;
+        }
+
+        if (ContinueDispatch is { } continueDispatch)
+        {
+            DispatchEntered?.TrySetResult(true);
+            await continueDispatch.Task.WaitAsync(cancellationToken);
+        }
+
+        return new AIReplyOrchestrationResult
         {
             ConversationId = request.ConversationId,
             Operation = request.Operation,
             Output = "Generated test reply.",
             Suggestions = ["Generated suggestion one", "Generated suggestion two", "Generated suggestion three"],
             Provider = "Test",
+            FallbackUsed = Fallback,
             GeneratedAt = DateTimeOffset.UtcNow
-        });
+        };
     }
 }

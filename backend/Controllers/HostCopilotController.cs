@@ -36,6 +36,7 @@ public sealed class HostCopilotController(IHostCopilotWorkspaceService workspace
     [RequiresPermission("conversations.reply")]
     [ProducesResponseType(typeof(ApiResponse<HostCopilotDraftResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<HostCopilotDraftResponse>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ApiResponse<HostCopilotDraftResponse>>> GenerateDraft(
         Guid conversationId,
         [FromBody] HostCopilotDraftGenerateRequest request,

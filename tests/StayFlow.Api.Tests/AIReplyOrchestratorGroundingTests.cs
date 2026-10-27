@@ -143,6 +143,32 @@ public sealed class AIReplyOrchestratorGroundingTests
     }
 
     [Fact]
+    public async Task OrchestrateAsync_RetrievalDiagnosticsOnlyNeverInvokesPaidProviderOrTelemetry()
+    {
+        var selected = new ConversationContextKnowledgeItem(
+            "diagnostics-source", "Guest Wi-Fi", "Network: StayFlowGuest",
+            PropertyKnowledgeCategory.WiFi, DateTimeOffset.UtcNow, 10, true, ["wifi"], null);
+        var context = BuildContext([selected], [selected]);
+        var provider = new SpyDevelopmentProvider();
+        var telemetryStore = new CapturingTelemetryStore();
+        var result = await BuildOrchestrator(context, provider, [selected], telemetryStore: telemetryStore)
+            .OrchestrateAsync(Guid.NewGuid(), new AIReplyOrchestrationRequest
+            {
+                ConversationId = context.ConversationId,
+                Operation = AIReplyOperation.SuggestedHostReplies,
+                RetrievalDiagnosticsOnly = true
+            }, CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal("NotInvoked", result!.Provider);
+        Assert.NotNull(result.RetrievalDiagnostics);
+        Assert.Null(result.TokenUsage);
+        Assert.DoesNotContain(AIReplyOrchestrationStage.ProviderInvoked, result.CompletedStages);
+        Assert.Null(provider.LastRequest);
+        Assert.Empty(telemetryStore.Observations);
+    }
+
+    [Fact]
     public async Task OrchestrateAsync_ForwardsCommercialOuterIdentityAndProviderCallId()
     {
         var selected = new ConversationContextKnowledgeItem(

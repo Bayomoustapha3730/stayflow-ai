@@ -168,6 +168,313 @@ public sealed class SubscriptionEntitlementService(
             cancellationToken);
     }
 
+    public async Task<CopilotOperationExecutionStart> BeginCopilotOperationAsync(
+        Guid companyId,
+        Guid operationId,
+        Guid conversationId,
+        Guid actorUserId,
+        CopilotOperationType operationType,
+        string semanticRequestFingerprint,
+        CancellationToken cancellationToken)
+    {
+        if (operationId == Guid.Empty || conversationId == Guid.Empty || actorUserId == Guid.Empty)
+        {
+            throw new DomainValidationException("Copilot operation identity is required.", "copilot_operation_identity_required");
+        }
+
+        if (string.IsNullOrWhiteSpace(semanticRequestFingerprint) || semanticRequestFingerprint.Length != 64)
+        {
+            throw new DomainValidationException("Copilot semantic request fingerprint is invalid.", "copilot_operation_fingerprint_invalid");
+        }
+
+        if (!dbContext.Database.IsRelational())
+        {
+            try
+            {
+                var result = await BeginCopilotOperationCoreAsync(
+                    companyId, operationId, conversationId, actorUserId, operationType,
+                    semanticRequestFingerprint, cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                dbContext.ChangeTracker.Clear();
+                throw;
+            }
+        }
+
+        return await QuotaAdmissionRetryPolicy.ExecuteAsync(
+            async _ =>
+            {
+                await using var transaction = await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+                try
+                {
+                    var result = await BeginCopilotOperationCoreAsync(
+                        companyId, operationId, conversationId, actorUserId, operationType,
+                        semanticRequestFingerprint, cancellationToken);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    dbContext.ChangeTracker.Clear();
+                    throw;
+                }
+            },
+            static () => Task.CompletedTask,
+            IsRetryableQuotaRace,
+            cancellationToken);
+    }
+
+    public async Task<CopilotOperationExecutionStart?> FindCopilotOperationReplayAsync(
+        Guid companyId,
+        Guid operationId,
+        Guid conversationId,
+        Guid actorUserId,
+        CopilotOperationType operationType,
+        string semanticRequestFingerprint,
+        CancellationToken cancellationToken)
+    {
+        var operation = await dbContext.CopilotOperations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == operationId, cancellationToken);
+        if (operation is null)
+        {
+            return null;
+        }
+
+        if (operation.CompanyId != companyId
+            || operation.ConversationId != conversationId
+            || operation.ActorUserId != actorUserId
+            || operation.OperationType != operationType)
+        {
+            throw new ConflictException("Copilot operation identity is not valid for this request.", "copilot_operation_conflict");
+        }
+
+        if (operation.SemanticRequestFingerprint is null)
+        {
+            return new CopilotOperationExecutionStart(CopilotOperationExecutionDisposition.Indeterminate);
+        }
+
+        if (!string.Equals(operation.SemanticRequestFingerprint, semanticRequestFingerprint, StringComparison.Ordinal))
+        {
+            throw new ConflictException("This operation ID was already used for a different semantic request.", "copilot_operation_semantic_conflict");
+        }
+
+        return operation.Status switch
+        {
+            CopilotOperationStatus.Completed => new CopilotOperationExecutionStart(
+                CopilotOperationExecutionDisposition.Completed,
+                operation.BusinessResultJson),
+            CopilotOperationStatus.Failed => new CopilotOperationExecutionStart(
+                CopilotOperationExecutionDisposition.Failed,
+                FailureCode: operation.FailureCode,
+                FailureMessage: operation.FailureMessage),
+            CopilotOperationStatus.Pending or CopilotOperationStatus.InProgress =>
+                new CopilotOperationExecutionStart(CopilotOperationExecutionDisposition.InProgress),
+            CopilotOperationStatus.Indeterminate =>
+                new CopilotOperationExecutionStart(CopilotOperationExecutionDisposition.Indeterminate),
+            _ => throw new InvalidOperationException($"Unsupported Copilot operation status '{operation.Status}'.")
+        };
+    }
+
+    private async Task<CopilotOperationExecutionStart> BeginCopilotOperationCoreAsync(
+        Guid companyId,
+        Guid operationId,
+        Guid conversationId,
+        Guid actorUserId,
+        CopilotOperationType operationType,
+        string semanticRequestFingerprint,
+        CancellationToken cancellationToken)
+    {
+        var operation = await dbContext.CopilotOperations.FirstOrDefaultAsync(item => item.Id == operationId, cancellationToken);
+        if (operation is not null)
+        {
+            if (operation.CompanyId != companyId
+                || operation.ConversationId != conversationId
+                || operation.ActorUserId != actorUserId
+                || operation.OperationType != operationType)
+            {
+                throw new ConflictException("Copilot operation identity is not valid for this request.", "copilot_operation_conflict");
+            }
+
+            if (operation.SemanticRequestFingerprint is null)
+            {
+                operation.Status = CopilotOperationStatus.Indeterminate;
+                operation.FailureCode = "legacy_operation_requires_recovery";
+                return new CopilotOperationExecutionStart(CopilotOperationExecutionDisposition.Indeterminate);
+            }
+
+            if (!string.Equals(operation.SemanticRequestFingerprint, semanticRequestFingerprint, StringComparison.Ordinal))
+            {
+                throw new ConflictException("This operation ID was already used for a different semantic request.", "copilot_operation_semantic_conflict");
+            }
+
+            return operation.Status switch
+            {
+                CopilotOperationStatus.Completed => new CopilotOperationExecutionStart(
+                    CopilotOperationExecutionDisposition.Completed,
+                    operation.BusinessResultJson),
+                CopilotOperationStatus.Failed => new CopilotOperationExecutionStart(
+                    CopilotOperationExecutionDisposition.Failed,
+                    FailureCode: operation.FailureCode,
+                    FailureMessage: operation.FailureMessage),
+                CopilotOperationStatus.Pending => new CopilotOperationExecutionStart(CopilotOperationExecutionDisposition.InProgress),
+                CopilotOperationStatus.InProgress => new CopilotOperationExecutionStart(CopilotOperationExecutionDisposition.InProgress),
+                CopilotOperationStatus.Indeterminate => new CopilotOperationExecutionStart(CopilotOperationExecutionDisposition.Indeterminate),
+                _ => throw new InvalidOperationException($"Unsupported Copilot operation status '{operation.Status}'.")
+            };
+        }
+
+        await ConsumeQuotaCoreAsync(
+            companyId,
+            UsageMetric.AiRequests,
+            1,
+            $"ai-request:copilot-operation:{operationId:N}",
+            cancellationToken,
+            saveChanges: false);
+
+        operation = new CopilotOperation
+        {
+            Id = operationId,
+            CompanyId = companyId,
+            ConversationId = conversationId,
+            ActorUserId = actorUserId,
+            OperationType = operationType,
+            Status = CopilotOperationStatus.Pending,
+            SemanticRequestFingerprint = semanticRequestFingerprint
+        };
+        await dbContext.CopilotOperations.AddAsync(operation, cancellationToken);
+        operation.Status = CopilotOperationStatus.InProgress;
+        operation.DispatchStartedAt = DateTimeOffset.UtcNow;
+        return new CopilotOperationExecutionStart(CopilotOperationExecutionDisposition.DispatchOwned);
+    }
+
+    public async Task CompleteCopilotOperationAsync(
+        Guid companyId,
+        Guid operationId,
+        string businessResultJson,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(businessResultJson);
+        var completedAt = DateTimeOffset.UtcNow;
+
+        if (dbContext.Database.IsRelational())
+        {
+            var updated = await dbContext.CopilotOperations
+                .Where(item => item.Id == operationId
+                    && item.CompanyId == companyId
+                    && item.Status == CopilotOperationStatus.InProgress)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.Status, CopilotOperationStatus.Completed)
+                    .SetProperty(item => item.BusinessResultJson, businessResultJson)
+                    .SetProperty(item => item.FailureCode, (string?)null)
+                    .SetProperty(item => item.FailureMessage, (string?)null)
+                    .SetProperty(item => item.CompletedAt, completedAt)
+                    .SetProperty(item => item.UpdatedAt, completedAt), cancellationToken);
+            if (updated != 1)
+            {
+                throw new InvalidOperationException("Copilot operation could not be completed from its current state.");
+            }
+
+            return;
+        }
+
+        var operation = await dbContext.CopilotOperations.FirstOrDefaultAsync(item =>
+            item.Id == operationId && item.CompanyId == companyId, cancellationToken);
+        if (operation is null || operation.Status != CopilotOperationStatus.InProgress)
+        {
+            throw new InvalidOperationException("Copilot operation could not be completed from its current state.");
+        }
+
+        operation.Status = CopilotOperationStatus.Completed;
+        operation.BusinessResultJson = businessResultJson;
+        operation.FailureCode = null;
+        operation.FailureMessage = null;
+        operation.CompletedAt = completedAt;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task FailCopilotOperationAsync(
+        Guid companyId,
+        Guid operationId,
+        string failureCode,
+        string failureMessage,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(failureCode);
+        ArgumentException.ThrowIfNullOrWhiteSpace(failureMessage);
+        if (failureCode.Length > 80 || failureMessage.Length > 500)
+        {
+            throw new ArgumentOutOfRangeException(nameof(failureMessage), "Copilot failure representation exceeds its storage limits.");
+        }
+
+        await SetCopilotOperationTerminalStateAsync(
+            companyId, operationId, CopilotOperationStatus.Failed, failureCode, failureMessage, cancellationToken);
+    }
+
+    public async Task MarkCopilotOperationIndeterminateAsync(
+        Guid companyId,
+        Guid operationId,
+        CancellationToken cancellationToken)
+    {
+        await SetCopilotOperationTerminalStateAsync(
+            companyId,
+            operationId,
+            CopilotOperationStatus.Indeterminate,
+            null,
+            null,
+            cancellationToken);
+    }
+
+    private async Task SetCopilotOperationTerminalStateAsync(
+        Guid companyId,
+        Guid operationId,
+        CopilotOperationStatus status,
+        string? failureCode,
+        string? failureMessage,
+        CancellationToken cancellationToken)
+    {
+        var stateChangedAt = DateTimeOffset.UtcNow;
+        if (dbContext.Database.IsRelational())
+        {
+            var updated = await dbContext.CopilotOperations
+                .Where(item => item.Id == operationId
+                    && item.CompanyId == companyId
+                    && item.Status == CopilotOperationStatus.InProgress)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.Status, status)
+                    .SetProperty(item => item.FailureCode, failureCode)
+                    .SetProperty(item => item.FailureMessage, failureMessage)
+                    .SetProperty(item => item.BusinessResultJson, (string?)null)
+                    .SetProperty(item => item.CompletedAt, (DateTimeOffset?)null)
+                    .SetProperty(item => item.UpdatedAt, stateChangedAt), cancellationToken);
+            if (updated != 1)
+            {
+                throw new InvalidOperationException("Copilot operation could not be transitioned from its current state.");
+            }
+
+            return;
+        }
+
+        var operation = await dbContext.CopilotOperations.FirstOrDefaultAsync(item =>
+            item.Id == operationId && item.CompanyId == companyId, cancellationToken);
+        if (operation is null || operation.Status != CopilotOperationStatus.InProgress)
+        {
+            throw new InvalidOperationException("Copilot operation could not be transitioned from its current state.");
+        }
+
+        operation.Status = status;
+        operation.FailureCode = failureCode;
+        operation.FailureMessage = failureMessage;
+        operation.BusinessResultJson = null;
+        operation.CompletedAt = null;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task MarkCopilotOperationCompletedAsync(Guid companyId, Guid operationId, CancellationToken cancellationToken)
     {
         var operation = await dbContext.CopilotOperations.FirstOrDefaultAsync(item => item.Id == operationId && item.CompanyId == companyId, cancellationToken);
@@ -436,6 +743,8 @@ public sealed class SubscriptionEntitlementService(
 
             return postgresException.SqlState == PostgresErrorCodes.UniqueViolation
                 && postgresException.ConstraintName is
+                    "PK_CopilotOperations"
+                    or
                     "IX_UsageOperations_CompanyId_Metric_PeriodStartUtc_IdempotencyKey"
                     or "IX_UsageRecords_CompanyId_Metric_PeriodStartUtc";
         }

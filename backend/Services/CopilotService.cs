@@ -4,6 +4,8 @@ using StayFlow.Api.DTOs.Copilot;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services.AI.Context;
 using StayFlow.Api.Services.AI.Orchestration;
+using System.Text.Json;
+using StayFlow.Api.Exceptions;
 
 namespace StayFlow.Api.Services;
 
@@ -63,13 +65,18 @@ public sealed class CopilotService(
         }
 
         await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.HostCopilot, cancellationToken);
-        await _subscriptionEntitlementService.AdmitCopilotOperationAsync(
+        var execution = await _subscriptionEntitlementService.BeginCopilotOperationAsync(
             companyId,
             operationId,
             conversationId,
             currentTenantContext.UserId ?? Guid.Empty,
             CopilotOperationType.CopilotSuggestion,
+            CopilotOperationFingerprint.Suggestions(conversationId, tone),
             cancellationToken);
+        if (execution.Disposition != CopilotOperationExecutionDisposition.DispatchOwned)
+        {
+            return Replay<ConversationCopilotSuggestionsResponse>(execution);
+        }
 
         AIReplyOrchestrationResult? result;
         try
@@ -84,27 +91,25 @@ public sealed class CopilotService(
                 OuterOperationType = OuterOperationType.CopilotOperation,
                 OuterOperationId = operationId
             }, cancellationToken);
-            if (result is null || result.FallbackUsed)
-            {
-                await _subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, operationId, cancellationToken);
-            }
-            else
-            {
-                await _subscriptionEntitlementService.MarkCopilotOperationCompletedAsync(companyId, operationId, cancellationToken);
-            }
         }
-        catch
+        catch (Exception failure)
         {
-            await _subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, operationId, cancellationToken);
+            await MarkIndeterminateAfterFailureAsync(companyId, operationId, failure);
             throw;
         }
 
-        if (result is null)
+        if (result is null || result.Suggestions.Count == 0)
         {
-            return ApiResponse<ConversationCopilotSuggestionsResponse>.Fail("Conversation was not found.");
+            var failureCode = result is null ? "conversation_not_found" : "copilot_result_unusable";
+            var failureMessage = result is null
+                ? "Conversation was not found."
+                : "Copilot could not produce a usable result.";
+            await _subscriptionEntitlementService.FailCopilotOperationAsync(
+                companyId, operationId, failureCode, failureMessage, cancellationToken);
+            return ApiResponse<ConversationCopilotSuggestionsResponse>.Fail(failureMessage);
         }
 
-        return ApiResponse<ConversationCopilotSuggestionsResponse>.Ok(new ConversationCopilotSuggestionsResponse
+        var response = new ConversationCopilotSuggestionsResponse
         {
             ConversationId = conversationId,
             SuggestedReplies = result.Suggestions.Take(3).ToList(),
@@ -119,7 +124,19 @@ public sealed class CopilotService(
             FallbackUsed = result.FallbackUsed,
             ContextTruncated = result.ContextTruncated,
             GeneratedAt = result.GeneratedAt
-        });
+        };
+        try
+        {
+            await _subscriptionEntitlementService.CompleteCopilotOperationAsync(
+                companyId, operationId, JsonSerializer.Serialize(response), cancellationToken);
+        }
+        catch (Exception failure)
+        {
+            await MarkIndeterminateAfterFailureAsync(companyId, operationId, failure);
+            throw;
+        }
+
+        return ApiResponse<ConversationCopilotSuggestionsResponse>.Ok(response);
     }
 
     public async Task<ApiResponse<CopilotSuggestReplyResponse>> SuggestHostReplyAsync(
@@ -133,13 +150,18 @@ public sealed class CopilotService(
         }
 
         await _subscriptionEntitlementService.EnsureFeatureEnabledAsync(companyId, FeatureKeys.HostCopilot, cancellationToken);
-        await _subscriptionEntitlementService.AdmitCopilotOperationAsync(
+        var execution = await _subscriptionEntitlementService.BeginCopilotOperationAsync(
             companyId,
             request.OperationId,
             conversationId,
             currentTenantContext.UserId ?? Guid.Empty,
             CopilotOperationType.CopilotGeneratedReply,
+            CopilotOperationFingerprint.GeneratedReply(conversationId, request.Tone, request.HostDraft, request.Guidance),
             cancellationToken);
+        if (execution.Disposition != CopilotOperationExecutionDisposition.DispatchOwned)
+        {
+            return Replay<CopilotSuggestReplyResponse>(execution);
+        }
 
         AIReplyOrchestrationResult? result;
         try
@@ -155,27 +177,25 @@ public sealed class CopilotService(
                 OuterOperationType = OuterOperationType.CopilotOperation,
                 OuterOperationId = request.OperationId
             }, cancellationToken);
-            if (result is null || result.FallbackUsed)
-            {
-                await _subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
-            }
-            else
-            {
-                await _subscriptionEntitlementService.MarkCopilotOperationCompletedAsync(companyId, request.OperationId, cancellationToken);
-            }
         }
-        catch
+        catch (Exception failure)
         {
-            await _subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
+            await MarkIndeterminateAfterFailureAsync(companyId, request.OperationId, failure);
             throw;
         }
 
-        if (result is null)
+        if (result is null || string.IsNullOrWhiteSpace(result.Output))
         {
-            return ApiResponse<CopilotSuggestReplyResponse>.Fail("Conversation was not found.");
+            var failureCode = result is null ? "conversation_not_found" : "copilot_result_unusable";
+            var failureMessage = result is null
+                ? "Conversation was not found."
+                : "Copilot could not produce a usable result.";
+            await _subscriptionEntitlementService.FailCopilotOperationAsync(
+                companyId, request.OperationId, failureCode, failureMessage, cancellationToken);
+            return ApiResponse<CopilotSuggestReplyResponse>.Fail(failureMessage);
         }
 
-        return ApiResponse<CopilotSuggestReplyResponse>.Ok(new CopilotSuggestReplyResponse
+        var response = new CopilotSuggestReplyResponse
         {
             ConversationId = conversationId,
             SuggestedReply = result.Output ?? string.Empty,
@@ -202,7 +222,19 @@ public sealed class CopilotService(
             OrchestrationWarnings = result.Warnings.Select(MapOrchestrationWarning).ToList(),
             ContextTruncated = result.ContextTruncated,
             GeneratedAt = result.GeneratedAt
-        });
+        };
+        try
+        {
+            await _subscriptionEntitlementService.CompleteCopilotOperationAsync(
+                companyId, request.OperationId, JsonSerializer.Serialize(response), cancellationToken);
+        }
+        catch (Exception failure)
+        {
+            await MarkIndeterminateAfterFailureAsync(companyId, request.OperationId, failure);
+            throw;
+        }
+
+        return ApiResponse<CopilotSuggestReplyResponse>.Ok(response);
     }
 
     public async Task<ApiResponse<ConversationRetrievalDiagnosticsResponse>> GetRetrievalDiagnosticsAsync(
@@ -221,7 +253,8 @@ public sealed class CopilotService(
             ConversationId = conversationId,
             Operation = AIReplyOperation.SuggestedHostReplies,
             RequestedSuggestionCount = 3,
-            CorrelationId = currentTenantContext.CorrelationId
+            CorrelationId = currentTenantContext.CorrelationId,
+            RetrievalDiagnosticsOnly = true
         }, cancellationToken);
 
         if (result is null)
@@ -258,6 +291,38 @@ public sealed class CopilotService(
             DurationMilliseconds = result.DurationMilliseconds,
             GeneratedAt = result.GeneratedAt
         });
+    }
+
+    private static ApiResponse<T> Replay<T>(CopilotOperationExecutionStart execution)
+    {
+        return execution.Disposition switch
+        {
+            CopilotOperationExecutionDisposition.Completed when !string.IsNullOrWhiteSpace(execution.BusinessResultJson) =>
+                ApiResponse<T>.Ok(JsonSerializer.Deserialize<T>(execution.BusinessResultJson)
+                    ?? throw new InvalidOperationException("Persisted Copilot result could not be deserialized.")),
+            CopilotOperationExecutionDisposition.Completed =>
+                throw new InvalidOperationException("Completed Copilot operation has no persisted result."),
+            CopilotOperationExecutionDisposition.Failed =>
+                ApiResponse<T>.Fail(execution.FailureMessage ?? "Copilot could not produce a usable result."),
+            CopilotOperationExecutionDisposition.InProgress =>
+                throw new ConflictException("This Copilot operation is still in progress.", "copilot_operation_in_progress"),
+            CopilotOperationExecutionDisposition.Indeterminate =>
+                throw new ConflictException("This Copilot operation requires recovery and will not be redispatched.", "copilot_operation_indeterminate"),
+            _ => throw new InvalidOperationException("Copilot dispatch ownership was expected.")
+        };
+    }
+
+    private async Task MarkIndeterminateAfterFailureAsync(Guid companyId, Guid operationId, Exception failure)
+    {
+        try
+        {
+            await _subscriptionEntitlementService.MarkCopilotOperationIndeterminateAsync(
+                companyId, operationId, CancellationToken.None);
+        }
+        catch (Exception persistenceFailure)
+        {
+            throw new AggregateException("Copilot execution failed and its recovery state could not be persisted.", failure, persistenceFailure);
+        }
     }
 
     private bool TryGetCompanyId(out Guid companyId, out string error)

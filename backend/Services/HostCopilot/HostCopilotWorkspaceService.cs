@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using StayFlow.Api.Exceptions;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.Data;
@@ -215,6 +217,20 @@ public sealed class HostCopilotWorkspaceService(
             return ApiResponse<HostCopilotDraftResponse>.Fail("Conversation was not found.");
         }
 
+        var fingerprint = CopilotOperationFingerprint.WorkspaceDraft(conversationId, request.Tone, request.HostInstruction);
+        var replay = await subscriptionEntitlementService.FindCopilotOperationReplayAsync(
+            companyId,
+            request.OperationId,
+            conversationId,
+            tenantContext.UserId ?? Guid.Empty,
+            CopilotOperationType.WorkspaceDraft,
+            fingerprint,
+            cancellationToken);
+        if (replay is not null)
+        {
+            return ReplayDraft(replay);
+        }
+
         var latestGuestMessage = await dbContext.ConversationMessages.AsNoTracking()
             .Where(message => message.CompanyId == companyId
                 && message.ConversationId == conversationId
@@ -229,13 +245,18 @@ public sealed class HostCopilotWorkspaceService(
             return ApiResponse<HostCopilotDraftResponse>.Fail("No guest message is available for draft generation.");
         }
 
-        await subscriptionEntitlementService.AdmitCopilotOperationAsync(
+        var execution = await subscriptionEntitlementService.BeginCopilotOperationAsync(
             companyId,
             request.OperationId,
             conversationId,
             tenantContext.UserId ?? Guid.Empty,
             CopilotOperationType.WorkspaceDraft,
+            fingerprint,
             cancellationToken);
+        if (execution.Disposition != CopilotOperationExecutionDisposition.DispatchOwned)
+        {
+            return ReplayDraft(execution);
+        }
 
         string draft;
         var deterministicFallback = false;
@@ -258,25 +279,17 @@ public sealed class HostCopilotWorkspaceService(
                     OuterOperationId = request.OperationId
                 }, cancellationToken);
             }
-            catch
+            catch (Exception failure)
             {
-                await subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
+                await MarkIndeterminateAfterFailureAsync(companyId, request.OperationId, failure);
                 throw;
             }
 
             if (orchestrated is null)
             {
-                await subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
+                await subscriptionEntitlementService.FailCopilotOperationAsync(
+                    companyId, request.OperationId, "conversation_not_found", "Conversation was not found.", cancellationToken);
                 return ApiResponse<HostCopilotDraftResponse>.Fail("Conversation was not found.");
-            }
-
-            if (orchestrated.FallbackUsed)
-            {
-                await subscriptionEntitlementService.MarkCopilotOperationFailedAsync(companyId, request.OperationId, cancellationToken);
-            }
-            else
-            {
-                await subscriptionEntitlementService.MarkCopilotOperationCompletedAsync(companyId, request.OperationId, cancellationToken);
             }
 
             deterministicFallback = orchestrated.FallbackUsed || string.IsNullOrWhiteSpace(orchestrated.Output);
@@ -292,7 +305,6 @@ public sealed class HostCopilotWorkspaceService(
         }
         else
         {
-            await subscriptionEntitlementService.MarkCopilotOperationCompletedAsync(companyId, request.OperationId, cancellationToken);
             deterministicFallback = true;
             mode = "deterministic";
             rationale = "LLM wording is disabled by configuration. Deterministic wording was used.";
@@ -300,7 +312,7 @@ public sealed class HostCopilotWorkspaceService(
         }
 
         var validation = ValidateDraftInternal(draft);
-        return ApiResponse<HostCopilotDraftResponse>.Ok(new HostCopilotDraftResponse
+        var response = new HostCopilotDraftResponse
         {
             ConversationId = conversationId,
             Draft = draft,
@@ -308,7 +320,51 @@ public sealed class HostCopilotWorkspaceService(
             GenerationMode = mode,
             Rationale = rationale,
             Validation = validation
-        });
+        };
+        try
+        {
+            await subscriptionEntitlementService.CompleteCopilotOperationAsync(
+                companyId, request.OperationId, JsonSerializer.Serialize(response), cancellationToken);
+        }
+        catch (Exception failure)
+        {
+            await MarkIndeterminateAfterFailureAsync(companyId, request.OperationId, failure);
+            throw;
+        }
+
+        return ApiResponse<HostCopilotDraftResponse>.Ok(response);
+    }
+
+    private static ApiResponse<HostCopilotDraftResponse> ReplayDraft(CopilotOperationExecutionStart execution)
+    {
+        return execution.Disposition switch
+        {
+            CopilotOperationExecutionDisposition.Completed when !string.IsNullOrWhiteSpace(execution.BusinessResultJson) =>
+                ApiResponse<HostCopilotDraftResponse>.Ok(JsonSerializer.Deserialize<HostCopilotDraftResponse>(execution.BusinessResultJson)
+                    ?? throw new InvalidOperationException("Persisted Copilot result could not be deserialized.")),
+            CopilotOperationExecutionDisposition.Completed =>
+                throw new InvalidOperationException("Completed Copilot operation has no persisted result."),
+            CopilotOperationExecutionDisposition.Failed =>
+                ApiResponse<HostCopilotDraftResponse>.Fail(execution.FailureMessage ?? "Copilot could not produce a usable result."),
+            CopilotOperationExecutionDisposition.InProgress =>
+                throw new ConflictException("This Copilot operation is still in progress.", "copilot_operation_in_progress"),
+            CopilotOperationExecutionDisposition.Indeterminate =>
+                throw new ConflictException("This Copilot operation requires recovery and will not be redispatched.", "copilot_operation_indeterminate"),
+            _ => throw new InvalidOperationException("Copilot dispatch ownership was expected.")
+        };
+    }
+
+    private async Task MarkIndeterminateAfterFailureAsync(Guid companyId, Guid operationId, Exception failure)
+    {
+        try
+        {
+            await subscriptionEntitlementService.MarkCopilotOperationIndeterminateAsync(
+                companyId, operationId, CancellationToken.None);
+        }
+        catch (Exception persistenceFailure)
+        {
+            throw new AggregateException("Copilot execution failed and its recovery state could not be persisted.", failure, persistenceFailure);
+        }
     }
 
     public Task<ApiResponse<HostCopilotDraftValidationResponse>> ValidateDraftAsync(Guid conversationId, HostCopilotDraftValidateRequest request, CancellationToken cancellationToken)

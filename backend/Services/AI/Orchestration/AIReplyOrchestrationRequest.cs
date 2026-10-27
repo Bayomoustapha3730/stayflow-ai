@@ -13,4 +13,5 @@ public sealed class AIReplyOrchestrationRequest
     public string? CorrelationId { get; init; }
     public OuterOperationType? OuterOperationType { get; init; }
     public Guid? OuterOperationId { get; init; }
+    public bool RetrievalDiagnosticsOnly { get; init; }
 }
