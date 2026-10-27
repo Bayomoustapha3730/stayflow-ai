@@ -24,7 +24,8 @@ public sealed class OpenAIProviderResponse
 {
     public string? ResponseText { get; init; }
     public string? RequestId { get; init; }
-    public string? ModelName { get; init; }
+    public string? ResolvedModel { get; init; }
+    public string? ModelName => ResolvedModel;
     public AiTokenUsage? TokenUsage { get; init; }
     public bool IsIncomplete { get; init; }
     public bool IsRefusal { get; init; }

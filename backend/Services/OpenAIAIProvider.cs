@@ -33,17 +33,17 @@ public sealed class OpenAIAIProvider(
 
             if (providerResponse.IsIncomplete)
             {
-                return Failure(request, AIProviderOutcome.Failed, OpenAIProviderFailureCategories.UnexpectedResponse, openAIOptions.Model, providerResponse.RequestId, stopwatch.ElapsedMilliseconds, providerResponse.TokenUsage);
+                return Failure(request, AIProviderOutcome.Failed, OpenAIProviderFailureCategories.UnexpectedResponse, openAIOptions.Model, providerResponse.ResolvedModel, providerResponse.RequestId, stopwatch.ElapsedMilliseconds, providerResponse.TokenUsage);
             }
 
             if (providerResponse.IsRefusal)
             {
-                return Failure(request, AIProviderOutcome.Failed, OpenAIProviderFailureCategories.UnexpectedResponse, openAIOptions.Model, providerResponse.RequestId, stopwatch.ElapsedMilliseconds, providerResponse.TokenUsage);
+                return Failure(request, AIProviderOutcome.Failed, OpenAIProviderFailureCategories.UnexpectedResponse, openAIOptions.Model, providerResponse.ResolvedModel, providerResponse.RequestId, stopwatch.ElapsedMilliseconds, providerResponse.TokenUsage);
             }
 
             if (string.IsNullOrWhiteSpace(providerResponse.ResponseText))
             {
-                return Failure(request, AIProviderOutcome.Failed, OpenAIProviderFailureCategories.EmptyResponse, openAIOptions.Model, providerResponse.RequestId, stopwatch.ElapsedMilliseconds, providerResponse.TokenUsage);
+                return Failure(request, AIProviderOutcome.Failed, OpenAIProviderFailureCategories.EmptyResponse, openAIOptions.Model, providerResponse.ResolvedModel, providerResponse.RequestId, stopwatch.ElapsedMilliseconds, providerResponse.TokenUsage);
             }
 
             logger.LogInformation(
@@ -55,29 +55,30 @@ public sealed class OpenAIAIProvider(
             return AIProviderResult.Success(
                 providerResponse.ResponseText,
                 ProviderName,
-                providerResponse.ModelName ?? openAIOptions.Model,
+                providerResponse.ResolvedModel,
                 providerResponse.RequestId,
                 stopwatch.ElapsedMilliseconds,
                 providerResponse.TokenUsage,
                 request.ProviderCallId,
                 request.OuterOperationType,
-                request.OuterOperationId);
+                request.OuterOperationId,
+                openAIOptions.Model);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             stopwatch.Stop();
-            return Failure(request, AIProviderOutcome.Unavailable, OpenAIProviderFailureCategories.Cancelled, openAIOptions.Model, null, stopwatch.ElapsedMilliseconds);
+            return Failure(request, AIProviderOutcome.Unavailable, OpenAIProviderFailureCategories.Cancelled, openAIOptions.Model, null, null, stopwatch.ElapsedMilliseconds);
         }
         catch (OperationCanceledException)
         {
             stopwatch.Stop();
-            return Failure(request, AIProviderOutcome.Unavailable, OpenAIProviderFailureCategories.Timeout, openAIOptions.Model, null, stopwatch.ElapsedMilliseconds);
+            return Failure(request, AIProviderOutcome.Unavailable, OpenAIProviderFailureCategories.Timeout, openAIOptions.Model, null, null, stopwatch.ElapsedMilliseconds);
         }
         catch (TimeoutException exception)
         {
             stopwatch.Stop();
             logger.LogWarning(exception, "OpenAI provider timed out. CorrelationId={CorrelationId} Model={Model}", request.CorrelationId, openAIOptions.Model);
-            return Failure(request, AIProviderOutcome.Unavailable, OpenAIProviderFailureCategories.Timeout, openAIOptions.Model, null, stopwatch.ElapsedMilliseconds);
+            return Failure(request, AIProviderOutcome.Unavailable, OpenAIProviderFailureCategories.Timeout, openAIOptions.Model, null, null, stopwatch.ElapsedMilliseconds);
         }
         catch (OpenAIProviderException exception)
         {
@@ -89,19 +90,19 @@ public sealed class OpenAIAIProvider(
                 request.CorrelationId,
                 openAIOptions.Model,
                 exception.FailureCategory);
-            return Failure(request, outcome, exception.FailureCategory, openAIOptions.Model, null, stopwatch.ElapsedMilliseconds);
+            return Failure(request, outcome, exception.FailureCategory, openAIOptions.Model, null, null, stopwatch.ElapsedMilliseconds);
         }
         catch (HttpRequestException exception)
         {
             stopwatch.Stop();
             logger.LogWarning(exception, "OpenAI provider network failure. CorrelationId={CorrelationId} Model={Model}", request.CorrelationId, openAIOptions.Model);
-            return Failure(request, AIProviderOutcome.Unavailable, OpenAIProviderFailureCategories.Network, openAIOptions.Model, null, stopwatch.ElapsedMilliseconds);
+            return Failure(request, AIProviderOutcome.Unavailable, OpenAIProviderFailureCategories.Network, openAIOptions.Model, null, null, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception exception)
         {
             stopwatch.Stop();
             logger.LogError(exception, "OpenAI provider failed unexpectedly. CorrelationId={CorrelationId} Model={Model}", request.CorrelationId, openAIOptions.Model);
-            return Failure(request, AIProviderOutcome.Failed, OpenAIProviderFailureCategories.Unknown, openAIOptions.Model, null, stopwatch.ElapsedMilliseconds);
+            return Failure(request, AIProviderOutcome.Failed, OpenAIProviderFailureCategories.Unknown, openAIOptions.Model, null, null, stopwatch.ElapsedMilliseconds);
         }
     }
 
@@ -138,7 +139,8 @@ public sealed class OpenAIAIProvider(
         AIProviderRequest request,
         AIProviderOutcome outcome,
         string failureCategory,
-        string? modelName,
+        string? requestedModel,
+        string? resolvedModel,
         string? requestId,
         long durationMs,
         AiTokenUsage? tokenUsage = null)
@@ -147,7 +149,9 @@ public sealed class OpenAIAIProvider(
         {
             Outcome = outcome,
             ProviderName = ProviderName,
-            ModelName = modelName,
+            RequestedModel = requestedModel,
+            ResolvedModel = resolvedModel,
+            ModelName = resolvedModel ?? requestedModel,
             RequestId = requestId,
             DurationMs = durationMs,
             TokenUsage = tokenUsage,

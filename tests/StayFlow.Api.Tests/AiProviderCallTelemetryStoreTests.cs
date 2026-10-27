@@ -1,17 +1,144 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Data.Sqlite;
 using Npgsql;
 using StayFlow.Api.Data;
 using StayFlow.Api.Data.Configurations;
 using StayFlow.Api.DTOs.AIProvider;
 using StayFlow.Api.Models;
+using StayFlow.Api.Services;
 using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Tests;
 
 public sealed class AiProviderCallTelemetryStoreTests
 {
+    [Fact]
+    public void Sprint20ProviderIdentityMigration_BackfillsHistoricalRowsWithoutFutureLifecycleDefault()
+    {
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseNpgsql("Host=localhost;Database=migration-script-only")
+            .Options;
+        using var context = new ApplicationDbContext(options);
+        var script = context.GetService<IMigrator>().GenerateScript(
+            "20261027041407_MakeCopilotOperationsReplaySafe",
+            "20261027165315_Sprint20ProviderIdentityDurableDispatch");
+
+        Assert.Contains("DEFAULT 'LegacyObserved'", script, StringComparison.Ordinal);
+        Assert.Contains("ALTER COLUMN \"LifecycleState\" DROP DEFAULT", script, StringComparison.Ordinal);
+        Assert.Contains("RENAME COLUMN \"Model\" TO \"RequestedModel\"", script, StringComparison.Ordinal);
+        Assert.Contains("ADD \"ResolvedModel\" character varying(120)", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("ADD \"ResolvedModel\" character varying(120) NOT NULL", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("DEFAULT 'Observed'", script, StringComparison.Ordinal);
+
+        var lifecycleProperty = context.Model.FindEntityType(typeof(AiProviderCallTelemetry))!
+            .FindProperty(nameof(AiProviderCallTelemetry.LifecycleState))!;
+        Assert.Null(lifecycleProperty.FindAnnotation(RelationalAnnotationNames.DefaultValue));
+    }
+
+    [Fact]
+    public async Task PrepareAsync_CreatesPreparedRecordAndClaimsDispatchOnlyOnce()
+    {
+        var (context, store, companyId) = await CreateStoreAsync();
+        await using (context)
+        {
+            var callId = ProviderCallId.New();
+            var startedAt = DateTimeOffset.UtcNow;
+            await store.PrepareAsync(
+                new AiProviderCallPreparation(callId, companyId, null, null, "OpenAI", "requested-model"),
+                CancellationToken.None);
+
+            var prepared = await ReadCallAsync(context, callId);
+            Assert.Equal(AiProviderCallLifecycleState.Prepared, prepared.LifecycleState);
+            Assert.Equal("requested-model", prepared.RequestedModel);
+            Assert.Null(prepared.ResolvedModel);
+            Assert.Null(prepared.Outcome);
+            Assert.False(prepared.UsageKnown);
+
+            Assert.True(await store.TryStartDispatchAsync(callId, companyId, startedAt, CancellationToken.None));
+            Assert.False(await store.TryStartDispatchAsync(callId, companyId, startedAt, CancellationToken.None));
+
+            context.ChangeTracker.Clear();
+            var dispatched = await ReadCallAsync(context, callId);
+            Assert.Equal(AiProviderCallLifecycleState.DispatchStarted, dispatched.LifecycleState);
+            Assert.Equal(startedAt, dispatched.DispatchStartedAt);
+        }
+    }
+
+    [Fact]
+    public async Task RecordIndeterminateAsync_PersistsFailureCategoryAfterDispatchClaim()
+    {
+        var (context, store, companyId) = await CreateStoreAsync();
+        await using (context)
+        {
+            var callId = ProviderCallId.New();
+            var completedAt = DateTimeOffset.UtcNow;
+            await store.PrepareAsync(
+                new AiProviderCallPreparation(callId, companyId, null, null, "OpenAI", "requested-model"),
+                CancellationToken.None);
+            Assert.True(await store.TryStartDispatchAsync(callId, companyId, completedAt, CancellationToken.None));
+
+            await store.RecordIndeterminateAsync(
+                new AiProviderCallIndeterminateObservation(
+                    callId,
+                    companyId,
+                    OpenAIProviderFailureCategories.Network,
+                    completedAt),
+                CancellationToken.None);
+
+            var saved = await ReadCallAsync(context, callId);
+            Assert.Equal(AiProviderCallLifecycleState.Indeterminate, saved.LifecycleState);
+            Assert.Equal(OpenAIProviderFailureCategories.Network, saved.FailureCategory);
+            Assert.Equal(completedAt, saved.CompletedAt);
+            Assert.Null(saved.Outcome);
+        }
+    }
+
+    [Fact]
+    public async Task RecordAsync_PreparedCallBecomesObservedAndRetainsProviderIdentity()
+    {
+        var (context, store, companyId) = await CreateStoreAsync();
+        await using (context)
+        {
+            var callId = ProviderCallId.New();
+            var dispatchStartedAt = DateTimeOffset.UtcNow;
+            var completedAt = dispatchStartedAt.AddSeconds(1);
+            await store.PrepareAsync(
+                new AiProviderCallPreparation(callId, companyId, null, null, "OpenAI", "requested-model"),
+                CancellationToken.None);
+            Assert.True(await store.TryStartDispatchAsync(callId, companyId, dispatchStartedAt, CancellationToken.None));
+
+            await store.RecordAsync(
+                new AiProviderCallObservation(
+                    callId,
+                    companyId,
+                    null,
+                    null,
+                    "OpenAI",
+                    "requested-model",
+                    new AiTokenUsage(2, 1, 3),
+                    AIProviderOutcome.Success,
+                    "resolved-model",
+                    "provider-request-id",
+                    LifecycleState: AiProviderCallLifecycleState.Observed,
+                    CompletedAt: completedAt),
+                CancellationToken.None);
+
+            context.ChangeTracker.Clear();
+            var saved = await ReadCallAsync(context, callId);
+            Assert.Equal(AiProviderCallLifecycleState.Observed, saved.LifecycleState);
+            Assert.Equal("requested-model", saved.RequestedModel);
+            Assert.Equal("resolved-model", saved.ResolvedModel);
+            Assert.Equal("provider-request-id", saved.ProviderRequestId);
+            Assert.Equal(dispatchStartedAt, saved.DispatchStartedAt);
+            Assert.Equal(completedAt, saved.CompletedAt);
+            Assert.Equal(AIProviderOutcome.Success, saved.Outcome);
+        }
+    }
+
     [Fact]
     public async Task RecordAsync_FirstUnknownObservationPersistsNullTokenCounts()
     {
@@ -268,7 +395,7 @@ public sealed class AiProviderCallTelemetryStoreTests
                 CancellationToken.None));
 
             var saved = await ReadCallAsync(context, callId);
-            Assert.Equal("model-a", saved.Model);
+            Assert.Equal("model-a", saved.RequestedModel);
             Assert.Equal(1, await context.AiProviderCallTelemetries.CountAsync());
         }
     }
@@ -624,7 +751,7 @@ public sealed class AiProviderCallTelemetryStoreTests
                         .ChangeTracker.Entries<AiProviderCallTelemetry>().Single().Entity).ProviderCallId,
                     CompanyId = companyId,
                     Provider = "TestProvider",
-                    Model = "test-model",
+                    RequestedModel = "test-model",
                     UsageKnown = false,
                     Outcome = AIProviderOutcome.Success
                 });

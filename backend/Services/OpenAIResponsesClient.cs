@@ -43,7 +43,7 @@ public sealed class OpenAIResponsesClient : IOpenAIResponsesClient
             {
                 ResponseText = response.GetOutputText(),
                 RequestId = response.Id,
-                ModelName = request.Model,
+                ResolvedModel = response.Model,
                 TokenUsage = MapTokenUsage(response.Usage),
                 IsIncomplete = status.Contains("Incomplete", StringComparison.OrdinalIgnoreCase),
                 IsRefusal = status.Contains("Refusal", StringComparison.OrdinalIgnoreCase)

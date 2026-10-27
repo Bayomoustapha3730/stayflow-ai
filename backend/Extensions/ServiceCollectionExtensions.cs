@@ -355,10 +355,22 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<Services.IOpenAIResponsesClient, Services.OpenAIResponsesClient>();
         services.AddScoped<Services.IAIProvider>(serviceProvider =>
         {
-            var provider = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.AIProviderOptions>>().Value.Provider;
-            return provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase)
-                ? serviceProvider.GetRequiredService<Services.OpenAIAIProvider>()
+            var providerOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.AIProviderOptions>>().Value;
+            var isOpenAI = providerOptions.Provider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase);
+            var innerProvider = isOpenAI
+                ? (Services.IAIProvider)serviceProvider.GetRequiredService<Services.OpenAIAIProvider>()
                 : serviceProvider.GetRequiredService<Services.DevelopmentAIProvider>();
+            var requestedModel = isOpenAI
+                ? serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.OpenAIOptions>>().Value.Model
+                : null;
+
+            return new Services.AccountingAIProvider(
+                innerProvider,
+                providerOptions.Provider,
+                requestedModel,
+                serviceProvider.GetRequiredService<Services.AI.Orchestration.IAiProviderCallTelemetryStore>(),
+                serviceProvider.GetRequiredService<TimeProvider>(),
+                serviceProvider.GetRequiredService<ILogger<Services.AccountingAIProvider>>());
         });
         services.AddScoped<Services.IAIOrchestrator, Services.AIOrchestrator>();
         services.AddScoped<Services.AI.Orchestration.IAiProviderCallTelemetryStore, Services.AI.Orchestration.AiProviderCallTelemetryStore>();

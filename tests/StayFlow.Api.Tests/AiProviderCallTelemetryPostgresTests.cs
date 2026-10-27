@@ -83,6 +83,30 @@ public sealed class AiProviderCallTelemetryPostgresTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task TryStartDispatchAsync_ConcurrentClaimsAllowOnlyOnePhysicalDispatch()
+    {
+        var companyId = await SeedCompanyAsync();
+        var callId = ProviderCallId.New();
+        var store = new AiProviderCallTelemetryStore(dbOptions);
+        await store.PrepareAsync(
+            new AiProviderCallPreparation(callId, companyId, null, null, "OpenAI", "requested-model"),
+            CancellationToken.None);
+        var dispatchStartedAt = DateTimeOffset.UtcNow;
+
+        var claims = await Task.WhenAll(
+            new AiProviderCallTelemetryStore(dbOptions).TryStartDispatchAsync(
+                callId, companyId, dispatchStartedAt, CancellationToken.None),
+            new AiProviderCallTelemetryStore(dbOptions).TryStartDispatchAsync(
+                callId, companyId, dispatchStartedAt, CancellationToken.None));
+
+        Assert.Single(claims, claimed => claimed);
+        await using var verificationContext = new ApplicationDbContext(dbOptions);
+        var saved = await verificationContext.AiProviderCallTelemetries.SingleAsync();
+        Assert.Equal(AiProviderCallLifecycleState.DispatchStarted, saved.LifecycleState);
+        Assert.Equal(dispatchStartedAt, saved.DispatchStartedAt);
+    }
+
+    [Fact]
     public async Task RecordAsync_ConcurrentUnknownAndKnownReplayKeepsKnownUsage()
     {
         var companyId = await SeedCompanyAsync();
@@ -248,7 +272,7 @@ public sealed class AiProviderCallTelemetryPostgresTests : IAsyncLifetime
                     ProviderCallId = call.ProviderCallId,
                     CompanyId = companyId,
                     Provider = call.Provider,
-                    Model = call.Model,
+                    RequestedModel = call.RequestedModel,
                     UsageKnown = false,
                     Outcome = call.Outcome
                 });

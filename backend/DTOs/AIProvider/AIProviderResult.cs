@@ -5,6 +5,8 @@ public sealed class AIProviderResult
     public AIProviderOutcome Outcome { get; init; }
     public string? ResponseText { get; init; }
     public string ProviderName { get; init; } = string.Empty;
+    public string? RequestedModel { get; init; }
+    public string? ResolvedModel { get; init; }
     public string? ModelName { get; init; }
     public string? RequestId { get; init; }
     public long DurationMs { get; init; }
@@ -23,14 +25,17 @@ public sealed class AIProviderResult
         AiTokenUsage? tokenUsage = null,
         ProviderCallId? providerCallId = null,
         OuterOperationType? outerOperationType = null,
-        Guid? outerOperationId = null)
+        Guid? outerOperationId = null,
+        string? requestedModel = null)
     {
         return new AIProviderResult
         {
             Outcome = AIProviderOutcome.Success,
             ResponseText = responseText,
             ProviderName = providerName,
-            ModelName = modelName,
+            RequestedModel = requestedModel,
+            ResolvedModel = modelName,
+            ModelName = modelName ?? requestedModel,
             RequestId = requestId,
             DurationMs = durationMs,
             TokenUsage = tokenUsage,

@@ -61,21 +61,30 @@ public sealed class AIReplyOrchestratorGroundingTests
         Assert.Equal(completeness, snapshot.Completeness);
         Assert.Equal(fallbackExpected, result.FallbackUsed);
         Assert.Contains(logger.Messages, message => message.Contains(provider.LastRequest.ProviderCallId.Value, StringComparison.Ordinal));
-        var observation = Assert.Single(telemetryStore.Observations);
-        Assert.Equal(provider.LastRequest.ProviderCallId, observation.ProviderCallId);
-        Assert.Equal(companyId, observation.CompanyId);
-        Assert.Equal(OuterOperationType.GuestMessage, observation.OuterOperationType);
-        Assert.Equal(outerId, observation.OuterOperationId);
-        Assert.Equal(mode is "structured-failure" or "exception" ? AIProviderOutcome.Failed
-            : mode == "timeout" ? AIProviderOutcome.Unavailable
-            : AIProviderOutcome.Success, observation.Outcome);
-        Assert.Equal(mode switch
+        if (mode is "exception" or "timeout")
         {
-            "known" => new AiTokenUsage(12, 3, 15),
-            "zero" => new AiTokenUsage(0, 0, 0),
-            _ => null
-        }, observation.TokenUsage);
-        Assert.False(telemetryStore.CancellationToken.CanBeCanceled);
+            var indeterminate = Assert.Single(telemetryStore.IndeterminateObservations);
+            Assert.Equal(provider.LastRequest.ProviderCallId, indeterminate.ProviderCallId);
+            Assert.Equal(companyId, indeterminate.CompanyId);
+            Assert.Equal(mode == "timeout" ? OpenAIProviderFailureCategories.Cancelled : OpenAIProviderFailureCategories.Unknown,
+                indeterminate.FailureCategory);
+        }
+        else
+        {
+            var observation = Assert.Single(telemetryStore.Observations);
+            Assert.Equal(provider.LastRequest.ProviderCallId, observation.ProviderCallId);
+            Assert.Equal(companyId, observation.CompanyId);
+            Assert.Equal(OuterOperationType.GuestMessage, observation.OuterOperationType);
+            Assert.Equal(outerId, observation.OuterOperationId);
+            Assert.Equal(mode == "structured-failure" ? AIProviderOutcome.Failed : AIProviderOutcome.Success, observation.Outcome);
+            Assert.Equal(mode switch
+            {
+                "known" => new AiTokenUsage(12, 3, 15),
+                "zero" => new AiTokenUsage(0, 0, 0),
+                _ => null
+            }, observation.TokenUsage);
+            Assert.False(telemetryStore.CancellationToken.CanBeCanceled);
+        }
     }
 
     [Fact]
@@ -104,12 +113,10 @@ public sealed class AIReplyOrchestratorGroundingTests
         Assert.Contains(logger.Messages, message => message.Contains(provider.LastRequest!.ProviderCallId.Value, StringComparison.Ordinal)
             && message.Contains("UsageKnown=False", StringComparison.Ordinal)
             && message.Contains("ProviderCallCount=1", StringComparison.Ordinal));
-        var observation = Assert.Single(telemetryStore.Observations);
-        Assert.Equal(provider.LastRequest.ProviderCallId, observation.ProviderCallId);
-        Assert.Equal(OuterOperationType.GuestMessage, observation.OuterOperationType);
-        Assert.Equal(outerId, observation.OuterOperationId);
-        Assert.Equal(AIProviderOutcome.Unavailable, observation.Outcome);
-        Assert.Null(observation.TokenUsage);
+        var indeterminate = Assert.Single(telemetryStore.IndeterminateObservations);
+        Assert.Equal(provider.LastRequest.ProviderCallId, indeterminate.ProviderCallId);
+        Assert.Equal(OuterOperationType.GuestMessage, telemetryStore.Preparations.Single().OuterOperationType);
+        Assert.Equal(outerId, telemetryStore.Preparations.Single().OuterOperationId);
         Assert.False(telemetryStore.CancellationToken.CanBeCanceled);
     }
 
@@ -236,7 +243,8 @@ public sealed class AIReplyOrchestratorGroundingTests
             Assert.Equal(OuterOperationType.GuestMessage, saved.OuterOperationType);
             Assert.Equal(outerId, saved.OuterOperationId);
             Assert.Equal("Development", saved.Provider);
-            Assert.Equal("stayflow-development-deterministic", saved.Model);
+            Assert.Equal("stayflow-development-deterministic", saved.RequestedModel);
+            Assert.Equal("stayflow-development-deterministic", saved.ResolvedModel);
             Assert.True(saved.UsageKnown);
             Assert.Equal(12, saved.InputTokens);
             Assert.Equal(3, saved.OutputTokens);
@@ -246,7 +254,7 @@ public sealed class AIReplyOrchestratorGroundingTests
     }
 
     [Fact]
-    public async Task OrchestrateAsync_TelemetryPersistenceFailureDoesNotReplaceProviderSuccess()
+    public async Task OrchestrateAsync_PreparationFailurePreventsProviderDispatch()
     {
         var selected = new ConversationContextKnowledgeItem(
             "telemetry-best-effort-source", "Guest Wi-Fi", "Password: DemoStay2026",
@@ -255,7 +263,7 @@ public sealed class AIReplyOrchestratorGroundingTests
         var provider = new SpyDevelopmentProvider { Mode = "known" };
         var logger = new RecordingLogger();
 
-        var result = await BuildOrchestrator(
+        await Assert.ThrowsAsync<AiProviderCallPersistenceException>(() => BuildOrchestrator(
                 context,
                 provider,
                 [selected],
@@ -265,12 +273,9 @@ public sealed class AIReplyOrchestratorGroundingTests
             {
                 ConversationId = context.ConversationId,
                 Operation = AIReplyOperation.FutureGuestReply
-            }, CancellationToken.None);
+            }, CancellationToken.None));
 
-        Assert.NotNull(result);
-        Assert.False(result!.FallbackUsed);
-        Assert.Contains("DemoStay2026", result.Output);
-        Assert.Contains(logger.Messages, message => message.Contains("AI provider telemetry persistence failed", StringComparison.Ordinal));
+        Assert.Null(provider.LastRequest);
     }
 
     [Fact]
@@ -342,7 +347,9 @@ public sealed class AIReplyOrchestratorGroundingTests
             Assert.NotNull(result);
             var saved = await database.AiProviderCallTelemetries.SingleAsync();
             Assert.Equal(provider.LastRequest!.ProviderCallId.Value, saved.ProviderCallId);
-            Assert.Equal(AIProviderOutcome.Failed, saved.Outcome);
+            Assert.Equal(AiProviderCallLifecycleState.Indeterminate, saved.LifecycleState);
+            Assert.Null(saved.Outcome);
+            Assert.Equal(OpenAIProviderFailureCategories.Unknown, saved.FailureCategory);
             Assert.False(saved.UsageKnown);
             Assert.Null(saved.InputTokens);
             Assert.Null(saved.OutputTokens);
@@ -577,11 +584,21 @@ public sealed class AIReplyOrchestratorGroundingTests
         IAiProviderCallTelemetryStore? telemetryStore = null,
         IAIReplyOutputValidator? outputValidator = null)
     {
+        IAIProvider accountedProvider = telemetryStore is null
+            ? provider
+            : new AccountingAIProvider(
+                provider,
+                "Development",
+                "stayflow-development-deterministic",
+                telemetryStore,
+                TimeProvider.System,
+                NullLogger<AccountingAIProvider>.Instance);
+
         return new AIReplyOrchestrator(
             new FakeConversationContextBuilder(context),
             new FakeRanker(selectedItems),
             new AIPromptBuilder(Options.Create(new AIPromptOptions())),
-            provider,
+            accountedProvider,
             outputValidator ?? new AIReplyOutputValidator(),
             new AIReplySafetyEvaluator(),
             new ContextConfidenceEvaluator(),
@@ -594,8 +611,7 @@ public sealed class AIReplyOrchestratorGroundingTests
                 MaximumSelectedKnowledgeCharacters = 10000,
                 ProviderTimeoutSeconds = 10
             }),
-            logger ?? NullLogger<AIReplyOrchestrator>.Instance,
-            providerCallTelemetryStore: telemetryStore);
+            logger ?? NullLogger<AIReplyOrchestrator>.Instance);
     }
 
     private static async Task SeedTelemetryBoundaryAsync(
@@ -791,20 +807,47 @@ public sealed class AIReplyOrchestratorGroundingTests
 
     private sealed class FailingTelemetryStore : IAiProviderCallTelemetryStore
     {
+        public Task PrepareAsync(AiProviderCallPreparation preparation, CancellationToken cancellationToken) =>
+            Task.FromException(new InvalidOperationException("telemetry store unavailable"));
+
+        public Task<bool> TryStartDispatchAsync(ProviderCallId providerCallId, Guid companyId, DateTimeOffset dispatchStartedAt, CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
         public Task RecordAsync(AiProviderCallObservation observation, CancellationToken cancellationToken)
         {
             return Task.FromException(new InvalidOperationException("telemetry store unavailable"));
         }
+
+        public Task RecordIndeterminateAsync(AiProviderCallIndeterminateObservation observation, CancellationToken cancellationToken) =>
+            Task.CompletedTask;
     }
 
     private sealed class CapturingTelemetryStore : IAiProviderCallTelemetryStore
     {
+        public List<AiProviderCallPreparation> Preparations { get; } = [];
         public List<AiProviderCallObservation> Observations { get; } = [];
+        public List<AiProviderCallIndeterminateObservation> IndeterminateObservations { get; } = [];
         public CancellationToken CancellationToken { get; private set; }
+
+        public Task PrepareAsync(AiProviderCallPreparation preparation, CancellationToken cancellationToken)
+        {
+            Preparations.Add(preparation);
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> TryStartDispatchAsync(ProviderCallId providerCallId, Guid companyId, DateTimeOffset dispatchStartedAt, CancellationToken cancellationToken) =>
+            Task.FromResult(true);
 
         public Task RecordAsync(AiProviderCallObservation observation, CancellationToken cancellationToken)
         {
             Observations.Add(observation);
+            CancellationToken = cancellationToken;
+            return Task.CompletedTask;
+        }
+
+        public Task RecordIndeterminateAsync(AiProviderCallIndeterminateObservation observation, CancellationToken cancellationToken)
+        {
+            IndeterminateObservations.Add(observation);
             CancellationToken = cancellationToken;
             return Task.CompletedTask;
         }

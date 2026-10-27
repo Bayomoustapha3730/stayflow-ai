@@ -113,7 +113,7 @@ public sealed class OpenAIAIProviderTests
         {
             ResponseText = "Safe response",
             RequestId = "resp_123",
-            ModelName = "gpt-test",
+            ResolvedModel = "gpt-resolved",
             TokenUsage = new AiTokenUsage(100, 25, 125)
         };
 
@@ -127,7 +127,9 @@ public sealed class OpenAIAIProviderTests
         Assert.Equal("OpenAI", result.ProviderName);
         Assert.Equal("Safe response", result.ResponseText);
         Assert.Equal("resp_123", result.RequestId);
-        Assert.Equal("gpt-test", result.ModelName);
+        Assert.Equal("gpt-test", result.RequestedModel);
+        Assert.Equal("gpt-resolved", result.ResolvedModel);
+        Assert.Equal("gpt-resolved", result.ModelName);
         Assert.Equal(new AiTokenUsage(100, 25, 125), result.TokenUsage);
         Assert.Equal(request.ProviderCallId, result.ProviderCallId);
         Assert.Equal(request.OuterOperationType, result.OuterOperationType);
@@ -373,7 +375,7 @@ public sealed class OpenAIAIProviderTests
     private sealed class FakeOpenAIResponsesClient : IOpenAIResponsesClient
     {
         public OpenAIProviderRequest? LastRequest { get; private set; }
-        public OpenAIProviderResponse Response { get; set; } = new() { ResponseText = "Safe response", RequestId = "resp_test", ModelName = "gpt-test" };
+        public OpenAIProviderResponse Response { get; set; } = new() { ResponseText = "Safe response", RequestId = "resp_test", ResolvedModel = "gpt-test" };
         public Exception? Exception { get; set; }
 
         public Task<OpenAIProviderResponse> CreateResponseAsync(OpenAIProviderRequest request, CancellationToken cancellationToken)

@@ -13,6 +13,15 @@ public enum AiTokenUsageCompleteness
     Complete
 }
 
+public enum AiProviderCallLifecycleState
+{
+    Prepared,
+    DispatchStarted,
+    Observed,
+    Indeterminate,
+    LegacyObserved
+}
+
 public sealed record ProviderCallId
 {
     public string Value { get; }

@@ -6,6 +6,7 @@ using StayFlow.Api.DTOs.AIResponseValidation;
 using StayFlow.Api.DTOs.AIOrchestration;
 using StayFlow.Api.Models;
 using StayFlow.Api.Repositories;
+using StayFlow.Api.Services.AI.Orchestration;
 
 namespace StayFlow.Api.Services;
 
@@ -177,6 +178,7 @@ public sealed class AIOrchestrator(
             providerWasInvoked = true;
             providerResult = await aiProvider.GenerateAsync(new AIProviderRequest
             {
+                CompanyId = currentTenantContext.CompanyId ?? contextResult.Metadata.CompanyId ?? Guid.Empty,
                 PromptPackage = promptPackage,
                 RenderedMessages = promptPackage.RenderedMessages,
                 ResponseConstraints = promptPackage.ResponseConstraints,
@@ -250,6 +252,10 @@ public sealed class AIOrchestrator(
             ApplyDevelopmentDiagnostics(mapped, contextResult, providerWasInvoked);
             await AuditAsync(mapped, contextResult, providerResult, validationResult, cancellationToken);
             return mapped;
+        }
+        catch (AiProviderCallPersistenceException)
+        {
+            throw;
         }
         catch (Exception exception)
         {

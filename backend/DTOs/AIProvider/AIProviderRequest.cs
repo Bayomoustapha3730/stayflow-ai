@@ -5,6 +5,7 @@ namespace StayFlow.Api.DTOs.AIProvider;
 
 public sealed class AIProviderRequest
 {
+    public Guid CompanyId { get; init; }
     public AIPromptPackage PromptPackage { get; init; } = new();
     public IReadOnlyCollection<AIPromptMessage> RenderedMessages { get; init; } = [];
     public AIResponseConstraints ResponseConstraints { get; init; } = new();

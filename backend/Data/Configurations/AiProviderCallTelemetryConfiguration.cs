@@ -24,8 +24,12 @@ public sealed class AiProviderCallTelemetryConfiguration : IEntityTypeConfigurat
         builder.Property(call => call.ProviderCallId).HasMaxLength(64).IsRequired();
         builder.Property(call => call.OuterOperationType).HasConversion<string>().HasMaxLength(40);
         builder.Property(call => call.Provider).HasMaxLength(80);
-        builder.Property(call => call.Model).HasMaxLength(120);
-        builder.Property(call => call.Outcome).HasConversion<string>().HasMaxLength(30).IsRequired();
+        builder.Property(call => call.RequestedModel).HasMaxLength(120);
+        builder.Property(call => call.ResolvedModel).HasMaxLength(120);
+        builder.Property(call => call.ProviderRequestId).HasMaxLength(160);
+        builder.Property(call => call.LifecycleState).HasConversion<string>().HasMaxLength(30).IsRequired();
+        builder.Property(call => call.FailureCategory).HasMaxLength(80);
+        builder.Property(call => call.Outcome).HasConversion<string>().HasMaxLength(30);
 
         builder.HasOne(call => call.Company)
             .WithMany()
