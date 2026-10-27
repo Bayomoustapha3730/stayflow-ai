@@ -246,6 +246,55 @@ public sealed class AiProviderCallTelemetryStore(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task PersistCostAsync(
+        ProviderCallId providerCallId,
+        Guid companyId,
+        AiProviderCostResult cost,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(providerCallId);
+        ValidateCostResult(cost);
+        if (companyId == Guid.Empty)
+        {
+            throw new ArgumentException("CompanyId is required.", nameof(companyId));
+        }
+
+        for (var attempt = 1; attempt <= MaximumAttempts; attempt++)
+        {
+            await using var dbContext = new ApplicationDbContext(dbContextOptions, tenantContext);
+            await using var transaction = dbContext.Database.IsRelational()
+                ? await dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+
+            try
+            {
+                var call = await dbContext.AiProviderCallTelemetries
+                    .SingleOrDefaultAsync(item => item.ProviderCallId == providerCallId.Value, cancellationToken);
+                if (call is null || call.CompanyId != companyId)
+                {
+                    throw new AiProviderCallTelemetryConflictException(
+                        $"Provider call '{providerCallId.Value}' has no matching tenant record for cost enrichment.");
+                }
+
+                ApplyCostResult(call, cost, providerCallId);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+
+                return;
+            }
+            catch (Exception exception) when (attempt < MaximumAttempts && IsRetryableConcurrencyFailure(exception))
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                }
+            }
+        }
+    }
+
     private async Task ReconcileUniqueRaceAsync(
         AiProviderCallObservation observation,
         DbUpdateException uniqueViolation,
@@ -407,6 +456,93 @@ public sealed class AiProviderCallTelemetryStore(
             existing.InputTokens = knownUsage.InputTokens;
             existing.OutputTokens = knownUsage.OutputTokens;
             existing.TotalTokens = knownUsage.TotalTokens;
+        }
+    }
+
+    private static void ApplyCostResult(
+        AiProviderCallTelemetry call,
+        AiProviderCostResult incoming,
+        ProviderCallId providerCallId)
+    {
+        if (call.CostState == AiProviderCostState.Calculated)
+        {
+            if (CostMatches(call, incoming))
+            {
+                return;
+            }
+
+            throw new AiProviderCallTelemetryConflictException(
+                $"Calculated provider cost for call '{providerCallId.Value}' cannot be replaced.");
+        }
+
+        if (call.CostState == AiProviderCostState.NotApplicable)
+        {
+            if (CostMatches(call, incoming))
+            {
+                return;
+            }
+
+            throw new AiProviderCallTelemetryConflictException(
+                $"Non-applicable provider cost for call '{providerCallId.Value}' cannot be replaced.");
+        }
+
+        if (call.PricingVersionId.HasValue
+            && incoming.PricingVersionId.HasValue
+            && call.PricingVersionId != incoming.PricingVersionId)
+        {
+            throw new AiProviderCallTelemetryConflictException(
+                $"Provider cost for call '{providerCallId.Value}' resolved to conflicting pricing versions.");
+        }
+
+        if (incoming.State == AiProviderCostState.NotApplicable && call.PricingVersionId.HasValue)
+        {
+            throw new AiProviderCallTelemetryConflictException(
+                $"Provider cost for call '{providerCallId.Value}' conflicts with its previously resolved pricing version.");
+        }
+
+        call.CostState = incoming.State;
+        call.CostReason = incoming.Reason;
+        call.PricingVersionId = incoming.PricingVersionId ?? call.PricingVersionId;
+        call.ProviderCostAmount = incoming.Amount;
+        call.ProviderCostCurrency = incoming.Currency;
+    }
+
+    private static bool CostMatches(AiProviderCallTelemetry call, AiProviderCostResult cost) =>
+        call.CostState == cost.State
+        && call.CostReason == cost.Reason
+        && call.PricingVersionId == cost.PricingVersionId
+        && call.ProviderCostAmount == cost.Amount
+        && call.ProviderCostCurrency == cost.Currency;
+
+    private static void ValidateCostResult(AiProviderCostResult cost)
+    {
+        ArgumentNullException.ThrowIfNull(cost);
+        if (!Enum.IsDefined(cost.State) || !Enum.IsDefined(cost.Reason))
+        {
+            throw new ArgumentOutOfRangeException(nameof(cost), "Provider cost state or reason is not supported.");
+        }
+
+        var valid = cost.State switch
+        {
+            AiProviderCostState.Calculated =>
+                cost.Reason == AiProviderCostReason.Calculated
+                && cost.PricingVersionId.HasValue
+                && cost.Amount is >= 0
+                && string.Equals(cost.Currency, "USD", StringComparison.Ordinal),
+            AiProviderCostState.Unknown =>
+                cost.Reason is not (AiProviderCostReason.Calculated or AiProviderCostReason.NonBillableProvider)
+                && cost.Amount is null
+                && cost.Currency is null,
+            AiProviderCostState.NotApplicable =>
+                cost.Reason == AiProviderCostReason.NonBillableProvider
+                && cost.PricingVersionId is null
+                && cost.Amount is null
+                && cost.Currency is null,
+            _ => false
+        };
+        if (!valid)
+        {
+            throw new ArgumentException("Provider cost result violates its state invariants.", nameof(cost));
         }
     }
 

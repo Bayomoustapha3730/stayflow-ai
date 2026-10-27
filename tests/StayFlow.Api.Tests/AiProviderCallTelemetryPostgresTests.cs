@@ -147,6 +147,63 @@ public sealed class AiProviderCallTelemetryPostgresTests : IAsyncLifetime
         Assert.Equal(expectedPrice, saved.OutputPrice);
     }
 
+    [Fact]
+    public async Task AiProviderCallCost_PersistsPreciseAmountAndPricingVersionLink()
+    {
+        var companyId = await SeedCompanyAsync();
+        var dispatchStartedAt = DateTimeOffset.UtcNow;
+        var callId = ProviderCallId.New();
+        var store = new AiProviderCallTelemetryStore(dbOptions);
+        await store.PrepareAsync(
+            new AiProviderCallPreparation(callId, companyId, null, null, "SyntheticProvider", "requested-model"),
+            CancellationToken.None);
+        Assert.True(await store.TryStartDispatchAsync(callId, companyId, dispatchStartedAt, CancellationToken.None));
+
+        var catalog = new AiProviderPricingCatalog(dbOptions);
+        var versionId = await catalog.PublishAsync(
+            new AiProviderPricingVersionDraft(
+                "SyntheticProvider",
+                "synthetic-precision-sku",
+                dispatchStartedAt.AddDays(-1),
+                null,
+                "USD",
+                0.123456789012m,
+                0m,
+                1_000_000),
+            CancellationToken.None);
+        await store.RecordAsync(
+            new AiProviderCallObservation(
+                callId,
+                companyId,
+                null,
+                null,
+                "SyntheticProvider",
+                "requested-model",
+                new AiTokenUsage(1, 0, 1),
+                AIProviderOutcome.Success,
+                "synthetic-precision-sku"),
+            CancellationToken.None);
+        var cost = await new AiProviderCostCalculator(new AiProviderPricingResolver(dbOptions))
+            .CalculateAsync(
+                new AiProviderCostFacts(
+                    "SyntheticProvider",
+                    "synthetic-precision-sku",
+                    dispatchStartedAt,
+                    1,
+                    0),
+                CancellationToken.None);
+        await store.PersistCostAsync(callId, companyId, cost, CancellationToken.None);
+
+        await using var verificationContext = new ApplicationDbContext(dbOptions);
+        var saved = await verificationContext.AiProviderCallTelemetries
+            .AsNoTracking()
+            .SingleAsync(call => call.ProviderCallId == callId.Value);
+        Assert.Equal(AiProviderCostState.Calculated, saved.CostState);
+        Assert.Equal(versionId, saved.PricingVersionId);
+        Assert.Equal(0.000000123456789012m, saved.ProviderCostAmount);
+        Assert.Equal("USD", saved.ProviderCostCurrency);
+    }
+
     private static async Task<(Guid? VersionId, Exception? Exception)> PublishAndCaptureAsync(
         IAiProviderPricingCatalog catalog,
         AiProviderPricingVersionDraft draft)

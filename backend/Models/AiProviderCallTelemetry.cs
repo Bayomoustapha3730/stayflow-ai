@@ -1,4 +1,5 @@
 using StayFlow.Api.DTOs.AIProvider;
+using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Models;
 
@@ -21,6 +22,12 @@ public sealed class AiProviderCallTelemetry : AuditableEntity
     public long? OutputTokens { get; set; }
     public long? TotalTokens { get; set; }
     public AIProviderOutcome? Outcome { get; set; }
+    public AiProviderCostState CostState { get; set; } = AiProviderCostState.Unknown;
+    public AiProviderCostReason CostReason { get; set; } = AiProviderCostReason.ProviderUsageUnavailable;
+    public Guid? PricingVersionId { get; set; }
+    public decimal? ProviderCostAmount { get; set; }
+    public string? ProviderCostCurrency { get; set; }
 
     public Company Company { get; set; } = null!;
+    public AiProviderPricingVersion? PricingVersion { get; set; }
 }

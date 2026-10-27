@@ -87,6 +87,20 @@ namespace backend.Data.Migrations
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("CostReason")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)")
+                        .HasDefaultValue("ProviderUsageUnavailable");
+
+                    b.Property<string>("CostState")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Unknown");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -119,6 +133,9 @@ namespace backend.Data.Migrations
                     b.Property<long?>("OutputTokens")
                         .HasColumnType("bigint");
 
+                    b.Property<Guid?>("PricingVersionId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Provider")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
@@ -127,6 +144,14 @@ namespace backend.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
+
+                    b.Property<decimal?>("ProviderCostAmount")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<string>("ProviderCostCurrency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
 
                     b.Property<string>("ProviderRequestId")
                         .HasMaxLength(160)
@@ -153,6 +178,8 @@ namespace backend.Data.Migrations
 
                     b.HasIndex("CreatedAt");
 
+                    b.HasIndex("PricingVersionId");
+
                     b.HasIndex("ProviderCallId")
                         .IsUnique()
                         .HasDatabaseName("UX_AiProviderCallTelemetries_ProviderCallId");
@@ -161,6 +188,14 @@ namespace backend.Data.Migrations
 
                     b.ToTable("AiProviderCallTelemetries", null, t =>
                         {
+                            t.HasCheckConstraint("CK_AiProviderCallTelemetries_CostAmount", "\"ProviderCostAmount\" IS NULL OR \"ProviderCostAmount\" >= 0");
+
+                            t.HasCheckConstraint("CK_AiProviderCallTelemetries_CostCurrency", "\"ProviderCostCurrency\" IS NULL OR \"ProviderCostCurrency\" = 'USD'");
+
+                            t.HasCheckConstraint("CK_AiProviderCallTelemetries_CostReason", "\"CostReason\" IN ('Calculated', 'MissingResolvedModel', 'MissingDispatchTimestamp', 'UnknownProvider', 'UnknownModel', 'NoEffectivePrice', 'AmbiguousPrice', 'MissingTokenUsage', 'UnsupportedPricingDimension', 'ProviderUsageUnavailable', 'NonBillableProvider', 'CalculationOverflow')");
+
+                            t.HasCheckConstraint("CK_AiProviderCallTelemetries_CostState", "(\"CostState\" = 'Calculated' AND \"CostReason\" = 'Calculated' AND \"PricingVersionId\" IS NOT NULL AND \"ProviderCostAmount\" IS NOT NULL AND \"ProviderCostCurrency\" = 'USD') OR (\"CostState\" = 'Unknown' AND \"CostReason\" NOT IN ('Calculated', 'NonBillableProvider') AND \"ProviderCostAmount\" IS NULL AND \"ProviderCostCurrency\" IS NULL) OR (\"CostState\" = 'NotApplicable' AND \"CostReason\" = 'NonBillableProvider' AND \"PricingVersionId\" IS NULL AND \"ProviderCostAmount\" IS NULL AND \"ProviderCostCurrency\" IS NULL)");
+
                             t.HasCheckConstraint("CK_AiProviderCallTelemetries_OuterOperation", "(\"OuterOperationType\" IS NULL AND \"OuterOperationId\" IS NULL) OR (\"OuterOperationType\" IS NOT NULL AND \"OuterOperationId\" IS NOT NULL)");
 
                             t.HasCheckConstraint("CK_AiProviderCallTelemetries_Usage", "(\"UsageKnown\" = FALSE AND \"InputTokens\" IS NULL AND \"OutputTokens\" IS NULL AND \"TotalTokens\" IS NULL) OR (\"UsageKnown\" = TRUE AND \"InputTokens\" IS NOT NULL AND \"OutputTokens\" IS NOT NULL AND \"TotalTokens\" IS NOT NULL AND \"InputTokens\" >= 0 AND \"OutputTokens\" >= 0 AND \"TotalTokens\" >= 0)");
@@ -4671,7 +4706,14 @@ namespace backend.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("StayFlow.Api.Models.AiProviderPricingVersion", "PricingVersion")
+                        .WithMany()
+                        .HasForeignKey("PricingVersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Company");
+
+                    b.Navigation("PricingVersion");
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.Company", b =>

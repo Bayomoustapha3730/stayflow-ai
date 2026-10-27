@@ -591,6 +591,7 @@ public sealed class AIReplyOrchestratorGroundingTests
                 "Development",
                 "stayflow-development-deterministic",
                 telemetryStore,
+                new DevelopmentCostCalculator(),
                 TimeProvider.System,
                 NullLogger<AccountingAIProvider>.Instance);
 
@@ -820,6 +821,13 @@ public sealed class AIReplyOrchestratorGroundingTests
 
         public Task RecordIndeterminateAsync(AiProviderCallIndeterminateObservation observation, CancellationToken cancellationToken) =>
             Task.CompletedTask;
+
+        public Task PersistCostAsync(
+            ProviderCallId providerCallId,
+            Guid companyId,
+            AiProviderCostResult cost,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
     }
 
     private sealed class CapturingTelemetryStore : IAiProviderCallTelemetryStore
@@ -849,6 +857,30 @@ public sealed class AIReplyOrchestratorGroundingTests
         {
             IndeterminateObservations.Add(observation);
             CancellationToken = cancellationToken;
+            return Task.CompletedTask;
+        }
+
+        public Task PersistCostAsync(
+            ProviderCallId providerCallId,
+            Guid companyId,
+            AiProviderCostResult cost,
+            CancellationToken cancellationToken) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class DevelopmentCostCalculator : IAiProviderCostCalculator
+    {
+        public Task<AiProviderCostResult> CalculateAsync(AiProviderCostFacts facts, CancellationToken cancellationToken) =>
+            Task.FromResult(new AiProviderCostResult(
+                AiProviderCostState.NotApplicable,
+                AiProviderCostReason.NonBillableProvider));
+
+        public Task PersistCostAsync(
+            ProviderCallId providerCallId,
+            Guid companyId,
+            AiProviderCostResult cost,
+            CancellationToken cancellationToken)
+        {
             return Task.CompletedTask;
         }
     }

@@ -8,6 +8,7 @@ public sealed class AccountingAIProvider(
     string providerName,
     string? requestedModel,
     IAiProviderCallTelemetryStore telemetryStore,
+    IAiProviderCostCalculator costCalculator,
     TimeProvider timeProvider,
     ILogger<AccountingAIProvider> logger) : IAIProvider
 {
@@ -108,6 +109,16 @@ public sealed class AccountingAIProvider(
                     persistenceException);
             }
 
+            await PersistCostBestEffortAsync(
+                request.ProviderCallId,
+                request.CompanyId,
+                new AiProviderCostFacts(
+                    providerName,
+                    null,
+                    dispatchStartedAt,
+                    null,
+                    null,
+                    ProviderUsageUnavailable: true));
             throw;
         }
 
@@ -144,6 +155,18 @@ public sealed class AccountingAIProvider(
                 exception);
         }
 
+        await PersistCostBestEffortAsync(
+            request.ProviderCallId,
+            request.CompanyId,
+            new AiProviderCostFacts(
+                providerName,
+                result.ResolvedModel,
+                dispatchStartedAt,
+                result.TokenUsage?.InputTokens,
+                result.TokenUsage?.OutputTokens,
+                ProviderUsageUnavailable:
+                    lifecycleState == AiProviderCallLifecycleState.Indeterminate && result.TokenUsage is null));
+
         return new AIProviderResult
         {
             Outcome = result.Outcome,
@@ -160,6 +183,25 @@ public sealed class AccountingAIProvider(
             OuterOperationType = request.OuterOperationType,
             OuterOperationId = request.OuterOperationId
         };
+    }
+
+    private async Task PersistCostBestEffortAsync(
+        ProviderCallId providerCallId,
+        Guid companyId,
+        AiProviderCostFacts facts)
+    {
+        try
+        {
+            var cost = await costCalculator.CalculateAsync(facts, CancellationToken.None);
+            await telemetryStore.PersistCostAsync(providerCallId, companyId, cost, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception,
+                "AI provider cost enrichment failed. ProviderCallId={ProviderCallId} CompanyId={CompanyId}",
+                providerCallId.Value,
+                companyId);
+        }
     }
 
     private static bool IsIndeterminate(string? failureCategory)

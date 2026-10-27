@@ -1,4 +1,5 @@
 using StayFlow.Api.DTOs.AIProvider;
+using StayFlow.Api.Services;
 
 namespace StayFlow.Api.Services.AI.Orchestration;
 
@@ -8,6 +9,7 @@ public interface IAiProviderCallTelemetryStore
     Task<bool> TryStartDispatchAsync(ProviderCallId providerCallId, Guid companyId, DateTimeOffset dispatchStartedAt, CancellationToken cancellationToken);
     Task RecordAsync(AiProviderCallObservation observation, CancellationToken cancellationToken);
     Task RecordIndeterminateAsync(AiProviderCallIndeterminateObservation observation, CancellationToken cancellationToken);
+    Task PersistCostAsync(ProviderCallId providerCallId, Guid companyId, AiProviderCostResult cost, CancellationToken cancellationToken);
 }
 
 public sealed record AiProviderCallPreparation(
