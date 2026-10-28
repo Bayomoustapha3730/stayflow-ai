@@ -60,6 +60,61 @@ public sealed class PlatformAdminControllerIntegrationTests : IClassFixture<Sign
     }
 
     [Fact]
+    public async Task CustomerBillingEndpoints_RequirePlatformPermission()
+    {
+        using var client = CreateClientWithToken(TargetCompanyId, PlatformAdminUserId, ["conversations.read"]);
+        var routes = new[]
+        {
+            "/api/platform-admin/customer-billing/summary?fromUtc=2099-10-01T00:00:00Z&toUtc=2099-10-02T00:00:00Z",
+            "/api/platform-admin/customer-billing/breakdown?fromUtc=2099-10-01T00:00:00Z&toUtc=2099-10-02T00:00:00Z&groupBy=Company",
+            "/api/platform-admin/customer-billing/reconciliation?fromUtc=2099-10-01T00:00:00Z&toUtc=2099-10-02T00:00:00Z"
+        };
+
+        foreach (var route in routes)
+        {
+            using var response = await client.GetAsync(route);
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task CustomerBillingEndpoints_PlatformAdminCanReadSummaryBreakdownAndReconciliation()
+    {
+        using var client = CreateClientWithToken(TargetCompanyId, PlatformAdminUserId, ["platform.admin"]);
+        var range = "fromUtc=2099-10-01T00:00:00Z&toUtc=2099-10-02T00:00:00Z";
+        var routes = new[]
+        {
+            $"/api/platform-admin/customer-billing/summary?{range}",
+            $"/api/platform-admin/customer-billing/breakdown?{range}&groupBy=BillingPeriod",
+            $"/api/platform-admin/customer-billing/reconciliation?{range}"
+        };
+
+        foreach (var route in routes)
+        {
+            using var response = await client.GetAsync(route);
+            var payload = await ParseJsonAsync(response);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(payload.RootElement.GetProperty("success").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public async Task CustomerBillingEndpoints_RejectInvalidGroupAndRange()
+    {
+        using var client = CreateClientWithToken(TargetCompanyId, PlatformAdminUserId, ["platform.admin"]);
+        using var invalidGroup = await client.GetAsync(
+            "/api/platform-admin/customer-billing/breakdown?fromUtc=2099-10-01T00:00:00Z&toUtc=2099-10-02T00:00:00Z&groupBy=Anything");
+        using var invalidRange = await client.GetAsync(
+            "/api/platform-admin/customer-billing/summary?fromUtc=2099-10-02T00:00:00Z&toUtc=2099-10-01T00:00:00Z");
+        using var nonUtcRange = await client.GetAsync(
+            "/api/platform-admin/customer-billing/summary?fromUtc=2099-10-01T01:00:00%2B01:00&toUtc=2099-10-02T00:00:00Z");
+
+        Assert.Equal(HttpStatusCode.BadRequest, invalidGroup.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidRange.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, nonUtcRange.StatusCode);
+    }
+
+    [Fact]
     public async Task GetAiProviderCostSummary_ReturnsReadOnlySummary()
     {
         using var client = CreateClientWithToken(TargetCompanyId, PlatformAdminUserId, ["platform.admin"]);

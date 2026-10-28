@@ -71,3 +71,11 @@ Sprint 20B introduces tenant-safe Stripe billing orchestration for checkout, pla
 
 - Audit log records for user-triggered and webhook-triggered billing changes
 - Webhook processing result includes event identity and duplicate status for diagnostics
+
+## Customer usage accounting visibility
+
+- `CustomerBillableUsageOperations` are the historical monetary source of truth for consumed usage.
+- Internal reports sum persisted `ChargeAmount` only for `Calculated` USD operations; `Unknown` is not zero, `NotBillable` is excluded, and a calculated zero remains calculated.
+- Reports use the persisted `PeriodStartUtc`/`PeriodEndUtc` snapshots and select range periods by `PeriodStartUtc` in a half-open interval. Historical prices are never recalculated.
+- Summary, breakdown, and accounting-reconciliation reads are restricted to the `platform.admin` authorization policy and permission.
+- These reports reconcile usage-accounting facts only. No mapping to invoice line items exists yet, and no Stripe usage submission or invoice reconciliation is performed.
