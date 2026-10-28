@@ -1045,6 +1045,70 @@ namespace backend.Data.Migrations
                     b.ToTable("CopilotOperations", (string)null);
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.CustomerUsagePriceVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BillingMode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<DateTimeOffset>("EffectiveFromUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("EffectiveToUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Metric")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<Guid>("SubscriptionPlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("UnitPrice")
+                        .HasPrecision(28, 12)
+                        .HasColumnType("numeric(28,12)");
+
+                    b.Property<decimal>("UnitQuantity")
+                        .HasPrecision(28, 12)
+                        .HasColumnType("numeric(28,12)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubscriptionPlanId", "Metric", "EffectiveFromUtc");
+
+                    b.ToTable("CustomerUsagePriceVersions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CustomerUsagePriceVersions_BillingMode", "\"BillingMode\" IN ('IncludedOnly', 'PerUnitOverage', 'NotBillable')");
+
+                            t.HasCheckConstraint("CK_CustomerUsagePriceVersions_Currency", "\"Currency\" = 'USD'");
+
+                            t.HasCheckConstraint("CK_CustomerUsagePriceVersions_EffectivePeriod", "\"EffectiveToUtc\" IS NULL OR \"EffectiveToUtc\" > \"EffectiveFromUtc\"");
+
+                            t.HasCheckConstraint("CK_CustomerUsagePriceVersions_Identity", "\"SubscriptionPlanId\" <> '00000000-0000-0000-0000-000000000000' AND \"Metric\" IN ('Users', 'Properties', 'Reservations', 'AiRequests', 'AiTokens', 'WhatsAppMessages', 'ApiRequests', 'StorageBytes', 'FileUploads')");
+
+                            t.HasCheckConstraint("CK_CustomerUsagePriceVersions_UnitPrice", "\"UnitPrice\" >= 0");
+
+                            t.HasCheckConstraint("CK_CustomerUsagePriceVersions_UnitQuantity", "\"UnitQuantity\" > 0");
+                        });
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.EarlyCheckInRequest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4931,6 +4995,17 @@ namespace backend.Data.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.CustomerUsagePriceVersion", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.SubscriptionPlan", "SubscriptionPlan")
+                        .WithMany("CustomerUsagePriceVersions")
+                        .HasForeignKey("SubscriptionPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("SubscriptionPlan");
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.EarlyCheckInRequest", b =>
                 {
                     b.HasOne("StayFlow.Api.Models.Company", "Company")
@@ -6035,6 +6110,8 @@ namespace backend.Data.Migrations
 
             modelBuilder.Entity("StayFlow.Api.Models.SubscriptionPlan", b =>
                 {
+                    b.Navigation("CustomerUsagePriceVersions");
+
                     b.Navigation("Entitlements");
 
                     b.Navigation("TenantSubscriptions");

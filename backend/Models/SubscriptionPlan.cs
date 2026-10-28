@@ -11,4 +11,5 @@ public sealed class SubscriptionPlan : AuditableEntity
 
     public ICollection<PlanEntitlement> Entitlements { get; set; } = [];
     public ICollection<TenantSubscription> TenantSubscriptions { get; set; } = [];
+    public ICollection<CustomerUsagePriceVersion> CustomerUsagePriceVersions { get; set; } = [];
 }

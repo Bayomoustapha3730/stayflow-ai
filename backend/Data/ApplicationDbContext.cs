@@ -20,6 +20,7 @@ public sealed class ApplicationDbContext(
     public DbSet<UsageOperation> UsageOperations => Set<UsageOperation>();
     public DbSet<AiProviderCallTelemetry> AiProviderCallTelemetries => Set<AiProviderCallTelemetry>();
     public DbSet<AiProviderPricingVersion> AiProviderPricingVersions => Set<AiProviderPricingVersion>();
+    public DbSet<CustomerUsagePriceVersion> CustomerUsagePriceVersions => Set<CustomerUsagePriceVersion>();
     public DbSet<User> Users => Set<User>();
     public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
     public DbSet<OrganizationInvitation> OrganizationInvitations => Set<OrganizationInvitation>();
@@ -76,6 +77,7 @@ public sealed class ApplicationDbContext(
     {
         NormalizeUserEmails();
         ValidateImmutablePricingVersions();
+        ValidateImmutableCustomerUsagePriceVersions();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChanges();
@@ -85,6 +87,7 @@ public sealed class ApplicationDbContext(
     {
         NormalizeUserEmails();
         ValidateImmutablePricingVersions();
+        ValidateImmutableCustomerUsagePriceVersions();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChangesAsync(cancellationToken);
@@ -144,6 +147,15 @@ public sealed class ApplicationDbContext(
             .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
         {
             throw new InvalidOperationException("Published AI provider pricing versions are immutable.");
+        }
+    }
+
+    private void ValidateImmutableCustomerUsagePriceVersions()
+    {
+        if (ChangeTracker.Entries<CustomerUsagePriceVersion>()
+            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("Published customer usage price versions are immutable.");
         }
     }
 

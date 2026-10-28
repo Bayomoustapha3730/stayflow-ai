@@ -375,6 +375,8 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<Services.IAiProviderPricingCatalog, Services.AiProviderPricingCatalog>();
         services.AddScoped<Services.IAiProviderPricingResolver, Services.AiProviderPricingResolver>();
+        services.AddScoped<Services.ICustomerUsagePricingCatalog, Services.CustomerUsagePricingCatalog>();
+        services.AddScoped<Services.ICustomerUsagePricingResolver, Services.CustomerUsagePricingResolver>();
         services.AddScoped<Services.IAiProviderCostCalculator, Services.AiProviderCostCalculator>();
         services.AddScoped<Services.IAiProviderCostQueryService, Services.AiProviderCostQueryService>();
         services.AddScoped<Services.IAIOrchestrator, Services.AIOrchestrator>();
