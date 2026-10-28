@@ -14,6 +14,21 @@ public sealed class CustomerUsagePricingResolver(
         CancellationToken cancellationToken)
     {
         await using var dbContext = new ApplicationDbContext(dbContextOptions);
+        return await ResolveWithinContextAsync(
+            dbContext,
+            subscriptionPlanId,
+            metric,
+            occurredAtUtc,
+            cancellationToken);
+    }
+
+    internal static async Task<CustomerUsagePricingResolution> ResolveWithinContextAsync(
+        ApplicationDbContext dbContext,
+        Guid subscriptionPlanId,
+        UsageMetric metric,
+        DateTimeOffset occurredAtUtc,
+        CancellationToken cancellationToken)
+    {
         var matchingVersions = await dbContext.CustomerUsagePriceVersions
             .AsNoTracking()
             .Where(version => version.SubscriptionPlanId == subscriptionPlanId
@@ -48,15 +63,26 @@ public sealed class CustomerUsagePricingResolver(
                 match.UnitPrice,
                 match.Currency),
             CustomerUsageBillingMode.IncludedOnly => NotBillable(
-                CustomerUsagePricingResolutionReason.IncludedOnly),
+                CustomerUsagePricingResolutionReason.IncludedOnly,
+                match),
             CustomerUsageBillingMode.NotBillable => NotBillable(
-                CustomerUsagePricingResolutionReason.MetricNotBillable),
+                CustomerUsagePricingResolutionReason.MetricNotBillable,
+                match),
             _ => Unknown(CustomerUsagePricingResolutionReason.UnsupportedBillingMode)
         };
     }
 
-    private static CustomerUsagePricingResolution NotBillable(CustomerUsagePricingResolutionReason reason) =>
-        new(CustomerUsagePricingResolutionState.NotBillable, reason);
+    private static CustomerUsagePricingResolution NotBillable(
+        CustomerUsagePricingResolutionReason reason,
+        CustomerUsagePriceVersion version) =>
+        new(
+            CustomerUsagePricingResolutionState.NotBillable,
+            reason,
+            version.Id,
+            version.SubscriptionPlanId,
+            version.Metric,
+            version.EffectiveFromUtc,
+            version.EffectiveToUtc);
 
     private static CustomerUsagePricingResolution Unknown(CustomerUsagePricingResolutionReason reason) =>
         new(CustomerUsagePricingResolutionState.Unknown, reason);

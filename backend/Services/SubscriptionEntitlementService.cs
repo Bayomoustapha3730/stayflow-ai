@@ -77,7 +77,15 @@ public sealed class SubscriptionEntitlementService(
     {
         if (!dbContext.Database.IsRelational())
         {
-            return await ConsumeQuotaCoreAsync(companyId, metric, quantity, idempotencyKey, cancellationToken);
+            try
+            {
+                return await ConsumeQuotaCoreAsync(companyId, metric, quantity, idempotencyKey, cancellationToken);
+            }
+            catch
+            {
+                dbContext.ChangeTracker.Clear();
+                throw;
+            }
         }
 
         return await QuotaAdmissionRetryPolicy.ExecuteAsync(
@@ -93,7 +101,7 @@ public sealed class SubscriptionEntitlementService(
                 await transaction.CommitAsync(cancellationToken);
                 return result;
             }
-            catch (Exception exception) when (IsRetryableQuotaRace(exception))
+            catch
             {
                 await transaction.RollbackAsync(cancellationToken);
                 dbContext.ChangeTracker.Clear();
@@ -637,6 +645,54 @@ public sealed class SubscriptionEntitlementService(
         }
 
         var subscription = await GetOrCreateCurrentSubscriptionAsync(companyId, cancellationToken);
+        var periodStartUtc = subscription.CurrentPeriodStartUtc;
+        var periodEndUtc = subscription.CurrentPeriodEndUtc;
+        var metricValue = metric.ToStorageValue();
+
+        var priorOperation = await dbContext.UsageOperations
+            .AsNoTracking()
+            .FirstOrDefaultAsync(operation => operation.CompanyId == companyId
+                && operation.Metric == metricValue
+                && operation.PeriodStartUtc == periodStartUtc
+                && operation.IdempotencyKey == normalizedKey, cancellationToken);
+        if (priorOperation is not null)
+        {
+            if (priorOperation.Quantity != quantity)
+            {
+                throw new ConflictException(
+                    "This usage idempotency key was already used with a different quantity.",
+                    "usage_operation_conflict");
+            }
+
+            var billableOperation = await dbContext.CustomerBillableUsageOperations
+                .AsNoTracking()
+                .SingleOrDefaultAsync(operation => operation.UsageOperationId == priorOperation.Id, cancellationToken);
+            if (billableOperation is null)
+            {
+                throw new ConflictException(
+                    "A legacy usage operation has no authoritative customer billing record and cannot be replayed safely.",
+                    "customer_billable_usage_legacy_missing");
+            }
+
+            if (billableOperation.CompanyId != priorOperation.CompanyId
+                || billableOperation.Metric != metric
+                || billableOperation.PeriodStartUtc != priorOperation.PeriodStartUtc
+                || billableOperation.ConsumedQuantity != priorOperation.Quantity)
+            {
+                throw new ConflictException(
+                    "The stored customer billing record conflicts with its quota operation.",
+                    "customer_billable_usage_conflict");
+            }
+
+            return new UsageConsumptionResult(
+                metric,
+                billableOperation.IncludedQuantity,
+                billableOperation.UsageBefore,
+                billableOperation.UsageAfter,
+                billableOperation.IncludedQuantity is null,
+                true);
+        }
+
         EnsureStatusAllowsQuotaConsumption(subscription, metric);
         await dbContext.Entry(subscription)
             .Reference(item => item.SubscriptionPlan)
@@ -651,28 +707,6 @@ public sealed class SubscriptionEntitlementService(
         if (entitlement?.IsEnabled != true)
         {
             throw new ForbiddenOperationException($"Quota metric '{metric}' is not enabled for the current subscription.", "quota_metric_not_enabled");
-        }
-
-        var periodStartUtc = subscription.CurrentPeriodStartUtc;
-        var periodEndUtc = subscription.CurrentPeriodEndUtc;
-        var metricValue = metric.ToStorageValue();
-
-        var priorOperation = await dbContext.UsageOperations
-            .AsNoTracking()
-            .FirstOrDefaultAsync(operation => operation.CompanyId == companyId
-                && operation.Metric == metricValue
-                && operation.PeriodStartUtc == periodStartUtc
-                && operation.IdempotencyKey == normalizedKey, cancellationToken);
-        if (priorOperation is not null)
-        {
-            var existingRecord = await dbContext.UsageRecords
-                .AsNoTracking()
-                .FirstOrDefaultAsync(record => record.CompanyId == companyId
-                    && record.Metric == metricValue
-                    && record.PeriodStartUtc == periodStartUtc, cancellationToken);
-            var used = existingRecord?.QuantityUsed ?? 0;
-            var remaining = entitlement.QuotaLimit is null ? (long?)null : Math.Max(0, entitlement.QuotaLimit.Value - used);
-            return new UsageConsumptionResult(metric, entitlement.QuotaLimit, Math.Max(0, used - priorOperation.Quantity), used, entitlement.IsUnlimited || entitlement.QuotaLimit is null, true);
         }
 
         var usageRecord = await dbContext.UsageRecords
@@ -713,7 +747,8 @@ public sealed class SubscriptionEntitlementService(
             await dbContext.UsageRecords.AddAsync(usageRecord, cancellationToken);
         }
 
-        await dbContext.UsageOperations.AddAsync(new UsageOperation
+        var occurredAtUtc = DateTimeOffset.UtcNow;
+        var usageOperation = new UsageOperation
         {
             Id = Guid.NewGuid(),
             CompanyId = companyId,
@@ -721,7 +756,49 @@ public sealed class SubscriptionEntitlementService(
             IdempotencyKey = normalizedKey,
             PeriodStartUtc = periodStartUtc,
             Quantity = quantity
-        }, cancellationToken);
+        };
+        await dbContext.UsageOperations.AddAsync(usageOperation, cancellationToken);
+
+        var includedQuantity = unlimited ? null : limit;
+        var calculation = CustomerUsageChargeCalculator.Calculate(
+            previousUsage,
+            quantity,
+            includedQuantity);
+        var billing = new CustomerUsageBillingCalculation(
+            CustomerBillableUsageState.NotBillable,
+            CustomerBillableUsageReason.WithinIncludedAllowance);
+
+        if (calculation.BillableQuantity > 0)
+        {
+            var resolution = await CustomerUsagePricingResolver.ResolveWithinContextAsync(
+                dbContext,
+                subscription.SubscriptionPlanId,
+                metric,
+                occurredAtUtc,
+                cancellationToken);
+            billing = CustomerUsageChargeCalculator.ResolvePrice(calculation.BillableQuantity, resolution);
+        }
+
+        dbContext.CustomerBillableUsageOperations.Add(CustomerBillableUsageOperation.Create(
+            companyId,
+            usageOperation,
+            subscription.Id,
+            subscription.SubscriptionPlanId,
+            metric,
+            occurredAtUtc,
+            periodEndUtc,
+            quantity,
+            previousUsage,
+            calculation.UsageAfter,
+            includedQuantity,
+            calculation.BillableQuantity,
+            billing.State,
+            billing.Reason,
+            billing.PricingVersionId,
+            billing.UnitQuantity,
+            billing.UnitPrice,
+            billing.ChargeAmount,
+            billing.Currency));
 
         if (saveChanges)
         {
@@ -746,6 +823,7 @@ public sealed class SubscriptionEntitlementService(
                     "PK_CopilotOperations"
                     or
                     "IX_UsageOperations_CompanyId_Metric_PeriodStartUtc_IdempotencyKey"
+                    or "UX_CustomerBillableUsageOperations_UsageOperationId"
                     or "IX_UsageRecords_CompanyId_Metric_PeriodStartUtc";
         }
 

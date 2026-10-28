@@ -1045,6 +1045,119 @@ namespace backend.Data.Migrations
                     b.ToTable("CopilotOperations", (string)null);
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.CustomerBillableUsageOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("BillableQuantity")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("BillingReason")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("BillingState")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<decimal?>("ChargeAmount")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("ConsumedQuantity")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Currency")
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<Guid?>("CustomerUsagePriceVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("IncludedQuantity")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Metric")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("PeriodEndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("PeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SubscriptionPlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantSubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("UnitPrice")
+                        .HasPrecision(28, 12)
+                        .HasColumnType("numeric(28,12)");
+
+                    b.Property<decimal?>("UnitQuantity")
+                        .HasPrecision(28, 12)
+                        .HasColumnType("numeric(28,12)");
+
+                    b.Property<long>("UsageAfter")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("UsageBefore")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("UsageOperationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerUsagePriceVersionId");
+
+                    b.HasIndex("SubscriptionPlanId");
+
+                    b.HasIndex("TenantSubscriptionId");
+
+                    b.HasIndex("UsageOperationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_CustomerBillableUsageOperations_UsageOperationId");
+
+                    b.HasIndex("CompanyId", "PeriodStartUtc", "Metric");
+
+                    b.ToTable("CustomerBillableUsageOperations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CustomerBillableUsageOperations_BillableQuantity", "\"BillableQuantity\" >= 0 AND \"BillableQuantity\" <= \"ConsumedQuantity\"");
+
+                            t.HasCheckConstraint("CK_CustomerBillableUsageOperations_BillingState", "(\"BillingState\" = 'Calculated' AND \"BillingReason\" = 'Calculated' AND \"BillableQuantity\" > 0 AND \"CustomerUsagePriceVersionId\" IS NOT NULL AND \"UnitQuantity\" IS NOT NULL AND \"UnitQuantity\" > 0 AND \"UnitPrice\" IS NOT NULL AND \"UnitPrice\" >= 0 AND \"ChargeAmount\" IS NOT NULL AND \"ChargeAmount\" >= 0 AND \"Currency\" = 'USD') OR (\"BillingState\" = 'NotBillable' AND \"BillingReason\" IN ('WithinIncludedAllowance', 'IncludedOnly', 'MetricNotBillable') AND \"ChargeAmount\" IS NULL AND \"Currency\" IS NULL) OR (\"BillingState\" = 'Unknown' AND \"BillingReason\" IN ('MissingPrice', 'AmbiguousPrice', 'UnsupportedBillingMode', 'MissingEntitlement') AND \"BillableQuantity\" > 0 AND \"ChargeAmount\" IS NULL AND \"Currency\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_CustomerBillableUsageOperations_ChargeAmount", "\"ChargeAmount\" IS NULL OR \"ChargeAmount\" >= 0");
+
+                            t.HasCheckConstraint("CK_CustomerBillableUsageOperations_Currency", "\"Currency\" IS NULL OR \"Currency\" = 'USD'");
+
+                            t.HasCheckConstraint("CK_CustomerBillableUsageOperations_Identity", "\"CompanyId\" <> '00000000-0000-0000-0000-000000000000' AND \"TenantSubscriptionId\" <> '00000000-0000-0000-0000-000000000000' AND \"SubscriptionPlanId\" <> '00000000-0000-0000-0000-000000000000' AND \"Metric\" IN ('Users', 'Properties', 'Reservations', 'AiRequests', 'AiTokens', 'WhatsAppMessages', 'ApiRequests', 'StorageBytes', 'FileUploads')");
+
+                            t.HasCheckConstraint("CK_CustomerBillableUsageOperations_Intervals", "\"PeriodEndUtc\" > \"PeriodStartUtc\" AND \"OccurredAtUtc\" >= \"PeriodStartUtc\" AND \"OccurredAtUtc\" <= \"PeriodEndUtc\"");
+
+                            t.HasCheckConstraint("CK_CustomerBillableUsageOperations_Quantities", "\"ConsumedQuantity\" > 0 AND \"UsageBefore\" >= 0 AND \"UsageAfter\" = \"UsageBefore\" + \"ConsumedQuantity\" AND (\"IncludedQuantity\" IS NULL OR \"IncludedQuantity\" >= 0)");
+
+                            t.HasCheckConstraint("CK_CustomerBillableUsageOperations_UnitPrice", "(\"UnitQuantity\" IS NULL AND \"UnitPrice\" IS NULL) OR (\"UnitQuantity\" IS NOT NULL AND \"UnitQuantity\" > 0 AND \"UnitPrice\" IS NOT NULL AND \"UnitPrice\" >= 0)");
+                        });
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.CustomerUsagePriceVersion", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4995,6 +5108,40 @@ namespace backend.Data.Migrations
                     b.Navigation("Conversation");
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.CustomerBillableUsageOperation", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", null)
+                        .WithMany("CustomerBillableUsageOperations")
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.CustomerUsagePriceVersion", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerUsagePriceVersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("StayFlow.Api.Models.SubscriptionPlan", null)
+                        .WithMany()
+                        .HasForeignKey("SubscriptionPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.TenantSubscription", null)
+                        .WithMany()
+                        .HasForeignKey("TenantSubscriptionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.UsageOperation", "UsageOperation")
+                        .WithOne()
+                        .HasForeignKey("StayFlow.Api.Models.CustomerBillableUsageOperation", "UsageOperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("UsageOperation");
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.CustomerUsagePriceVersion", b =>
                 {
                     b.HasOne("StayFlow.Api.Models.SubscriptionPlan", "SubscriptionPlan")
@@ -5982,6 +6129,8 @@ namespace backend.Data.Migrations
                     b.Navigation("Conversations");
 
                     b.Navigation("CopilotOperations");
+
+                    b.Navigation("CustomerBillableUsageOperations");
 
                     b.Navigation("Guests");
 

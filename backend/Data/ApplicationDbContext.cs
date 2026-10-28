@@ -21,6 +21,7 @@ public sealed class ApplicationDbContext(
     public DbSet<AiProviderCallTelemetry> AiProviderCallTelemetries => Set<AiProviderCallTelemetry>();
     public DbSet<AiProviderPricingVersion> AiProviderPricingVersions => Set<AiProviderPricingVersion>();
     public DbSet<CustomerUsagePriceVersion> CustomerUsagePriceVersions => Set<CustomerUsagePriceVersion>();
+    public DbSet<CustomerBillableUsageOperation> CustomerBillableUsageOperations => Set<CustomerBillableUsageOperation>();
     public DbSet<User> Users => Set<User>();
     public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
     public DbSet<OrganizationInvitation> OrganizationInvitations => Set<OrganizationInvitation>();
@@ -78,6 +79,7 @@ public sealed class ApplicationDbContext(
         NormalizeUserEmails();
         ValidateImmutablePricingVersions();
         ValidateImmutableCustomerUsagePriceVersions();
+        ValidateImmutableCustomerBillableUsageOperations();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChanges();
@@ -88,6 +90,7 @@ public sealed class ApplicationDbContext(
         NormalizeUserEmails();
         ValidateImmutablePricingVersions();
         ValidateImmutableCustomerUsagePriceVersions();
+        ValidateImmutableCustomerBillableUsageOperations();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChangesAsync(cancellationToken);
@@ -156,6 +159,15 @@ public sealed class ApplicationDbContext(
             .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
         {
             throw new InvalidOperationException("Published customer usage price versions are immutable.");
+        }
+    }
+
+    private void ValidateImmutableCustomerBillableUsageOperations()
+    {
+        if (ChangeTracker.Entries<CustomerBillableUsageOperation>()
+            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
+        {
+            throw new InvalidOperationException("Customer billable usage operations are immutable.");
         }
     }
 

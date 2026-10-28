@@ -39,6 +39,7 @@ public sealed class Company : AuditableEntity
     public ICollection<TenantApiKey> TenantApiKeys { get; set; } = [];
     public ICollection<UsageRecord> UsageRecords { get; set; } = [];
     public ICollection<UsageOperation> UsageOperations { get; set; } = [];
+    public ICollection<CustomerBillableUsageOperation> CustomerBillableUsageOperations { get; set; } = [];
     public ICollection<ServiceProvider> ServiceProviders { get; set; } = [];
     public ICollection<ServiceRequest> ServiceRequests { get; set; } = [];
     public ICollection<Payment> Payments { get; set; } = [];
