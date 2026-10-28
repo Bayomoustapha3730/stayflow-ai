@@ -48,6 +48,18 @@ public interface ICustomerBillingDeliveryStore
         string? externalRequestId,
         string? failureCode,
         DateTimeOffset occurredAtUtc);
+
+    Task<bool> RecordReconciledDeliveredAsync(
+        Guid deliveryId,
+        string? externalObjectId,
+        string? externalRequestId,
+        DateTimeOffset occurredAtUtc);
+
+    Task<bool> RecordReconciledRejectedAsync(
+        Guid deliveryId,
+        string failureCode,
+        string? externalRequestId,
+        DateTimeOffset occurredAtUtc);
 }
 
 public interface ICustomerBillingDeliveryCoordinator

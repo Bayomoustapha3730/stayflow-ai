@@ -1,8 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using StayFlow.Api.Data;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services;
+using StayFlow.Api.Services.Billing;
 
 namespace StayFlow.Api.Tests;
 
@@ -126,6 +129,55 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
         Assert.False(await TryStartAsync(deliveryId, At(13)));
     }
 
+    [PostgresFact]
+    public async Task Dispatcher_ConcurrentCallsClaimAndSendExactlyOnce()
+    {
+        var billingOperationId = await SeedBillingOperationAsync();
+        var prepared = await PrepareAsync(billingOperationId);
+        var deliveryId = prepared.Delivery!.Id;
+        var transport = new CountingTransport();
+
+        var results = await Task.WhenAll(
+            DispatchAsync(deliveryId, transport),
+            DispatchAsync(deliveryId, transport));
+
+        Assert.Equal(1, transport.SendCount);
+        Assert.Single(results, result => result.Outcome == CustomerBillingDeliveryDispatcherOutcome.Delivered);
+        Assert.Single(results, result => result.Outcome == CustomerBillingDeliveryDispatcherOutcome.NotEligible);
+        await using var verify = new ApplicationDbContext(dbOptions);
+        var delivery = await verify.CustomerBillingDeliveries.SingleAsync(item => item.Id == deliveryId);
+        Assert.Equal(CustomerBillingDeliveryState.Delivered, delivery.DeliveryState);
+        Assert.Equal(1, delivery.AttemptCount);
+    }
+
+    private async Task<CustomerBillingDeliveryDispatcherResult> DispatchAsync(
+        Guid deliveryId,
+        CountingTransport transport)
+    {
+        await using var context = new ApplicationDbContext(dbOptions);
+        var dispatcher = new CustomerBillingDeliveryDispatcher(
+            new CustomerBillingDeliveryStore(context),
+            transport,
+            Options.Create(new CustomerUsageBillingOptions
+            {
+                Enabled = true,
+                Metrics = new Dictionary<string, CustomerUsageBillingMetricOptions>(StringComparer.Ordinal)
+                {
+                    [UsageMetric.AiTokens.ToString()] = new()
+                    {
+                        Transport = "StripeMeter",
+                        MeterEventName = "ai_tokens",
+                        CustomerPayloadKey = "customer",
+                        ValuePayloadKey = "value",
+                        BillableQuantityIsExternalUnit = true
+                    }
+                }
+            }),
+            TimeProvider.System,
+            NullLogger<CustomerBillingDeliveryDispatcher>.Instance);
+        return await dispatcher.DispatchAsync(deliveryId, CancellationToken.None);
+    }
+
     private async Task<CustomerBillingDeliveryPreparationResult> PrepareAsync(Guid billingOperationId)
     {
         await using var context = new ApplicationDbContext(dbOptions);
@@ -229,4 +281,31 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
 
     private static DateTimeOffset At(int days) =>
         new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero).AddDays(days);
+
+    private sealed class CountingTransport : ICustomerBillingExternalTransport
+    {
+        private int sendCount;
+
+        public int SendCount => Volatile.Read(ref sendCount);
+
+        public async Task<CustomerBillingExternalResult> SendAsync(
+            CustomerBillingExternalRequest request,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref sendCount);
+            await Task.Delay(50, cancellationToken);
+            return new CustomerBillingExternalResult(
+                CustomerBillingExternalTransportOutcome.Delivered,
+                "test_delivered",
+                "external-object",
+                "provider-request");
+        }
+
+        public Task<CustomerBillingExternalReconciliationResult> ReconcileAsync(
+            CustomerBillingExternalReconciliationRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CustomerBillingExternalReconciliationResult(
+                CustomerBillingExternalReconciliationOutcome.Unsupported,
+                "test_unsupported"));
+    }
 }

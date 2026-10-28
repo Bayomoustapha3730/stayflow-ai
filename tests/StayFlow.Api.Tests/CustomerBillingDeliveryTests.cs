@@ -1,8 +1,11 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using StayFlow.Api.Data;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services;
+using StayFlow.Api.Services.Billing;
 
 namespace StayFlow.Api.Tests;
 
@@ -355,6 +358,330 @@ public sealed class CustomerBillingDeliveryTests
         Assert.False(await store.RecordDeliveredAsync(delivery.Delivery!.Id, null, null, At(11)));
     }
 
+    [Fact]
+    public async Task Dispatcher_DeliveredOutcomeClaimsOnceAndPersistsSnapshotAndExternalIds()
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m,
+            billableQuantity: 3);
+        var deliveryId = await PrepareDeliveryAsync(harness);
+        var delivery = await GetDeliveryAsync(harness.Options, deliveryId);
+        var transport = new StubTransport
+        {
+            SendResult = new CustomerBillingExternalResult(
+                CustomerBillingExternalTransportOutcome.Delivered,
+                "meter_event_created",
+                "meter-event-1",
+                "request-1")
+        };
+
+        CustomerBillingDeliveryDispatcherResult result;
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            result = await CreateDispatcher(new CustomerBillingDeliveryStore(context), transport)
+                .DispatchAsync(deliveryId, CancellationToken.None);
+        }
+
+        var persisted = await GetDeliveryAsync(harness.Options, deliveryId);
+        Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.Delivered, result.Outcome);
+        Assert.Equal(CustomerBillingDeliveryState.Delivered, persisted.DeliveryState);
+        Assert.Equal(1, persisted.AttemptCount);
+        Assert.Equal("meter-event-1", persisted.ExternalObjectId);
+        Assert.Equal("request-1", persisted.ExternalRequestId);
+        Assert.Equal(1, transport.SendCount);
+        Assert.Equal(delivery.ExternalIdempotencyKey, transport.LastRequest!.ExternalIdempotencyKey);
+        Assert.Equal(delivery.BillableQuantitySnapshot, transport.LastRequest.BillableQuantity);
+        Assert.Equal(delivery.ChargeAmountSnapshot, transport.LastRequest.ChargeAmount);
+        Assert.Equal(delivery.PeriodStartUtc, transport.LastRequest.PeriodStartUtc);
+    }
+
+    [Fact]
+    public async Task Dispatcher_LostClaimAndSuppressedDeliveryNeverSend()
+    {
+        await using var claimHarness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m);
+        var claimedId = await PrepareDeliveryAsync(claimHarness);
+        var transport = new StubTransport();
+        await using (var context = new ApplicationDbContext(claimHarness.Options))
+        {
+            Assert.True(await new CustomerBillingDeliveryStore(context).TryStartDispatchAsync(claimedId, At(11)));
+        }
+
+        await using (var context = new ApplicationDbContext(claimHarness.Options))
+        {
+            var result = await CreateDispatcher(new CustomerBillingDeliveryStore(context), transport)
+                .DispatchAsync(claimedId, CancellationToken.None);
+            Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.NotEligible, result.Outcome);
+        }
+
+        await using var suppressedHarness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 0m);
+        var suppressedId = await PrepareDeliveryAsync(suppressedHarness);
+        await using (var context = new ApplicationDbContext(suppressedHarness.Options))
+        {
+            var result = await CreateDispatcher(new CustomerBillingDeliveryStore(context), transport)
+                .DispatchAsync(suppressedId, CancellationToken.None);
+            Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.NotEligible, result.Outcome);
+        }
+
+        Assert.Equal(0, transport.SendCount);
+    }
+
+    [Theory]
+    [InlineData(CustomerBillingExternalTransportOutcome.Rejected, CustomerBillingDeliveryFailureCategory.ProviderRejected, CustomerBillingDeliveryDispatcherOutcome.Rejected, false)]
+    [InlineData(CustomerBillingExternalTransportOutcome.RetryableUnavailable, CustomerBillingDeliveryFailureCategory.RetryableProviderUnavailable, CustomerBillingDeliveryDispatcherOutcome.RetryableFailure, true)]
+    public async Task Dispatcher_PersistsDefinitiveAndRetryableFailuresWithoutImmediateRetry(
+        CustomerBillingExternalTransportOutcome transportOutcome,
+        CustomerBillingDeliveryFailureCategory failureCategory,
+        CustomerBillingDeliveryDispatcherOutcome dispatcherOutcome,
+        bool retryAllowed)
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m);
+        var deliveryId = await PrepareDeliveryAsync(harness);
+        var transport = new StubTransport
+        {
+            SendResult = new CustomerBillingExternalResult(transportOutcome, "bounded_provider_code", null, "request-1")
+        };
+
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            var result = await CreateDispatcher(new CustomerBillingDeliveryStore(context), transport)
+                .DispatchAsync(deliveryId, CancellationToken.None);
+            Assert.Equal(dispatcherOutcome, result.Outcome);
+        }
+
+        var persisted = await GetDeliveryAsync(harness.Options, deliveryId);
+        Assert.Equal(CustomerBillingDeliveryState.Failed, persisted.DeliveryState);
+        Assert.Equal(failureCategory, persisted.LastFailureCategory);
+        Assert.Equal(1, transport.SendCount);
+
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            Assert.Equal(
+                retryAllowed,
+                await new CustomerBillingDeliveryStore(context).TryStartDispatchAsync(deliveryId, At(12)));
+        }
+
+        Assert.Equal(1, transport.SendCount);
+    }
+
+    [Fact]
+    public async Task Dispatcher_IndeterminateOutcomeCannotRedispatchAndReconciliationNeverSends()
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m);
+        var deliveryId = await PrepareDeliveryAsync(harness);
+        var transport = new StubTransport
+        {
+            SendResult = new CustomerBillingExternalResult(
+                CustomerBillingExternalTransportOutcome.Indeterminate,
+                "stripe_network_outcome_ambiguous")
+        };
+
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            var dispatcher = CreateDispatcher(new CustomerBillingDeliveryStore(context), transport);
+            var first = await dispatcher.DispatchAsync(deliveryId, CancellationToken.None);
+            var second = await dispatcher.DispatchAsync(deliveryId, CancellationToken.None);
+            Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.Indeterminate, first.Outcome);
+            Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.NotEligible, second.Outcome);
+        }
+
+        var persisted = await GetDeliveryAsync(harness.Options, deliveryId);
+        Assert.Equal(CustomerBillingDeliveryState.Indeterminate, persisted.DeliveryState);
+        Assert.Equal(1, persisted.AttemptCount);
+        Assert.Equal(1, transport.SendCount);
+
+        transport.ReconcileResult = new CustomerBillingExternalReconciliationResult(
+            CustomerBillingExternalReconciliationOutcome.NotFound,
+            "provider_event_not_found");
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            var result = await CreateDispatcher(new CustomerBillingDeliveryStore(context), transport)
+                .ReconcileAsync(deliveryId, CancellationToken.None);
+            Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.NotFound, result.Outcome);
+            Assert.Equal(CustomerBillingDeliveryState.Indeterminate, result.State);
+        }
+
+        Assert.Equal(1, transport.SendCount);
+        Assert.Equal(1, transport.ReconcileCount);
+        Assert.Equal(persisted.ExternalIdempotencyKey, transport.LastReconciliationRequest!.ExternalIdempotencyKey);
+    }
+
+    [Theory]
+    [InlineData(CustomerBillingExternalReconciliationOutcome.FoundDelivered, CustomerBillingDeliveryState.Delivered, CustomerBillingDeliveryDispatcherOutcome.Delivered)]
+    [InlineData(CustomerBillingExternalReconciliationOutcome.FoundRejected, CustomerBillingDeliveryState.Failed, CustomerBillingDeliveryDispatcherOutcome.Rejected)]
+    [InlineData(CustomerBillingExternalReconciliationOutcome.Unsupported, CustomerBillingDeliveryState.Indeterminate, CustomerBillingDeliveryDispatcherOutcome.Unsupported)]
+    [InlineData(CustomerBillingExternalReconciliationOutcome.StillIndeterminate, CustomerBillingDeliveryState.Indeterminate, CustomerBillingDeliveryDispatcherOutcome.StillIndeterminate)]
+    public async Task Dispatcher_ReconciliationPersistsOnlyDefinitiveOutcomes(
+        CustomerBillingExternalReconciliationOutcome reconciliationOutcome,
+        CustomerBillingDeliveryState expectedState,
+        CustomerBillingDeliveryDispatcherOutcome expectedOutcome)
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m);
+        var deliveryId = await PrepareDeliveryAsync(harness);
+        await MakeIndeterminateAsync(harness, deliveryId);
+        var transport = new StubTransport
+        {
+            ReconcileResult = new CustomerBillingExternalReconciliationResult(
+                reconciliationOutcome,
+                "reconciled_provider_code",
+                "meter-event-2",
+                "request-2")
+        };
+
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            var result = await CreateDispatcher(new CustomerBillingDeliveryStore(context), transport)
+                .ReconcileAsync(deliveryId, CancellationToken.None);
+            Assert.Equal(expectedOutcome, result.Outcome);
+        }
+
+        var persisted = await GetDeliveryAsync(harness.Options, deliveryId);
+        Assert.Equal(expectedState, persisted.DeliveryState);
+        Assert.Equal(0, transport.SendCount);
+        Assert.Equal(1, transport.ReconcileCount);
+        if (reconciliationOutcome == CustomerBillingExternalReconciliationOutcome.FoundDelivered)
+        {
+            Assert.Equal("meter-event-2", persisted.ExternalObjectId);
+            Assert.Equal("request-2", persisted.ExternalRequestId);
+        }
+
+        if (reconciliationOutcome == CustomerBillingExternalReconciliationOutcome.FoundRejected)
+        {
+            Assert.Equal(CustomerBillingDeliveryFailureCategory.ProviderRejected, persisted.LastFailureCategory);
+            await using var verify = new ApplicationDbContext(harness.Options);
+            Assert.False(await new CustomerBillingDeliveryStore(verify).TryStartDispatchAsync(deliveryId, At(14)));
+        }
+    }
+
+    [Fact]
+    public async Task Dispatcher_UnexpectedTransportExceptionRecordsIndeterminate()
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m);
+        var deliveryId = await PrepareDeliveryAsync(harness);
+        var transport = new StubTransport
+        {
+            SendException = new HttpRequestException("network outcome unclear")
+        };
+
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            var result = await CreateDispatcher(new CustomerBillingDeliveryStore(context), transport)
+                .DispatchAsync(deliveryId, CancellationToken.None);
+            Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.Indeterminate, result.Outcome);
+        }
+
+        var persisted = await GetDeliveryAsync(harness.Options, deliveryId);
+        Assert.Equal(CustomerBillingDeliveryState.Indeterminate, persisted.DeliveryState);
+        Assert.Equal("transport_exception", persisted.LastFailureCode);
+        Assert.Equal(1, transport.SendCount);
+    }
+
+    [Fact]
+    public async Task Dispatcher_PersistenceFailureDoesNotSendAgainAndMovesToIndeterminate()
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m);
+        var deliveryId = await PrepareDeliveryAsync(harness);
+        var original = await GetDeliveryAsync(harness.Options, deliveryId);
+        var transport = new StubTransport
+        {
+            SendResult = new CustomerBillingExternalResult(
+                CustomerBillingExternalTransportOutcome.Delivered,
+                "created",
+                "external-1")
+        };
+
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            var throwingStore = new DeliveredWriteFailingStore(new CustomerBillingDeliveryStore(context));
+            var result = await CreateDispatcher(throwingStore, transport).DispatchAsync(deliveryId, CancellationToken.None);
+            Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.PersistenceFailure, result.Outcome);
+        }
+
+        var persisted = await GetDeliveryAsync(harness.Options, deliveryId);
+        Assert.Equal(CustomerBillingDeliveryState.Indeterminate, persisted.DeliveryState);
+        Assert.Equal(original.ExternalIdempotencyKey, persisted.ExternalIdempotencyKey);
+        Assert.Equal(1, transport.SendCount);
+    }
+
+    [Fact]
+    public async Task Dispatcher_PersistsDeliveredOutcomeAfterCallerCancellation()
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m);
+        var deliveryId = await PrepareDeliveryAsync(harness);
+        using var cancellation = new CancellationTokenSource();
+        var transport = new StubTransport
+        {
+            SendHandler = (_, _) =>
+            {
+                cancellation.Cancel();
+                return Task.FromResult(new CustomerBillingExternalResult(
+                    CustomerBillingExternalTransportOutcome.Delivered,
+                    "created",
+                    "external-2"));
+            }
+        };
+
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            var result = await CreateDispatcher(new CustomerBillingDeliveryStore(context), transport)
+                .DispatchAsync(deliveryId, cancellation.Token);
+            Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.Delivered, result.Outcome);
+        }
+
+        Assert.Equal(CustomerBillingDeliveryState.Delivered, (await GetDeliveryAsync(harness.Options, deliveryId)).DeliveryState);
+    }
+
+    [Fact]
+    public async Task Dispatcher_DisabledUsageBillingDoesNotClaimOrSend()
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m);
+        var deliveryId = await PrepareDeliveryAsync(harness);
+        var transport = new StubTransport();
+
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            var result = await CreateDispatcher(
+                    new CustomerBillingDeliveryStore(context),
+                    transport,
+                    enabled: false)
+                .DispatchAsync(deliveryId, CancellationToken.None);
+            Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.ConfigurationError, result.Outcome);
+        }
+
+        var persisted = await GetDeliveryAsync(harness.Options, deliveryId);
+        Assert.Equal(CustomerBillingDeliveryState.Prepared, persisted.DeliveryState);
+        Assert.Equal(0, persisted.AttemptCount);
+        Assert.Equal(0, transport.SendCount);
+    }
+
     private static async Task<Guid> PrepareDeliveryAsync(Harness harness)
     {
         await using var context = new ApplicationDbContext(harness.Options);
@@ -376,6 +703,39 @@ public sealed class CustomerBillingDeliveryTests
         await using var context = new ApplicationDbContext(options);
         return await context.CustomerBillingDeliveries.CountAsync();
     }
+
+    private static async Task MakeIndeterminateAsync(Harness harness, Guid deliveryId)
+    {
+        await using var context = new ApplicationDbContext(harness.Options);
+        var store = new CustomerBillingDeliveryStore(context);
+        Assert.True(await store.TryStartDispatchAsync(deliveryId, At(11)));
+        Assert.True(await store.RecordIndeterminateAsync(deliveryId, null, "request-1", "ambiguous", At(12)));
+    }
+
+    private static CustomerBillingDeliveryDispatcher CreateDispatcher(
+        ICustomerBillingDeliveryStore store,
+        StubTransport transport,
+        bool enabled = true) =>
+        new(
+            store,
+            transport,
+            Options.Create(new CustomerUsageBillingOptions
+            {
+                Enabled = enabled,
+                Metrics = new Dictionary<string, CustomerUsageBillingMetricOptions>(StringComparer.Ordinal)
+                {
+                    [UsageMetric.AiTokens.ToString()] = new()
+                    {
+                        Transport = "StripeMeter",
+                        MeterEventName = "ai_tokens",
+                        CustomerPayloadKey = "stripe_customer_id",
+                        ValuePayloadKey = "value",
+                        BillableQuantityIsExternalUnit = true
+                    }
+                }
+            }),
+            TimeProvider.System,
+            NullLogger<CustomerBillingDeliveryDispatcher>.Instance);
 
     private static async Task<Harness> CreateHarnessAsync(
         CustomerBillableUsageState billingState,
@@ -489,6 +849,104 @@ public sealed class CustomerBillingDeliveryTests
 
     private static DateTimeOffset At(int days) =>
         new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero).AddDays(days);
+
+    private sealed class StubTransport : ICustomerBillingExternalTransport
+    {
+        public CustomerBillingExternalResult SendResult { get; set; } =
+            new(CustomerBillingExternalTransportOutcome.Indeterminate, "unspecified");
+
+        public CustomerBillingExternalReconciliationResult ReconcileResult { get; set; } =
+            new(CustomerBillingExternalReconciliationOutcome.Unsupported, "unsupported");
+
+        public Func<CustomerBillingExternalRequest, CancellationToken, Task<CustomerBillingExternalResult>>? SendHandler { get; set; }
+        public Exception? SendException { get; set; }
+        public int SendCount { get; private set; }
+        public int ReconcileCount { get; private set; }
+        public CustomerBillingExternalRequest? LastRequest { get; private set; }
+        public CustomerBillingExternalReconciliationRequest? LastReconciliationRequest { get; private set; }
+
+        public Task<CustomerBillingExternalResult> SendAsync(
+            CustomerBillingExternalRequest request,
+            CancellationToken cancellationToken)
+        {
+            SendCount++;
+            LastRequest = request;
+            if (SendException is not null)
+            {
+                return Task.FromException<CustomerBillingExternalResult>(SendException);
+            }
+
+            return SendHandler?.Invoke(request, cancellationToken) ?? Task.FromResult(SendResult);
+        }
+
+        public Task<CustomerBillingExternalReconciliationResult> ReconcileAsync(
+            CustomerBillingExternalReconciliationRequest request,
+            CancellationToken cancellationToken)
+        {
+            ReconcileCount++;
+            LastReconciliationRequest = request;
+            return Task.FromResult(ReconcileResult);
+        }
+    }
+
+    private sealed class DeliveredWriteFailingStore(ICustomerBillingDeliveryStore inner) : ICustomerBillingDeliveryStore
+    {
+        public Task<CustomerBillableUsageOperation?> GetBillingOperationAsync(
+            Guid billingOperationId,
+            CancellationToken cancellationToken) =>
+            inner.GetBillingOperationAsync(billingOperationId, cancellationToken);
+
+        public Task<CustomerBillingDelivery> PrepareAsync(Guid billingOperationId, DateTimeOffset preparedAtUtc) =>
+            inner.PrepareAsync(billingOperationId, preparedAtUtc);
+
+        public Task<CustomerBillingDelivery?> GetByIdAsync(Guid deliveryId, CancellationToken cancellationToken) =>
+            inner.GetByIdAsync(deliveryId, cancellationToken);
+
+        public Task<CustomerBillingDelivery?> GetByBillingOperationAsync(
+            Guid billingOperationId,
+            CancellationToken cancellationToken) =>
+            inner.GetByBillingOperationAsync(billingOperationId, cancellationToken);
+
+        public Task<bool> TryStartDispatchAsync(Guid deliveryId, DateTimeOffset occurredAtUtc) =>
+            inner.TryStartDispatchAsync(deliveryId, occurredAtUtc);
+
+        public Task<bool> RecordDeliveredAsync(
+            Guid deliveryId,
+            string? externalObjectId,
+            string? externalRequestId,
+            DateTimeOffset occurredAtUtc) =>
+            throw new InvalidOperationException("Simulated delivery persistence failure.");
+
+        public Task<bool> RecordFailedAsync(
+            Guid deliveryId,
+            CustomerBillingDeliveryFailureCategory failureCategory,
+            string failureCode,
+            string? externalRequestId,
+            DateTimeOffset occurredAtUtc) =>
+            inner.RecordFailedAsync(deliveryId, failureCategory, failureCode, externalRequestId, occurredAtUtc);
+
+        public Task<bool> RecordIndeterminateAsync(
+            Guid deliveryId,
+            string? externalObjectId,
+            string? externalRequestId,
+            string? failureCode,
+            DateTimeOffset occurredAtUtc) =>
+            inner.RecordIndeterminateAsync(deliveryId, externalObjectId, externalRequestId, failureCode, occurredAtUtc);
+
+        public Task<bool> RecordReconciledDeliveredAsync(
+            Guid deliveryId,
+            string? externalObjectId,
+            string? externalRequestId,
+            DateTimeOffset occurredAtUtc) =>
+            inner.RecordReconciledDeliveredAsync(deliveryId, externalObjectId, externalRequestId, occurredAtUtc);
+
+        public Task<bool> RecordReconciledRejectedAsync(
+            Guid deliveryId,
+            string failureCode,
+            string? externalRequestId,
+            DateTimeOffset occurredAtUtc) =>
+            inner.RecordReconciledRejectedAsync(deliveryId, failureCode, externalRequestId, occurredAtUtc);
+    }
 
     private sealed record Harness(
         SqliteConnection Connection,
