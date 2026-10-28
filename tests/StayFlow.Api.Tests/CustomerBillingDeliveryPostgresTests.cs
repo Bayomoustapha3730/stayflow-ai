@@ -137,6 +137,8 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
         var deliveryId = prepared.Delivery!.Id;
         var transport = new CountingTransport();
 
+        var discoveries = await Task.WhenAll(DiscoverAsync(), DiscoverAsync());
+        Assert.All(discoveries, candidates => Assert.Contains(deliveryId, candidates));
         var results = await Task.WhenAll(
             DispatchAsync(deliveryId, transport),
             DispatchAsync(deliveryId, transport));
@@ -148,6 +150,122 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
         var delivery = await verify.CustomerBillingDeliveries.SingleAsync(item => item.Id == deliveryId);
         Assert.Equal(CustomerBillingDeliveryState.Delivered, delivery.DeliveryState);
         Assert.Equal(1, delivery.AttemptCount);
+    }
+
+    private async Task<IReadOnlyList<Guid>> DiscoverAsync()
+    {
+        await using var context = new ApplicationDbContext(dbOptions);
+        return await new CustomerBillingDeliveryStore(context).GetDispatchCandidatesAsync(
+            25,
+            At(10),
+            TimeSpan.FromMinutes(5),
+            CancellationToken.None);
+    }
+
+    [PostgresFact]
+    public async Task Store_DispatchDiscoveryUsesRetryDelayAndExcludesIndeterminate()
+    {
+        var billingOperationId = await SeedBillingOperationAsync();
+        var prepared = await PrepareAsync(billingOperationId);
+        var deliveryId = prepared.Delivery!.Id;
+
+        await using (var context = new ApplicationDbContext(dbOptions))
+        {
+            var candidates = await new CustomerBillingDeliveryStore(context).GetDispatchCandidatesAsync(
+                25,
+                At(10),
+                TimeSpan.FromMinutes(5),
+                CancellationToken.None);
+            Assert.Contains(deliveryId, candidates);
+        }
+
+        var result = await DispatchAsync(deliveryId, new CountingTransport(
+            CustomerBillingExternalTransportOutcome.RetryableUnavailable));
+        Assert.Equal(CustomerBillingDeliveryDispatcherOutcome.RetryableFailure, result.Outcome);
+        var now = DateTimeOffset.UtcNow.AddSeconds(1);
+        await using (var context = new ApplicationDbContext(dbOptions))
+        {
+            var store = new CustomerBillingDeliveryStore(context);
+            Assert.Empty(await store.GetDispatchCandidatesAsync(
+                25,
+                now,
+                TimeSpan.FromHours(1),
+                CancellationToken.None));
+            Assert.Contains(deliveryId, await store.GetDispatchCandidatesAsync(
+                25,
+                now,
+                TimeSpan.Zero,
+                CancellationToken.None));
+            Assert.True(await store.TryStartDispatchAsync(deliveryId, now));
+            Assert.True(await store.RecordIndeterminateAsync(deliveryId, null, null, "uncertain", now));
+            Assert.DoesNotContain(deliveryId, await store.GetDispatchCandidatesAsync(
+                25,
+                now.AddSeconds(1),
+                TimeSpan.Zero,
+                CancellationToken.None));
+        }
+    }
+
+    [PostgresFact]
+    public async Task Store_ReconciliationDiscoveryUsesDurableCadence()
+    {
+        var billingOperationId = await SeedBillingOperationAsync();
+        var prepared = await PrepareAsync(billingOperationId);
+        var deliveryId = prepared.Delivery!.Id;
+        await using var context = new ApplicationDbContext(dbOptions);
+        var store = new CustomerBillingDeliveryStore(context);
+        Assert.True(await store.TryStartDispatchAsync(deliveryId, At(11)));
+        Assert.True(await store.RecordIndeterminateAsync(deliveryId, null, null, "uncertain", At(12)));
+
+        Assert.Empty(await store.GetReconciliationCandidatesAsync(
+            25,
+            At(12).AddMinutes(4),
+            TimeSpan.FromMinutes(5),
+            CancellationToken.None));
+        Assert.Contains(deliveryId, await store.GetReconciliationCandidatesAsync(
+            25,
+            At(12).AddMinutes(5),
+            TimeSpan.FromMinutes(5),
+            CancellationToken.None));
+        Assert.True(await store.RecordReconciliationAttemptAsync(deliveryId, At(13), CancellationToken.None));
+        Assert.Empty(await store.GetReconciliationCandidatesAsync(
+            25,
+            At(13).AddMinutes(4),
+            TimeSpan.FromMinutes(5),
+            CancellationToken.None));
+    }
+
+    [PostgresFact]
+    public async Task Store_AbandonedDispatchRecoveryIsConditionalAndDoesNotIncrementAttempts()
+    {
+        var billingOperationId = await SeedBillingOperationAsync();
+        var prepared = await PrepareAsync(billingOperationId);
+        var deliveryId = prepared.Delivery!.Id;
+        await using (var context = new ApplicationDbContext(dbOptions))
+        {
+            var store = new CustomerBillingDeliveryStore(context);
+            Assert.True(await store.TryStartDispatchAsync(deliveryId, At(11)));
+            Assert.Empty(await store.GetAbandonedDispatchCandidatesAsync(25, At(10), CancellationToken.None));
+            Assert.Contains(deliveryId, await store.GetAbandonedDispatchCandidatesAsync(25, At(11), CancellationToken.None));
+            Assert.True(await store.MarkAbandonedDispatchIndeterminateAsync(
+                deliveryId,
+                At(11),
+                At(12),
+                CancellationToken.None));
+            Assert.False(await store.MarkAbandonedDispatchIndeterminateAsync(
+                deliveryId,
+                At(11),
+                At(13),
+                CancellationToken.None));
+        }
+
+        await using var verify = new ApplicationDbContext(dbOptions);
+        var recovered = await verify.CustomerBillingDeliveries.SingleAsync(item => item.Id == deliveryId);
+        Assert.Equal(CustomerBillingDeliveryState.Indeterminate, recovered.DeliveryState);
+        Assert.Equal(1, recovered.AttemptCount);
+        Assert.Equal("WorkerRecoveryRequired", recovered.LastFailureCode);
+        Assert.Equal(At(11), recovered.LastAttemptAtUtc);
+        Assert.Equal(At(12), recovered.IndeterminateAtUtc);
     }
 
     private async Task<CustomerBillingDeliveryDispatcherResult> DispatchAsync(
@@ -282,7 +400,9 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
     private static DateTimeOffset At(int days) =>
         new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero).AddDays(days);
 
-    private sealed class CountingTransport : ICustomerBillingExternalTransport
+    private sealed class CountingTransport(
+        CustomerBillingExternalTransportOutcome outcome = CustomerBillingExternalTransportOutcome.Delivered)
+        : ICustomerBillingExternalTransport
     {
         private int sendCount;
 
@@ -295,8 +415,10 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
             Interlocked.Increment(ref sendCount);
             await Task.Delay(50, cancellationToken);
             return new CustomerBillingExternalResult(
-                CustomerBillingExternalTransportOutcome.Delivered,
-                "test_delivered",
+                outcome,
+                outcome == CustomerBillingExternalTransportOutcome.Delivered
+                    ? "test_delivered"
+                    : "test_retryable_unavailable",
                 "external-object",
                 "provider-request");
         }

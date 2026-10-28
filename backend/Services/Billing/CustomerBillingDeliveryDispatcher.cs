@@ -212,6 +212,17 @@ public sealed class CustomerBillingDeliveryDispatcher(
             return CreateResult(delivery, CustomerBillingDeliveryDispatcherOutcome.NotEligible, "delivery_not_indeterminate");
         }
 
+        if (!await deliveryStore.RecordReconciliationAttemptAsync(deliveryId, timeProvider.GetUtcNow(), cancellationToken))
+        {
+            var current = await deliveryStore.GetByIdAsync(deliveryId, cancellationToken);
+            return current is null
+                ? Missing(deliveryId)
+                : CreateResult(
+                    current,
+                    CustomerBillingDeliveryDispatcherOutcome.PersistenceFailure,
+                    "reconciliation_attempt_persistence_failed");
+        }
+
         CustomerBillingExternalReconciliationResult reconciliationResult;
         try
         {

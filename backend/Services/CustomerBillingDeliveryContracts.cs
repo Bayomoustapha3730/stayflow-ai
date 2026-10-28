@@ -27,6 +27,34 @@ public interface ICustomerBillingDeliveryStore
         Guid billingOperationId,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<Guid>> GetDispatchCandidatesAsync(
+        int limit,
+        DateTimeOffset now,
+        TimeSpan retryDelay,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<Guid>> GetReconciliationCandidatesAsync(
+        int limit,
+        DateTimeOffset now,
+        TimeSpan reconciliationDelay,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<Guid>> GetAbandonedDispatchCandidatesAsync(
+        int limit,
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken);
+
+    Task<bool> MarkAbandonedDispatchIndeterminateAsync(
+        Guid deliveryId,
+        DateTimeOffset cutoff,
+        DateTimeOffset occurredAtUtc,
+        CancellationToken cancellationToken);
+
+    Task<bool> RecordReconciliationAttemptAsync(
+        Guid deliveryId,
+        DateTimeOffset occurredAtUtc,
+        CancellationToken cancellationToken);
+
     Task<bool> TryStartDispatchAsync(Guid deliveryId, DateTimeOffset occurredAtUtc);
 
     Task<bool> RecordDeliveredAsync(

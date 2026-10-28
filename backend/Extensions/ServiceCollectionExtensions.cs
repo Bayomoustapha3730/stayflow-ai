@@ -407,6 +407,13 @@ public static class ServiceCollectionExtensions
         services.AddScoped<Services.ICustomerBillingDeliveryStore, Services.CustomerBillingDeliveryStore>();
         services.AddScoped<Services.ICustomerBillingDeliveryCoordinator, Services.CustomerBillingDeliveryCoordinator>();
         services.AddScoped<Services.Billing.ICustomerBillingDeliveryDispatcher, Services.Billing.CustomerBillingDeliveryDispatcher>();
+        services.AddSingleton<
+            Microsoft.Extensions.Options.IValidateOptions<Services.Billing.CustomerBillingDeliveryWorkerOptions>,
+            Services.Billing.CustomerBillingDeliveryWorkerOptionsValidator>();
+        services.AddOptions<Services.Billing.CustomerBillingDeliveryWorkerOptions>()
+            .Bind(configuration.GetSection(Services.Billing.CustomerBillingDeliveryWorkerOptions.SectionName))
+            .ValidateOnStart();
+        services.AddHostedService<Services.Billing.CustomerBillingDeliveryWorker>();
         services.AddScoped<Services.IAIOrchestrator, Services.AIOrchestrator>();
         services.AddScoped<Services.AI.Orchestration.IAiProviderCallTelemetryStore, Services.AI.Orchestration.AiProviderCallTelemetryStore>();
         services.AddScoped<Repositories.IAuthRepository, Repositories.AuthRepository>();

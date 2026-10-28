@@ -81,6 +81,112 @@ public sealed class CustomerBillingDeliveryStore(ApplicationDbContext dbContext)
                 && delivery.DeliveryKind == CustomerBillingDeliveryKind.PendingExternalBilling,
                 cancellationToken);
 
+    public async Task<IReadOnlyList<Guid>> GetDispatchCandidatesAsync(
+        int limit,
+        DateTimeOffset now,
+        TimeSpan retryDelay,
+        CancellationToken cancellationToken)
+    {
+        ValidateLimit(limit);
+        ValidateUtc(now, nameof(now));
+        ValidateDelay(retryDelay, nameof(retryDelay));
+        var retryCutoff = now - retryDelay;
+
+        return await dbContext.CustomerBillingDeliveries
+            .AsNoTracking()
+            .Where(delivery => delivery.DeliveryState == CustomerBillingDeliveryState.Prepared
+                || (delivery.DeliveryState == CustomerBillingDeliveryState.Failed
+                    && delivery.LastFailureCategory == CustomerBillingDeliveryFailureCategory.RetryableProviderUnavailable
+                    && delivery.LastAttemptAtUtc != null
+                    && delivery.LastAttemptAtUtc <= retryCutoff))
+            .OrderBy(delivery => delivery.DeliveryState == CustomerBillingDeliveryState.Prepared
+                ? delivery.CreatedAtUtc
+                : delivery.LastAttemptAtUtc)
+            .ThenBy(delivery => delivery.Id)
+            .Select(delivery => delivery.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetReconciliationCandidatesAsync(
+        int limit,
+        DateTimeOffset now,
+        TimeSpan reconciliationDelay,
+        CancellationToken cancellationToken)
+    {
+        ValidateLimit(limit);
+        ValidateUtc(now, nameof(now));
+        ValidateDelay(reconciliationDelay, nameof(reconciliationDelay));
+        var cutoff = now - reconciliationDelay;
+
+        return await dbContext.CustomerBillingDeliveries
+            .AsNoTracking()
+            .Where(delivery => delivery.DeliveryState == CustomerBillingDeliveryState.Indeterminate
+                && delivery.UpdatedAtUtc <= cutoff)
+            .OrderBy(delivery => delivery.UpdatedAtUtc)
+            .ThenBy(delivery => delivery.Id)
+            .Select(delivery => delivery.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<Guid>> GetAbandonedDispatchCandidatesAsync(
+        int limit,
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken)
+    {
+        ValidateLimit(limit);
+        ValidateUtc(cutoff, nameof(cutoff));
+
+        return await dbContext.CustomerBillingDeliveries
+            .AsNoTracking()
+            .Where(delivery => delivery.DeliveryState == CustomerBillingDeliveryState.Dispatching
+                && delivery.LastAttemptAtUtc != null
+                && delivery.LastAttemptAtUtc <= cutoff)
+            .OrderBy(delivery => delivery.LastAttemptAtUtc)
+            .ThenBy(delivery => delivery.Id)
+            .Select(delivery => delivery.Id)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<bool> MarkAbandonedDispatchIndeterminateAsync(
+        Guid deliveryId,
+        DateTimeOffset cutoff,
+        DateTimeOffset occurredAtUtc,
+        CancellationToken cancellationToken)
+    {
+        ValidateUtc(cutoff, nameof(cutoff));
+        ValidateUtc(occurredAtUtc, nameof(occurredAtUtc));
+        var changed = await dbContext.CustomerBillingDeliveries
+            .Where(delivery => delivery.Id == deliveryId
+                && delivery.DeliveryState == CustomerBillingDeliveryState.Dispatching
+                && delivery.LastAttemptAtUtc != null
+                && delivery.LastAttemptAtUtc <= cutoff)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(delivery => delivery.DeliveryState, CustomerBillingDeliveryState.Indeterminate)
+                .SetProperty(delivery => delivery.DeliveryReason, CustomerBillingDeliveryReason.IndeterminateExternalOutcome)
+                .SetProperty(delivery => delivery.IndeterminateAtUtc, occurredAtUtc)
+                .SetProperty(delivery => delivery.LastFailureCategory, (CustomerBillingDeliveryFailureCategory?)null)
+                .SetProperty(delivery => delivery.LastFailureCode, "WorkerRecoveryRequired")
+                .SetProperty(delivery => delivery.UpdatedAtUtc, occurredAtUtc), cancellationToken);
+        return changed == 1;
+    }
+
+    public async Task<bool> RecordReconciliationAttemptAsync(
+        Guid deliveryId,
+        DateTimeOffset occurredAtUtc,
+        CancellationToken cancellationToken)
+    {
+        ValidateUtc(occurredAtUtc, nameof(occurredAtUtc));
+        var changed = await dbContext.CustomerBillingDeliveries
+            .Where(delivery => delivery.Id == deliveryId
+                && delivery.DeliveryState == CustomerBillingDeliveryState.Indeterminate)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(delivery => delivery.UpdatedAtUtc, occurredAtUtc), cancellationToken);
+        return changed == 1;
+    }
+
     public async Task<bool> TryStartDispatchAsync(Guid deliveryId, DateTimeOffset occurredAtUtc)
     {
         ValidateUtc(occurredAtUtc, nameof(occurredAtUtc));
@@ -279,6 +385,22 @@ public sealed class CustomerBillingDeliveryStore(ApplicationDbContext dbContext)
         if (value.Offset != TimeSpan.Zero)
         {
             throw new ArgumentException("Timestamps must use UTC.", parameterName);
+        }
+    }
+
+    private static void ValidateLimit(int limit)
+    {
+        if (limit is < 1 or > 100)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "Candidate query limits must be between 1 and 100.");
+        }
+    }
+
+    private static void ValidateDelay(TimeSpan delay, string parameterName)
+    {
+        if (delay < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(parameterName, "Candidate delays cannot be negative.");
         }
     }
 

@@ -907,6 +907,39 @@ public sealed class CustomerBillingDeliveryTests
             CancellationToken cancellationToken) =>
             inner.GetByBillingOperationAsync(billingOperationId, cancellationToken);
 
+        public Task<IReadOnlyList<Guid>> GetDispatchCandidatesAsync(
+            int limit,
+            DateTimeOffset now,
+            TimeSpan retryDelay,
+            CancellationToken cancellationToken) =>
+            inner.GetDispatchCandidatesAsync(limit, now, retryDelay, cancellationToken);
+
+        public Task<IReadOnlyList<Guid>> GetReconciliationCandidatesAsync(
+            int limit,
+            DateTimeOffset now,
+            TimeSpan reconciliationDelay,
+            CancellationToken cancellationToken) =>
+            inner.GetReconciliationCandidatesAsync(limit, now, reconciliationDelay, cancellationToken);
+
+        public Task<IReadOnlyList<Guid>> GetAbandonedDispatchCandidatesAsync(
+            int limit,
+            DateTimeOffset cutoff,
+            CancellationToken cancellationToken) =>
+            inner.GetAbandonedDispatchCandidatesAsync(limit, cutoff, cancellationToken);
+
+        public Task<bool> MarkAbandonedDispatchIndeterminateAsync(
+            Guid deliveryId,
+            DateTimeOffset cutoff,
+            DateTimeOffset occurredAtUtc,
+            CancellationToken cancellationToken) =>
+            inner.MarkAbandonedDispatchIndeterminateAsync(deliveryId, cutoff, occurredAtUtc, cancellationToken);
+
+        public Task<bool> RecordReconciliationAttemptAsync(
+            Guid deliveryId,
+            DateTimeOffset occurredAtUtc,
+            CancellationToken cancellationToken) =>
+            inner.RecordReconciliationAttemptAsync(deliveryId, occurredAtUtc, cancellationToken);
+
         public Task<bool> TryStartDispatchAsync(Guid deliveryId, DateTimeOffset occurredAtUtc) =>
             inner.TryStartDispatchAsync(deliveryId, occurredAtUtc);
 
