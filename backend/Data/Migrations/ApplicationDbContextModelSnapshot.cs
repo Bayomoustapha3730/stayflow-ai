@@ -1158,6 +1158,162 @@ namespace backend.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("StayFlow.Api.Models.CustomerBillingDelivery", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("BillableQuantitySnapshot")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("BillingReasonSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("BillingStateSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<decimal>("ChargeAmountSnapshot")
+                        .HasPrecision(28, 18)
+                        .HasColumnType("numeric(28,18)");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CurrencySnapshot")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<Guid>("CustomerBillableUsageOperationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CustomerUsagePriceVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("DeliveredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeliveryKind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("DeliveryProvider")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("DeliveryReason")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("DeliveryState")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("ExternalIdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("ExternalObjectId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ExternalRequestId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset?>("FirstAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("IndeterminateAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("LastAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastFailureCategory")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("LastFailureCode")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Metric")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTimeOffset>("PeriodEndUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("PeriodStartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SubscriptionPlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantSubscriptionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("CustomerUsagePriceVersionId");
+
+                    b.HasIndex("ExternalIdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_CustomerBillingDeliveries_ExternalIdempotencyKey");
+
+                    b.HasIndex("SubscriptionPlanId");
+
+                    b.HasIndex("TenantSubscriptionId");
+
+                    b.HasIndex("DeliveryState", "CreatedAtUtc");
+
+                    b.HasIndex("CustomerBillableUsageOperationId", "DeliveryProvider", "DeliveryKind")
+                        .IsUnique()
+                        .HasDatabaseName("UX_CustomerBillingDeliveries_BillingOperationProviderKind");
+
+                    b.ToTable("CustomerBillingDeliveries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_CustomerBillingDeliveries_AttemptCount", "\"AttemptCount\" >= 0");
+
+                            t.HasCheckConstraint("CK_CustomerBillingDeliveries_BoundedValues", "\"DeliveryProvider\" = 'Stripe' AND \"DeliveryKind\" = 'PendingExternalBilling' AND \"DeliveryState\" IN ('Prepared', 'Dispatching', 'Delivered', 'Failed', 'Indeterminate', 'Suppressed') AND \"DeliveryReason\" IN ('Prepared', 'DispatchClaimed', 'Delivered', 'ZeroChargeSuppressed', 'ProviderRejected', 'ProviderUnavailable', 'Timeout', 'Canceled', 'NetworkFailure', 'PersistenceFailure', 'IndeterminateExternalOutcome', 'ConfigurationMissing', 'InvalidSubscriptionMapping', 'InvalidPriceMapping') AND \"BillingStateSnapshot\" = 'Calculated' AND \"BillingReasonSnapshot\" = 'Calculated' AND \"Metric\" IN ('Users', 'Properties', 'Reservations', 'AiRequests', 'AiTokens', 'WhatsAppMessages', 'ApiRequests', 'StorageBytes', 'FileUploads')");
+
+                            t.HasCheckConstraint("CK_CustomerBillingDeliveries_DeliveryTimestamps", "(\"DeliveryState\" = 'Delivered' AND \"DeliveredAtUtc\" IS NOT NULL) OR (\"DeliveryState\" <> 'Delivered' AND \"DeliveredAtUtc\" IS NULL)");
+
+                            t.HasCheckConstraint("CK_CustomerBillingDeliveries_FailureCategory", "\"LastFailureCategory\" IS NULL OR \"LastFailureCategory\" IN ('ProviderRejected', 'ProviderUnavailable', 'Timeout', 'Canceled', 'NetworkFailure', 'PersistenceFailure', 'ConfigurationMissing', 'InvalidSubscriptionMapping', 'InvalidPriceMapping', 'RetryableProviderUnavailable')");
+
+                            t.HasCheckConstraint("CK_CustomerBillingDeliveries_FinancialFacts", "\"BillableQuantitySnapshot\" >= 0 AND \"ChargeAmountSnapshot\" >= 0 AND \"CurrencySnapshot\" = 'USD'");
+
+                            t.HasCheckConstraint("CK_CustomerBillingDeliveries_IdempotencyKey", "length(\"ExternalIdempotencyKey\") > 0");
+
+                            t.HasCheckConstraint("CK_CustomerBillingDeliveries_Identity", "\"CompanyId\" <> '00000000-0000-0000-0000-000000000000' AND \"CustomerBillableUsageOperationId\" <> '00000000-0000-0000-0000-000000000000' AND \"TenantSubscriptionId\" <> '00000000-0000-0000-0000-000000000000' AND \"SubscriptionPlanId\" <> '00000000-0000-0000-0000-000000000000' AND \"CustomerUsagePriceVersionId\" <> '00000000-0000-0000-0000-000000000000'");
+
+                            t.HasCheckConstraint("CK_CustomerBillingDeliveries_Period", "\"PeriodStartUtc\" < \"PeriodEndUtc\"");
+                        });
+                });
+
             modelBuilder.Entity("StayFlow.Api.Models.CustomerUsagePriceVersion", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5140,6 +5296,39 @@ namespace backend.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("UsageOperation");
+                });
+
+            modelBuilder.Entity("StayFlow.Api.Models.CustomerBillingDelivery", b =>
+                {
+                    b.HasOne("StayFlow.Api.Models.Company", null)
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.CustomerBillableUsageOperation", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerBillableUsageOperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.CustomerUsagePriceVersion", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerUsagePriceVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.SubscriptionPlan", null)
+                        .WithMany()
+                        .HasForeignKey("SubscriptionPlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StayFlow.Api.Models.TenantSubscription", null)
+                        .WithMany()
+                        .HasForeignKey("TenantSubscriptionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("StayFlow.Api.Models.CustomerUsagePriceVersion", b =>

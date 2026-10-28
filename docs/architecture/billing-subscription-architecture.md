@@ -79,3 +79,13 @@ Sprint 20B introduces tenant-safe Stripe billing orchestration for checkout, pla
 - Reports use the persisted `PeriodStartUtc`/`PeriodEndUtc` snapshots and select range periods by `PeriodStartUtc` in a half-open interval. Historical prices are never recalculated.
 - Summary, breakdown, and accounting-reconciliation reads are restricted to the `platform.admin` authorization policy and permission.
 - These reports reconcile usage-accounting facts only. No mapping to invoice line items exists yet, and no Stripe usage submission or invoice reconciliation is performed.
+
+## Customer billing delivery outbox
+
+- `CustomerBillableUsageOperation` remains the authoritative internal accounting fact. A durable `CustomerBillingDelivery` snapshots that fact before any future Stripe transport can run.
+- Each operation has at most one delivery per provider and kind. The persisted external idempotency key is derived from the durable delivery ID and remains stable across retries; retries never create a new delivery identity.
+- Delivery is downstream of accounting and quota admission. It does not read AI provider cost telemetry, change quota behavior, or recalculate historical customer charges.
+- Only `Calculated` USD facts with a persisted price version are eligible. A calculated zero-charge fact is retained as `Suppressed`; `Unknown` and `NotBillable` facts do not create external deliveries.
+- Dispatch claims use conditional database updates. Only `Prepared` and explicitly retryable `Failed` rows can be claimed. `Delivered` and `Indeterminate` rows cannot be automatically redispatched; timeout/network failures are not automatically retryable unless positively classified as `RetryableProviderUnavailable`.
+- An ambiguous external outcome remains `Indeterminate` until a later provider-reconciliation phase resolves it. Known outcomes are persisted without honoring caller cancellation, and a persistence failure cannot create a second local delivery or idempotency key.
+- This phase adds no Stripe request, invoice item, invoice, payment collection, public endpoint, or historical delivery sweep. Stripe transport and provider reconciliation remain future work.

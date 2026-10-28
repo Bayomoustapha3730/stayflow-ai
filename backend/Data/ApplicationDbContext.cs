@@ -22,6 +22,7 @@ public sealed class ApplicationDbContext(
     public DbSet<AiProviderPricingVersion> AiProviderPricingVersions => Set<AiProviderPricingVersion>();
     public DbSet<CustomerUsagePriceVersion> CustomerUsagePriceVersions => Set<CustomerUsagePriceVersion>();
     public DbSet<CustomerBillableUsageOperation> CustomerBillableUsageOperations => Set<CustomerBillableUsageOperation>();
+    public DbSet<CustomerBillingDelivery> CustomerBillingDeliveries => Set<CustomerBillingDelivery>();
     public DbSet<User> Users => Set<User>();
     public DbSet<OrganizationMember> OrganizationMembers => Set<OrganizationMember>();
     public DbSet<OrganizationInvitation> OrganizationInvitations => Set<OrganizationInvitation>();
@@ -80,6 +81,7 @@ public sealed class ApplicationDbContext(
         ValidateImmutablePricingVersions();
         ValidateImmutableCustomerUsagePriceVersions();
         ValidateImmutableCustomerBillableUsageOperations();
+        ValidateImmutableCustomerBillingDeliveries();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChanges();
@@ -91,6 +93,7 @@ public sealed class ApplicationDbContext(
         ValidateImmutablePricingVersions();
         ValidateImmutableCustomerUsagePriceVersions();
         ValidateImmutableCustomerBillableUsageOperations();
+        ValidateImmutableCustomerBillingDeliveries();
         ValidateTenantOwnership();
         UpdateAuditFields();
         return base.SaveChangesAsync(cancellationToken);
@@ -168,6 +171,44 @@ public sealed class ApplicationDbContext(
             .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted))
         {
             throw new InvalidOperationException("Customer billable usage operations are immutable.");
+        }
+    }
+
+    private void ValidateImmutableCustomerBillingDeliveries()
+    {
+        var immutableProperties = new[]
+        {
+            nameof(CustomerBillingDelivery.CompanyId),
+            nameof(CustomerBillingDelivery.CustomerBillableUsageOperationId),
+            nameof(CustomerBillingDelivery.TenantSubscriptionId),
+            nameof(CustomerBillingDelivery.SubscriptionPlanId),
+            nameof(CustomerBillingDelivery.Metric),
+            nameof(CustomerBillingDelivery.PeriodStartUtc),
+            nameof(CustomerBillingDelivery.PeriodEndUtc),
+            nameof(CustomerBillingDelivery.DeliveryProvider),
+            nameof(CustomerBillingDelivery.DeliveryKind),
+            nameof(CustomerBillingDelivery.BillingStateSnapshot),
+            nameof(CustomerBillingDelivery.BillingReasonSnapshot),
+            nameof(CustomerBillingDelivery.BillableQuantitySnapshot),
+            nameof(CustomerBillingDelivery.ChargeAmountSnapshot),
+            nameof(CustomerBillingDelivery.CurrencySnapshot),
+            nameof(CustomerBillingDelivery.CustomerUsagePriceVersionId),
+            nameof(CustomerBillingDelivery.ExternalIdempotencyKey),
+            nameof(CustomerBillingDelivery.CreatedAtUtc)
+        };
+
+        foreach (var entry in ChangeTracker.Entries<CustomerBillingDelivery>())
+        {
+            if (entry.State == EntityState.Deleted)
+            {
+                throw new InvalidOperationException("Customer billing deliveries cannot be deleted.");
+            }
+
+            if (entry.State == EntityState.Modified
+                && immutableProperties.Any(propertyName => entry.Property(propertyName).IsModified))
+            {
+                throw new InvalidOperationException("Customer billing delivery snapshots are immutable.");
+            }
         }
     }
 
