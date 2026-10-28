@@ -78,7 +78,7 @@ Sprint 20B introduces tenant-safe Stripe billing orchestration for checkout, pla
 - Internal reports sum persisted `ChargeAmount` only for `Calculated` USD operations; `Unknown` is not zero, `NotBillable` is excluded, and a calculated zero remains calculated.
 - Reports use the persisted `PeriodStartUtc`/`PeriodEndUtc` snapshots and select range periods by `PeriodStartUtc` in a half-open interval. Historical prices are never recalculated.
 - Summary, breakdown, and accounting-reconciliation reads are restricted to the `platform.admin` authorization policy and permission.
-- These reports reconcile usage-accounting facts only. No mapping to invoice line items exists yet, and no Stripe usage submission or invoice reconciliation is performed.
+- These reports reconcile usage-accounting facts only. No mapping to invoice line items exists yet, and no automatic Stripe usage submission or invoice reconciliation is performed.
 
 ## Customer billing delivery outbox
 
@@ -88,4 +88,14 @@ Sprint 20B introduces tenant-safe Stripe billing orchestration for checkout, pla
 - Only `Calculated` USD facts with a persisted price version are eligible. A calculated zero-charge fact is retained as `Suppressed`; `Unknown` and `NotBillable` facts do not create external deliveries.
 - Dispatch claims use conditional database updates. Only `Prepared` and explicitly retryable `Failed` rows can be claimed. `Delivered` and `Indeterminate` rows cannot be automatically redispatched; timeout/network failures are not automatically retryable unless positively classified as `RetryableProviderUnavailable`.
 - An ambiguous external outcome remains `Indeterminate` until a later provider-reconciliation phase resolves it. Known outcomes are persisted without honoring caller cancellation, and a persistence failure cannot create a second local delivery or idempotency key.
-- This phase adds no Stripe request, invoice item, invoice, payment collection, public endpoint, or historical delivery sweep. Stripe transport and provider reconciliation remain future work.
+- This phase adds no automatic Stripe request, invoice item, invoice, payment collection, public endpoint, or historical delivery sweep. Provider-driven reconciliation remains future work.
+
+## Stripe customer usage transport foundation
+
+- `Billing:PlanPriceIds` remains exclusively the base recurring subscription price mapping. `Billing:UsageBilling` is separate and defaults to `Enabled: false`; no production meter IDs or secrets are checked in.
+- A usage metric must have an exact-name `StripeMeter` mapping, configured meter event/customer/value payload keys, and an explicit `BillableQuantityIsExternalUnit: true` assertion. Missing or unsupported mappings fail closed; there is no fallback to a plan price or inferred quantity conversion.
+- Stripe meter events use the delivery's persisted idempotency key as both the Stripe event `identifier` and HTTP `Idempotency-Key`. The transport sends only the configured event name, mapped customer, and snapshotted billable quantity; the internal charge snapshot is not sent or repriced.
+- The meter event timestamp is the snapshotted period start and is rejected if it is outside Stripe's accepted event-time window. No occurrence-time fact is inferred.
+- Before a send, the Stripe adapter verifies the snapshotted subscription ID belongs to the same company and plan, has an external subscription mapping, is Active or Trialing, and that the company already has a Stripe customer mapping. It never creates customers.
+- A Stripe 429 is returned as explicitly retryable unavailable, other 4xx responses are rejected, and network errors, timeouts, 5xx responses, or malformed success responses are indeterminate. The transport performs no POST retry. Meter-event reconciliation is explicitly unsupported by this adapter.
+- Development transport outcomes are deterministic simulations and make no HTTP calls. Although the Stripe adapter supports a direct explicit call when enabled, no dispatcher, background service, endpoint, or caller is wired to send usage automatically.

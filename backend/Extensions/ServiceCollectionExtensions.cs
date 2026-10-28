@@ -167,6 +167,11 @@ public static class ServiceCollectionExtensions
                 && !string.IsNullOrWhiteSpace(options.BillingPortalReturnUrl),
                 "Billing URLs must be configured.")
             .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.Billing.CustomerUsageBillingOptions>,
+            Services.Billing.CustomerUsageBillingOptionsValidator>();
+        services.AddOptions<Services.Billing.CustomerUsageBillingOptions>()
+            .Bind(configuration.GetSection(Services.Billing.CustomerUsageBillingOptions.SectionName))
+            .ValidateOnStart();
         services.AddOptions<StayFlow.Api.Configuration.EmailDeliveryOptions>()
             .Bind(configuration.GetSection(StayFlow.Api.Configuration.EmailDeliveryOptions.SectionName))
             .Validate(options => options.Provider.Equals("Development", StringComparison.OrdinalIgnoreCase)
@@ -216,6 +221,25 @@ public static class ServiceCollectionExtensions
             return provider.Equals("Stripe", StringComparison.OrdinalIgnoreCase)
                 ? serviceProvider.GetRequiredService<Services.Billing.StripeBillingProvider>()
                 : serviceProvider.GetRequiredService<Services.Billing.DevelopmentBillingProvider>();
+        });
+        services.AddHttpClient(nameof(Services.Billing.StripeCustomerBillingTransport), client =>
+        {
+            client.BaseAddress = new Uri("https://api.stripe.com/v1/", UriKind.Absolute);
+            client.Timeout = TimeSpan.FromSeconds(30);
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false
+        });
+        services.AddScoped<Services.Billing.StripeCustomerBillingTransport>();
+        services.AddScoped<Services.Billing.DevelopmentCustomerBillingTransport>();
+        services.AddScoped<Services.Billing.ICustomerBillingExternalTransport>(serviceProvider =>
+        {
+            var provider = serviceProvider
+                .GetRequiredService<Microsoft.Extensions.Options.IOptions<Services.Billing.BillingOptions>>()
+                .Value.Provider;
+            return provider.Equals("Stripe", StringComparison.OrdinalIgnoreCase)
+                ? serviceProvider.GetRequiredService<Services.Billing.StripeCustomerBillingTransport>()
+                : serviceProvider.GetRequiredService<Services.Billing.DevelopmentCustomerBillingTransport>();
         });
         services.AddScoped<Repositories.IPropertyRepository, Repositories.PropertyRepository>();
         services.AddScoped<Services.IPropertyService, Services.PropertyService>();
