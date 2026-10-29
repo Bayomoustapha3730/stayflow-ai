@@ -66,6 +66,7 @@ public sealed class CustomerBillingDelivery
     public UsageMetric Metric { get; private set; }
     public DateTimeOffset PeriodStartUtc { get; private set; }
     public DateTimeOffset PeriodEndUtc { get; private set; }
+    public DateTimeOffset OccurredAtUtc { get; private set; }
     public CustomerBillingDeliveryProvider DeliveryProvider { get; private set; }
     public CustomerBillingDeliveryKind DeliveryKind { get; private set; }
     public CustomerBillableUsageState BillingStateSnapshot { get; private set; }
@@ -106,6 +107,7 @@ public sealed class CustomerBillingDelivery
             Metric = operation.Metric,
             PeriodStartUtc = operation.PeriodStartUtc,
             PeriodEndUtc = operation.PeriodEndUtc,
+            OccurredAtUtc = operation.OccurredAtUtc,
             DeliveryProvider = CustomerBillingDeliveryProvider.Stripe,
             DeliveryKind = CustomerBillingDeliveryKind.PendingExternalBilling,
             BillingStateSnapshot = operation.BillingState,

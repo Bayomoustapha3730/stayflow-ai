@@ -27,7 +27,19 @@ public sealed record CustomerBillingExternalMapping(
     string MeterEventName,
     string CustomerPayloadKey,
     string ValuePayloadKey,
-    bool BillableQuantityIsExternalUnit);
+    bool BillableQuantityIsExternalUnit)
+{
+    public Guid PlanSnapshotId { get; init; }
+    public Guid CustomerUsagePriceVersionId { get; init; }
+    public string MeterId { get; init; } = string.Empty;
+    public string UsagePriceId { get; init; } = string.Empty;
+    public string Currency { get; init; } = string.Empty;
+    public decimal UnitQuantity { get; init; }
+    public decimal UnitPrice { get; init; }
+    public decimal StripeUnitAmountMinor { get; init; }
+    public string RateSemantics { get; init; } = string.Empty;
+    public string MappingIdentity { get; init; } = string.Empty;
+}
 
 public sealed record CustomerBillingExternalRequest(
     Guid DeliveryId,
@@ -41,7 +53,9 @@ public sealed record CustomerBillingExternalRequest(
     DateTimeOffset PeriodStartUtc,
     DateTimeOffset PeriodEndUtc,
     string ExternalIdempotencyKey,
-    CustomerBillingExternalMapping Mapping)
+    CustomerBillingExternalMapping Mapping,
+    DateTimeOffset OccurredAtUtc,
+    Guid CustomerUsagePriceVersionId)
 {
     public static CustomerBillingExternalRequest FromDelivery(
         CustomerBillingDelivery delivery,
@@ -61,7 +75,9 @@ public sealed record CustomerBillingExternalRequest(
             delivery.PeriodStartUtc,
             delivery.PeriodEndUtc,
             delivery.ExternalIdempotencyKey,
-            mapping);
+            mapping,
+            delivery.OccurredAtUtc,
+            delivery.CustomerUsagePriceVersionId);
     }
 }
 

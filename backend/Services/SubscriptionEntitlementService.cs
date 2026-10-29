@@ -9,6 +9,7 @@ namespace StayFlow.Api.Services;
 
 public sealed class SubscriptionEntitlementService(
     ApplicationDbContext dbContext,
+    ICustomerBillingDeliveryCoordinator customerBillingDeliveryCoordinator,
     ILogger<SubscriptionEntitlementService> logger) : ISubscriptionEntitlementService
 {
     private static readonly string[] ActiveStatuses =
@@ -684,6 +685,15 @@ public sealed class SubscriptionEntitlementService(
                     "customer_billable_usage_conflict");
             }
 
+            await customerBillingDeliveryCoordinator.PrepareAsync(
+                billableOperation,
+                DateTimeOffset.UtcNow,
+                cancellationToken);
+            if (saveChanges)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+
             return new UsageConsumptionResult(
                 metric,
                 billableOperation.IncludedQuantity,
@@ -779,7 +789,7 @@ public sealed class SubscriptionEntitlementService(
             billing = CustomerUsageChargeCalculator.ResolvePrice(calculation.BillableQuantity, resolution);
         }
 
-        dbContext.CustomerBillableUsageOperations.Add(CustomerBillableUsageOperation.Create(
+        var customerBillingOperation = CustomerBillableUsageOperation.Create(
             companyId,
             usageOperation,
             subscription.Id,
@@ -798,7 +808,12 @@ public sealed class SubscriptionEntitlementService(
             billing.UnitQuantity,
             billing.UnitPrice,
             billing.ChargeAmount,
-            billing.Currency));
+            billing.Currency);
+        dbContext.CustomerBillableUsageOperations.Add(customerBillingOperation);
+        await customerBillingDeliveryCoordinator.PrepareAsync(
+            customerBillingOperation,
+            occurredAtUtc,
+            cancellationToken);
 
         if (saveChanges)
         {
@@ -824,6 +839,7 @@ public sealed class SubscriptionEntitlementService(
                     or
                     "IX_UsageOperations_CompanyId_Metric_PeriodStartUtc_IdempotencyKey"
                     or "UX_CustomerBillableUsageOperations_UsageOperationId"
+                    or "UX_CustomerBillingDeliveries_BillingOperationProviderKind"
                     or "IX_UsageRecords_CompanyId_Metric_PeriodStartUtc";
         }
 

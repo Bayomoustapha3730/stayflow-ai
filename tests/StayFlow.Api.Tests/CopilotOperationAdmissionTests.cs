@@ -239,7 +239,18 @@ public sealed class CopilotOperationAdmissionTests
             CurrentPeriodEndUtc = periodEnd
         });
         await db.SaveChangesAsync();
-        return new Harness(db, new SubscriptionEntitlementService(db, NullLogger<SubscriptionEntitlementService>.Instance), companyId, conversationId, actorUserId, periodStart, Guid.NewGuid());
+        return new Harness(
+            db,
+            new SubscriptionEntitlementService(
+                db,
+                new StayFlow.Api.Services.CustomerBillingDeliveryCoordinator(
+                    new StayFlow.Api.Services.CustomerBillingDeliveryStore(db)),
+                NullLogger<SubscriptionEntitlementService>.Instance),
+            companyId,
+            conversationId,
+            actorUserId,
+            periodStart,
+            Guid.NewGuid());
     }
 
     private sealed class Harness(

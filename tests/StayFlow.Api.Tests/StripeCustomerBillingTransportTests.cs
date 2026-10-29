@@ -1,5 +1,8 @@
 using System.Net;
+using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using StayFlow.Api.Data;
 using StayFlow.Api.Models;
@@ -9,6 +12,195 @@ namespace StayFlow.Api.Tests;
 
 public sealed class StripeCustomerBillingTransportTests
 {
+    private static readonly Guid TestPlanId = Guid.Parse("10000000-0000-0000-0000-000000000003");
+    private static readonly Guid TestPriceVersionId = Guid.Parse("20000000-0000-0000-0000-000000000003");
+
+    [Fact]
+    public void VersionAwareMapping_RoundTripsThroughRealJsonConfigurationBinding()
+    {
+        var source = EnabledOptions();
+        using var json = new MemoryStream(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(source)));
+        var configuration = new ConfigurationBuilder().AddJsonStream(json).Build();
+        var bound = configuration.Get<CustomerUsageBillingOptions>()!;
+
+        Assert.True(new CustomerUsageBillingOptionsValidator().Validate(null, bound).Succeeded);
+        var key = CustomerUsageBillingOptionsValidator.PriceMappingKey(TestPlanId, TestPriceVersionId);
+        Assert.Equal("price_test123", bound.Metrics["AiRequests"].PriceMappings[key].UsagePriceId);
+        Assert.Equal(source.Metrics["AiRequests"].PriceMappings[key].MappingIdentity,
+            bound.Metrics["AiRequests"].PriceMappings[key].MappingIdentity);
+    }
+
+    [Theory]
+    [InlineData("AiTokens")]
+    [InlineData("ApiRequests")]
+    [InlineData("StorageBytes")]
+    [InlineData("FileUploads")]
+    [InlineData("Users")]
+    [InlineData("Properties")]
+    public void UnprovenAndCapacityMetrics_CannotBeExternallyMapped(string metric)
+    {
+        var options = new CustomerUsageBillingOptions { Metrics = { [metric] = Mapping() } };
+        Assert.False(new CustomerUsageBillingOptionsValidator().Validate(null, options).Succeeded);
+    }
+
+    [Theory]
+    [InlineData(false, true, "invoice_finalization_policy_unverified")]
+    [InlineData(true, false, "usage_price_mapping_invalid")]
+    public async Task UnverifiedOperationalPolicies_FailClosed(
+        bool invoiceSafetyVerified, bool resourcesVerified, string expectedReason)
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+        var options = EnabledOptions();
+        options.OpenPeriodInvoiceSafetyVerified = invoiceSafetyVerified;
+        options.Metrics["AiRequests"].PriceMappings.Values.Single().ResourcesVerified = resourcesVerified;
+
+        var result = await CreateTransport(harness, http, options).SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal(expectedReason, result.ReasonCode);
+        Assert.Equal(0, http.RequestCount);
+    }
+
+    [Theory]
+    [InlineData(28, "usage_period_closed")]
+    [InlineData(29, "usage_period_closed")]
+    [InlineData(40, "usage_occurrence_outside_stripe_timestamp_window")]
+    [InlineData(0, "usage_occurrence_outside_stripe_timestamp_window")]
+    public async Task ClosedPeriodAndDelayedOrFutureOccurrence_FailClosed(int dispatchDay, string expectedReason)
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+
+        var result = await CreateTransport(harness, http, EnabledOptions(), dispatchTime: At(dispatchDay))
+            .SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal(expectedReason, result.ReasonCode);
+        Assert.Equal(0, http.RequestCount);
+    }
+
+    [Fact]
+    public async Task UnpinnedApiVersion_FailsClosedWithoutHttp()
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+        var transport = new StripeCustomerBillingTransport(http,
+            Options.Create(new BillingOptions { Provider = "Stripe", StripeApiVersion = "" }),
+            Options.Create(EnabledOptions()), harness.Context, new FixedTimeProvider(At(10)));
+
+        var result = await transport.SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal("stripe_api_version_invalid", result.ReasonCode);
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal(0, http.RequestCount);
+    }
+
+    [Fact]
+    public void RoundedStripeRate_CannotPassExactParity()
+    {
+        var options = EnabledOptions();
+        var mapping = options.Metrics["AiRequests"].PriceMappings.Values.Single();
+        mapping.UnitQuantity = 3m;
+        mapping.UnitPrice = 1m;
+        mapping.StripeUnitAmountMinor = 33.333333333333m;
+
+        Assert.False(new CustomerUsageBillingOptionsValidator().Validate(null, options).Succeeded);
+    }
+
+    [Fact]
+    public async Task MissingPriceMapping_DoesNotFallBackToCurrentPrice()
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+        var options = EnabledOptions();
+        var mapping = options.Metrics["AiRequests"].PriceMappings.Values.Single();
+        options.Metrics["AiRequests"].PriceMappings.Clear();
+        var currentVersionId = Guid.NewGuid();
+        mapping.MappingIdentity = CustomerUsageBillingOptionsValidator.ExpectedMappingIdentity(
+            TestPlanId, UsageMetric.AiRequests, currentVersionId, mapping.MeterId, mapping.MeterEventName, mapping.UsagePriceId);
+        options.Metrics["AiRequests"].PriceMappings.Add(
+            CustomerUsageBillingOptionsValidator.PriceMappingKey(TestPlanId, currentVersionId), mapping);
+
+        var result = await CreateTransport(harness, http, options).SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal("usage_price_mapping_missing", result.ReasonCode);
+        Assert.Equal(0, http.RequestCount);
+    }
+
+    [Fact]
+    public async Task MidPeriodPriceChange_DoesNotReRateHistoricalOperation()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var laterPrice = CustomerUsagePriceVersion.Create(new StayFlow.Api.Services.CustomerUsagePriceVersionDraft(
+            TestPlanId, UsageMetric.AiRequests, CustomerUsageBillingMode.PerUnitOverage,
+            1m, 99m, "USD", At(5), null));
+        harness.Context.CustomerUsagePriceVersions.Add(laterPrice);
+        await harness.Context.SaveChangesAsync();
+        using var http = new RecordingHttpClientFactory();
+
+        var result = await CreateTransport(harness, http, EnabledOptions())
+            .SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.Delivered, result.Outcome);
+        Assert.Equal(1, http.RequestCount);
+        Assert.Contains("payload%5Bvalue%5D=7", http.Body);
+    }
+
+    [Theory]
+    [InlineData("basis")]
+    [InlineData("identity")]
+    [InlineData("semantics")]
+    [InlineData("rate")]
+    public async Task PriceParity_MetadataDriftCannotSend(string mismatch)
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+        var options = EnabledOptions();
+        var mapping = options.Metrics["AiRequests"].PriceMappings.Values.Single();
+        var requestMapping = harness.Request.Mapping;
+        switch (mismatch)
+        {
+            case "basis":
+                mapping.UnitQuantity = 2m;
+                mapping.StripeUnitAmountMinor = 62.5m;
+                requestMapping = requestMapping with { UnitQuantity = 2m, StripeUnitAmountMinor = 62.5m };
+                break;
+            case "identity":
+                mapping.MappingIdentity = "unverified";
+                break;
+            case "semantics":
+                mapping.RateSemantics = "Tiered";
+                break;
+            case "rate":
+                mapping.StripeUnitAmountMinor = 126m;
+                break;
+        }
+
+        var result = await CreateTransport(harness, http, options)
+            .SendAsync(harness.Request with { Mapping = requestMapping }, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal(0, http.RequestCount);
+    }
+
+    [Fact]
+    public async Task StripeMissingResourceBadRequest_IsConfigurationError()
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory((_, _) => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("""{"error":{"type":"invalid_request_error","code":"resource_missing"}}""")
+        });
+
+        var result = await CreateTransport(harness, http, EnabledOptions())
+            .SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal(1, http.RequestCount);
+    }
+
     [Fact]
     public async Task DisabledUsageBilling_ReturnsDisabledWithoutHttp()
     {
@@ -46,7 +238,7 @@ public sealed class StripeCustomerBillingTransportTests
             Enabled = true,
             Metrics = new Dictionary<string, CustomerUsageBillingMetricOptions>(StringComparer.OrdinalIgnoreCase)
             {
-                ["aitokens"] = Mapping()
+                ["airequests"] = Mapping()
             }
         };
 
@@ -54,7 +246,7 @@ public sealed class StripeCustomerBillingTransportTests
             .SendAsync(harness.Request, CancellationToken.None);
 
         Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
-        Assert.Equal("usage_metric_mapping_missing", result.ReasonCode);
+        Assert.Equal("usage_price_mapping_invalid", result.ReasonCode);
         Assert.Equal(0, http.RequestCount);
     }
 
@@ -71,7 +263,6 @@ public sealed class StripeCustomerBillingTransportTests
                 ["AiRequests"] = new CustomerUsageBillingMetricOptions
                 {
                     Transport = "StripeMeter",
-                    MeterEventName = "ai_requests",
                     BillableQuantityIsExternalUnit = false
                 }
             }
@@ -105,6 +296,101 @@ public sealed class StripeCustomerBillingTransportTests
             Assert.Equal("subscription_not_eligible", result.ReasonCode);
             Assert.Equal(0, http.RequestCount);
         }
+    }
+
+    [Fact]
+    public async Task HistoricalPlanSnapshotStillRoutesAfterSubscriptionPlanChanges()
+    {
+        await using var harness = await CreateHarnessAsync();
+        var currentSubscription = await harness.Context.TenantSubscriptions.SingleAsync();
+        var changedPlan = new SubscriptionPlan
+        {
+            Id = Guid.NewGuid(),
+            Name = "Changed plan",
+            DisplayName = "Changed plan",
+            Description = "Current mutable plan"
+        };
+        harness.Context.SubscriptionPlans.Add(changedPlan);
+        currentSubscription.SubscriptionPlanId = changedPlan.Id;
+        await harness.Context.SaveChangesAsync();
+        using var http = new RecordingHttpClientFactory();
+
+        var result = await CreateTransport(harness, http, EnabledOptions())
+            .SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.Delivered, result.Outcome);
+        Assert.Equal(1, http.RequestCount);
+    }
+
+    [Fact]
+    public async Task MissingHistoricalPriceVersionMapping_FailsClosed()
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+
+        var result = await CreateTransport(harness, http, EnabledOptions())
+            .SendAsync(harness.Request with { CustomerUsagePriceVersionId = Guid.NewGuid() }, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal("usage_price_mapping_missing", result.ReasonCode);
+        Assert.Equal(0, http.RequestCount);
+    }
+
+    [Fact]
+    public async Task NonUsdUsagePriceMapping_FailsClosed()
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+        var options = EnabledOptions();
+        options.Metrics["AiRequests"].PriceMappings.Values.Single().Currency = "EUR";
+
+        var result = await CreateTransport(harness, http, options)
+            .SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal("usage_price_mapping_invalid", result.ReasonCode);
+        Assert.Equal(0, http.RequestCount);
+    }
+
+    [Fact]
+    public async Task ConfiguredPriceRateThatDiffersFromPersistedPricingSnapshot_FailsClosed()
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+        var options = EnabledOptions();
+        var priceMapping = options.Metrics["AiRequests"].PriceMappings.Values.Single();
+        priceMapping.UnitPrice = 2m;
+        priceMapping.StripeUnitAmountMinor = 200m;
+        priceMapping.MappingIdentity = CustomerUsageBillingOptionsValidator.ExpectedMappingIdentity(
+            TestPlanId, UsageMetric.AiRequests, TestPriceVersionId,
+            "mtr_test123", "ai_requests", "price_test123");
+        var requestMapping = harness.Request.Mapping with
+        {
+            UnitPrice = 2m,
+            StripeUnitAmountMinor = 200m,
+            MappingIdentity = priceMapping.MappingIdentity
+        };
+
+        var result = await CreateTransport(harness, http, options)
+            .SendAsync(harness.Request with { Mapping = requestMapping }, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal("usage_price_parity_mismatch", result.ReasonCode);
+        Assert.Equal(0, http.RequestCount);
+    }
+
+    [Fact]
+    public async Task DeliveryTimestampMustBeOperationOccurrenceNotPeriodStart()
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+
+        var result = await CreateTransport(harness, http, EnabledOptions())
+            .SendAsync(harness.Request with { OccurredAtUtc = At(0) }, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.ConfigurationError, result.Outcome);
+        Assert.Equal("delivery_snapshot_mismatch", result.ReasonCode);
+        Assert.Equal(0, http.RequestCount);
     }
 
     [Fact]
@@ -149,18 +435,52 @@ public sealed class StripeCustomerBillingTransportTests
         Assert.Equal(HttpMethod.Post, http.Method);
         Assert.Equal("/v1/billing/meter_events", http.PathAndQuery);
         Assert.Equal(harness.Request.ExternalIdempotencyKey, http.IdempotencyKey);
+        Assert.Equal("2024-06-20", http.StripeVersion);
         Assert.Contains($"identifier={Uri.EscapeDataString(harness.Request.ExternalIdempotencyKey)}", http.Body);
         Assert.Contains("payload%5Bvalue%5D=7", http.Body);
         Assert.Contains("payload%5Bstripe_customer_id%5D=cus_test_123", http.Body);
-        Assert.Contains("event_name=ai_tokens", http.Body);
-        Assert.Contains($"timestamp={At(0).ToUnixTimeSeconds()}", http.Body);
+        Assert.Contains("event_name=ai_requests", http.Body);
+        Assert.Contains($"timestamp={At(1).ToUnixTimeSeconds()}", http.Body);
+        Assert.DoesNotContain("payload%5Bvalue%5D=10", http.Body);
         Assert.DoesNotContain("price", http.Body, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("charge", http.Body, StringComparison.OrdinalIgnoreCase);
+        var delivery = await harness.Context.CustomerBillingDeliveries.SingleAsync();
+        var operation = await harness.Context.CustomerBillableUsageOperations.SingleAsync();
+        Assert.Equal(operation.OccurredAtUtc, delivery.OccurredAtUtc);
+        Assert.Equal(operation.OccurredAtUtc, harness.Request.OccurredAtUtc);
+        Assert.NotEqual(delivery.PeriodStartUtc, harness.Request.OccurredAtUtc);
+        Assert.NotEqual(delivery.CreatedAtUtc, harness.Request.OccurredAtUtc);
+        Assert.DoesNotContain(typeof(CustomerBillingExternalRequest).GetProperties(),
+            property => property.Name.Contains("ProviderCost", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("idempotency_error", "idempotency_key_in_use")]
+    [InlineData("invalid_request_error", "billing_meter_event_duplicate")]
+    [InlineData("invalid_request_error", "unknown_code")]
+    public async Task DuplicateAndUnprovenBadRequests_AreIndeterminate(string type, string code)
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory((_, _) => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(new { error = new { type, code } }))
+        });
+
+        var result = await CreateTransport(harness, http, EnabledOptions())
+            .SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.Indeterminate, result.Outcome);
+        Assert.Equal(1, http.RequestCount);
     }
 
     [Theory]
     [InlineData(HttpStatusCode.BadRequest, CustomerBillingExternalTransportOutcome.Rejected, "stripe_request_rejected")]
+    [InlineData(HttpStatusCode.Unauthorized, CustomerBillingExternalTransportOutcome.ConfigurationError, "stripe_credentials_rejected")]
+    [InlineData(HttpStatusCode.Forbidden, CustomerBillingExternalTransportOutcome.ConfigurationError, "stripe_permissions_rejected")]
+    [InlineData(HttpStatusCode.NotFound, CustomerBillingExternalTransportOutcome.ConfigurationError, "stripe_usage_configuration_not_found")]
     [InlineData(HttpStatusCode.TooManyRequests, CustomerBillingExternalTransportOutcome.RetryableUnavailable, "stripe_rate_limited")]
+    [InlineData(HttpStatusCode.Conflict, CustomerBillingExternalTransportOutcome.Indeterminate, "stripe_conflict_outcome_ambiguous")]
+    [InlineData(HttpStatusCode.RequestTimeout, CustomerBillingExternalTransportOutcome.Indeterminate, "stripe_unexpected_http_status")]
     [InlineData(HttpStatusCode.InternalServerError, CustomerBillingExternalTransportOutcome.Indeterminate, "stripe_server_outcome_ambiguous")]
     public async Task HttpFailureStatuses_AreClassifiedWithoutRetry(
         HttpStatusCode status,
@@ -168,7 +488,10 @@ public sealed class StripeCustomerBillingTransportTests
         string reasonCode)
     {
         await using var harness = await CreateHarnessAsync();
-        using var http = new RecordingHttpClientFactory((_, _) => new HttpResponseMessage(status));
+        using var http = new RecordingHttpClientFactory((_, _) => new HttpResponseMessage(status)
+        {
+            Content = new StringContent("""{"error":{"type":"invalid_request_error","code":"parameter_missing"}}""")
+        });
 
         var result = await CreateTransport(harness, http, EnabledOptions())
             .SendAsync(harness.Request, CancellationToken.None);
@@ -189,6 +512,21 @@ public sealed class StripeCustomerBillingTransportTests
 
         Assert.Equal(CustomerBillingExternalTransportOutcome.Indeterminate, result.Outcome);
         Assert.Equal("stripe_network_outcome_ambiguous", result.ReasonCode);
+        Assert.Equal(1, http.RequestCount);
+    }
+
+    [Fact]
+    public async Task AmbiguousTimeout_IsIndeterminateAndDoesNotTriggerSecondPost()
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory((_, _) =>
+            throw new TaskCanceledException("timeout before response"));
+
+        var result = await CreateTransport(harness, http, EnabledOptions())
+            .SendAsync(harness.Request, CancellationToken.None);
+
+        Assert.Equal(CustomerBillingExternalTransportOutcome.Indeterminate, result.Outcome);
+        Assert.Equal("stripe_request_outcome_ambiguous", result.ReasonCode);
         Assert.Equal(1, http.RequestCount);
     }
 
@@ -241,7 +579,8 @@ public sealed class StripeCustomerBillingTransportTests
         Harness harness,
         IHttpClientFactory httpClientFactory,
         CustomerUsageBillingOptions usageOptions,
-        string stripeSecretKey = "sk_test_never_logged") =>
+        string stripeSecretKey = "sk_test_never_logged",
+        DateTimeOffset? dispatchTime = null) =>
         new(
             httpClientFactory,
             Options.Create(new BillingOptions
@@ -251,24 +590,42 @@ public sealed class StripeCustomerBillingTransportTests
             }),
             Options.Create(usageOptions),
             harness.Context,
-            new FixedTimeProvider(At(10)));
+            new FixedTimeProvider(dispatchTime ?? At(10)));
 
     private static CustomerUsageBillingOptions EnabledOptions() => new()
     {
         Enabled = true,
+        OpenPeriodInvoiceSafetyVerified = true,
         Metrics = new Dictionary<string, CustomerUsageBillingMetricOptions>(StringComparer.Ordinal)
         {
-            ["AiTokens"] = Mapping()
+            ["AiRequests"] = Mapping()
         }
     };
 
     private static CustomerUsageBillingMetricOptions Mapping() => new()
     {
         Transport = "StripeMeter",
-        MeterEventName = "ai_tokens",
         CustomerPayloadKey = "stripe_customer_id",
         ValuePayloadKey = "value",
-        BillableQuantityIsExternalUnit = true
+        BillableQuantityIsExternalUnit = true,
+        PriceMappings = new Dictionary<string, CustomerUsageBillingPriceMappingOptions>(StringComparer.Ordinal)
+        {
+            [CustomerUsageBillingOptionsValidator.PriceMappingKey(TestPlanId, TestPriceVersionId)] = new()
+            {
+                ResourcesVerified = true,
+                MeterId = "mtr_test123",
+                MeterEventName = "ai_requests",
+                UsagePriceId = "price_test123",
+                Currency = "USD",
+                UnitQuantity = 1m,
+                UnitPrice = 1.25m,
+                StripeUnitAmountMinor = 125m,
+                RateSemantics = "LinearPerBillableUnit",
+                MappingIdentity = CustomerUsageBillingOptionsValidator.ExpectedMappingIdentity(
+                    TestPlanId, UsageMetric.AiRequests, TestPriceVersionId,
+                    "mtr_test123", "ai_requests", "price_test123")
+            }
+        }
     };
 
     private static async Task<Harness> CreateHarnessAsync(
@@ -281,8 +638,8 @@ public sealed class StripeCustomerBillingTransportTests
             .Options;
         var companyId = Guid.NewGuid();
         var subscriptionId = Guid.NewGuid();
-        var planId = Guid.NewGuid();
-        var priceVersionId = Guid.NewGuid();
+        var planId = TestPlanId;
+        var priceVersionId = TestPriceVersionId;
         var company = new Company
         {
             Id = companyId,
@@ -314,7 +671,7 @@ public sealed class StripeCustomerBillingTransportTests
         };
         var priceVersion = CustomerUsagePriceVersion.Create(new StayFlow.Api.Services.CustomerUsagePriceVersionDraft(
             planId,
-            UsageMetric.AiTokens,
+            UsageMetric.AiRequests,
             CustomerUsageBillingMode.PerUnitOverage,
             1m,
             1.25m,
@@ -327,7 +684,7 @@ public sealed class StripeCustomerBillingTransportTests
         {
             Id = Guid.NewGuid(),
             CompanyId = companyId,
-            Metric = UsageMetric.AiTokens.ToStorageValue(),
+            Metric = UsageMetric.AiRequests.ToStorageValue(),
             IdempotencyKey = $"transport-{Guid.NewGuid():N}",
             PeriodStartUtc = At(0),
             Quantity = 10
@@ -337,8 +694,8 @@ public sealed class StripeCustomerBillingTransportTests
             usageOperation,
             subscriptionId,
             planId,
-            UsageMetric.AiTokens,
-            At(1),
+            UsageMetric.AiRequests,
+            At(1).AddTicks(1234560),
             At(28),
             10,
             0,
@@ -372,10 +729,24 @@ public sealed class StripeCustomerBillingTransportTests
             context,
             CustomerBillingExternalRequest.FromDelivery(delivery, new CustomerBillingExternalMapping(
                 mapping.Transport,
-                mapping.MeterEventName,
+                    mapping.PriceMappings[CustomerUsageBillingOptionsValidator.PriceMappingKey(TestPlanId, TestPriceVersionId)].MeterEventName,
                 mapping.CustomerPayloadKey,
                 mapping.ValuePayloadKey,
-                mapping.BillableQuantityIsExternalUnit)));
+                    mapping.BillableQuantityIsExternalUnit)
+            {
+                PlanSnapshotId = TestPlanId,
+                CustomerUsagePriceVersionId = TestPriceVersionId,
+                MeterId = "mtr_test123",
+                UsagePriceId = "price_test123",
+                Currency = "USD",
+                UnitQuantity = 1m,
+                UnitPrice = 1.25m,
+                StripeUnitAmountMinor = 125m,
+                RateSemantics = "LinearPerBillableUnit",
+                MappingIdentity = CustomerUsageBillingOptionsValidator.ExpectedMappingIdentity(
+                        TestPlanId, UsageMetric.AiRequests, TestPriceVersionId,
+                        "mtr_test123", "ai_requests", "price_test123")
+            }));
     }
 
     private static DateTimeOffset At(int days) =>
@@ -412,6 +783,7 @@ public sealed class StripeCustomerBillingTransportTests
         public HttpMethod? Method => _handler.Method;
         public string? PathAndQuery => _handler.PathAndQuery;
         public string? IdempotencyKey => _handler.IdempotencyKey;
+        public string? StripeVersion => _handler.StripeVersion;
         public string Body => _handler.Body;
 
         public HttpClient CreateClient(string name) => _client;
@@ -425,6 +797,7 @@ public sealed class StripeCustomerBillingTransportTests
             public HttpMethod? Method { get; private set; }
             public string? PathAndQuery { get; private set; }
             public string? IdempotencyKey { get; private set; }
+            public string? StripeVersion { get; private set; }
             public string Body { get; private set; } = string.Empty;
 
             protected override async Task<HttpResponseMessage> SendAsync(
@@ -436,6 +809,9 @@ public sealed class StripeCustomerBillingTransportTests
                 PathAndQuery = request.RequestUri?.PathAndQuery;
                 IdempotencyKey = request.Headers.TryGetValues("Idempotency-Key", out var values)
                     ? values.Single()
+                    : null;
+                StripeVersion = request.Headers.TryGetValues("Stripe-Version", out var versionValues)
+                    ? versionValues.Single()
                     : null;
                 Body = request.Content is null
                     ? string.Empty

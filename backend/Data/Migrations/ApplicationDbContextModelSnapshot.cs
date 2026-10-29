@@ -1259,6 +1259,9 @@ namespace backend.Data.Migrations
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
 
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTimeOffset>("PeriodEndUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -1309,6 +1312,8 @@ namespace backend.Data.Migrations
                             t.HasCheckConstraint("CK_CustomerBillingDeliveries_IdempotencyKey", "length(\"ExternalIdempotencyKey\") > 0");
 
                             t.HasCheckConstraint("CK_CustomerBillingDeliveries_Identity", "\"CompanyId\" <> '00000000-0000-0000-0000-000000000000' AND \"CustomerBillableUsageOperationId\" <> '00000000-0000-0000-0000-000000000000' AND \"TenantSubscriptionId\" <> '00000000-0000-0000-0000-000000000000' AND \"SubscriptionPlanId\" <> '00000000-0000-0000-0000-000000000000' AND \"CustomerUsagePriceVersionId\" <> '00000000-0000-0000-0000-000000000000'");
+
+                            t.HasCheckConstraint("CK_CustomerBillingDeliveries_OccurredAt", "\"OccurredAtUtc\" >= \"PeriodStartUtc\" AND \"OccurredAtUtc\" <= \"PeriodEndUtc\"");
 
                             t.HasCheckConstraint("CK_CustomerBillingDeliveries_Period", "\"PeriodStartUtc\" < \"PeriodEndUtc\"");
                         });

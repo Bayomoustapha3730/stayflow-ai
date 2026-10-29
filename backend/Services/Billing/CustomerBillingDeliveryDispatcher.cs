@@ -26,7 +26,7 @@ public sealed class CustomerBillingDeliveryDispatcher(
             return CreateResult(delivery, CustomerBillingDeliveryDispatcherOutcome.NotEligible, "delivery_suppressed");
         }
 
-        var mappingResult = ResolveMapping(delivery.Metric);
+        var mappingResult = ResolveMapping(delivery);
         if (mappingResult.Mapping is null)
         {
             return CreateResult(
@@ -299,7 +299,8 @@ public sealed class CustomerBillingDeliveryDispatcher(
         }
     }
 
-    private (CustomerBillingExternalMapping? Mapping, string? ErrorCode) ResolveMapping(UsageMetric metric)
+    private (CustomerBillingExternalMapping? Mapping, string? ErrorCode) ResolveMapping(
+        CustomerBillingDelivery delivery)
     {
         var options = usageBillingOptions.Value;
         if (!options.Enabled)
@@ -307,23 +308,50 @@ public sealed class CustomerBillingDeliveryDispatcher(
             return (null, "usage_billing_disabled");
         }
 
+        if (!new CustomerUsageBillingOptionsValidator().Validate(null, options).Succeeded)
+        {
+            return (null, "usage_price_mapping_invalid");
+        }
+
+        var metric = delivery.Metric;
         var metricName = metric.ToString();
         var exactMetric = options.Metrics?
             .FirstOrDefault(entry => string.Equals(entry.Key, metricName, StringComparison.Ordinal));
         if (exactMetric is null
             || exactMetric.Value.Value is null
-            || !CustomerUsageBillingOptionsValidator.IsValidMapping(exactMetric.Value.Value))
+            || !CustomerUsageBillingOptionsValidator.IsValidMetricMapping(metric, exactMetric.Value.Value))
         {
             return (null, "usage_metric_mapping_invalid");
         }
 
-        var configured = exactMetric.Value.Value;
+        var metricMapping = exactMetric.Value.Value;
+        var mappingKey = CustomerUsageBillingOptionsValidator.PriceMappingKey(
+            delivery.SubscriptionPlanId,
+            delivery.CustomerUsagePriceVersionId);
+        if (!metricMapping.PriceMappings.TryGetValue(mappingKey, out var configured)
+            || configured is null)
+        {
+            return (null, "usage_price_mapping_missing");
+        }
+
         return (new CustomerBillingExternalMapping(
-            configured.Transport,
+            metricMapping.Transport,
             configured.MeterEventName,
-            configured.CustomerPayloadKey,
-            configured.ValuePayloadKey,
-            configured.BillableQuantityIsExternalUnit), null);
+            metricMapping.CustomerPayloadKey,
+            metricMapping.ValuePayloadKey,
+            metricMapping.BillableQuantityIsExternalUnit)
+        {
+            PlanSnapshotId = delivery.SubscriptionPlanId,
+            CustomerUsagePriceVersionId = delivery.CustomerUsagePriceVersionId,
+            MeterId = configured.MeterId,
+            UsagePriceId = configured.UsagePriceId,
+            Currency = configured.Currency,
+            UnitQuantity = configured.UnitQuantity,
+            UnitPrice = configured.UnitPrice,
+            StripeUnitAmountMinor = configured.StripeUnitAmountMinor,
+            RateSemantics = configured.RateSemantics,
+            MappingIdentity = configured.MappingIdentity
+        }, null);
     }
 
     private static bool HasValidBillingSnapshot(CustomerBillingDelivery delivery) =>
@@ -335,12 +363,15 @@ public sealed class CustomerBillingDeliveryDispatcher(
         && delivery.CustomerUsagePriceVersionId != Guid.Empty
         && delivery.DeliveryProvider == CustomerBillingDeliveryProvider.Stripe
         && delivery.DeliveryKind == CustomerBillingDeliveryKind.PendingExternalBilling
-        && delivery.BillableQuantitySnapshot >= 0
+        && delivery.BillableQuantitySnapshot > 0
         && delivery.ChargeAmountSnapshot > 0
         && delivery.CurrencySnapshot == "USD"
         && delivery.PeriodStartUtc.Offset == TimeSpan.Zero
         && delivery.PeriodEndUtc.Offset == TimeSpan.Zero
         && delivery.PeriodStartUtc < delivery.PeriodEndUtc
+        && delivery.OccurredAtUtc.Offset == TimeSpan.Zero
+        && delivery.OccurredAtUtc >= delivery.PeriodStartUtc
+        && delivery.OccurredAtUtc <= delivery.PeriodEndUtc
         && !string.IsNullOrWhiteSpace(delivery.ExternalIdempotencyKey)
         && delivery.ExternalIdempotencyKey.Length <= 100;
 

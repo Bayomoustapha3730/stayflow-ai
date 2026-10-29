@@ -10,6 +10,42 @@ namespace StayFlow.Api.Tests;
 
 public sealed class CustomerBillingDeliveryWorkerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CheckedInConfiguration_KeepsBothActivationSwitchesOff(bool includeDevelopment)
+    {
+        var builder = new ConfigurationBuilder().SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: false);
+        if (includeDevelopment)
+        {
+            builder.AddJsonFile("appsettings.Development.json", optional: false);
+        }
+
+        var configuration = builder.Build();
+        var usage = configuration.GetSection(CustomerUsageBillingOptions.SectionName)
+            .Get<CustomerUsageBillingOptions>()!;
+        var worker = configuration.GetSection(CustomerBillingDeliveryWorkerOptions.SectionName)
+            .Get<CustomerBillingDeliveryWorkerOptions>()!;
+        Assert.False(usage.Enabled);
+        Assert.False(worker.Enabled);
+        Assert.False(usage.OpenPeriodInvoiceSafetyVerified);
+        Assert.Empty(usage.Metrics);
+        Assert.Equal(BillingOptions.SupportedStripeApiVersion, configuration["Billing:StripeApiVersion"]);
+    }
+
+    [Fact]
+    public void WorkerDependsOnDispatcherInterfacesNotStripeTransport()
+    {
+        var constructorParameterTypes = typeof(CustomerBillingDeliveryWorker)
+            .GetConstructors()
+            .SelectMany(constructor => constructor.GetParameters())
+            .Select(parameter => parameter.ParameterType);
+
+        Assert.DoesNotContain(typeof(StripeCustomerBillingTransport), constructorParameterTypes);
+        Assert.DoesNotContain(typeof(StripeBillingProvider), constructorParameterTypes);
+    }
+
     [Fact]
     public async Task DisabledWorkerDoesNotQueryOrDispatch()
     {
@@ -309,6 +345,12 @@ public sealed class CustomerBillingDeliveryWorkerTests
             throw new NotSupportedException();
 
         public Task<CustomerBillingDelivery> PrepareAsync(Guid billingOperationId, DateTimeOffset preparedAtUtc) =>
+            throw new NotSupportedException();
+
+        public Task<CustomerBillingDelivery?> StageAsync(
+            CustomerBillableUsageOperation operation,
+            DateTimeOffset preparedAtUtc,
+            CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
         public Task<CustomerBillingDelivery?> GetByIdAsync(Guid deliveryId, CancellationToken cancellationToken) =>

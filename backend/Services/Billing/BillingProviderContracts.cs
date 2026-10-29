@@ -22,10 +22,12 @@ public interface IBillingProvider
 public sealed class BillingOptions
 {
     public const string SectionName = "Billing";
+    public const string SupportedStripeApiVersion = "2024-06-20";
 
     public string Provider { get; set; } = "Development";
     public string StripeSecretKey { get; set; } = string.Empty;
     public string StripeWebhookSigningSecret { get; set; } = string.Empty;
+    public string StripeApiVersion { get; set; } = SupportedStripeApiVersion;
     public string CheckoutSuccessUrl { get; set; } = "https://example.invalid/success";
     public string CheckoutCancelUrl { get; set; } = "https://example.invalid/cancel";
     public string BillingPortalReturnUrl { get; set; } = "https://example.invalid/billing";
@@ -59,6 +61,11 @@ public sealed class BillingOptionsValidator : IValidateOptions<BillingOptions>
         if (string.IsNullOrWhiteSpace(options.StripeWebhookSigningSecret))
         {
             errors.Add("Billing:StripeWebhookSigningSecret is required when Billing:Provider is Stripe.");
+        }
+
+        if (options.StripeApiVersion != BillingOptions.SupportedStripeApiVersion)
+        {
+            errors.Add($"Billing:StripeApiVersion must be {BillingOptions.SupportedStripeApiVersion}; other response schemas require a separate compatibility review.");
         }
 
         foreach (var planName in new[] { SubscriptionPlanNames.Starter, SubscriptionPlanNames.Professional })

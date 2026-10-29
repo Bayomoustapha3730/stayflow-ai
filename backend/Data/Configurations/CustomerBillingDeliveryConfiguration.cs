@@ -23,6 +23,9 @@ public sealed class CustomerBillingDeliveryConfiguration : IEntityTypeConfigurat
                 "CK_CustomerBillingDeliveries_Period",
                 "\"PeriodStartUtc\" < \"PeriodEndUtc\"");
             table.HasCheckConstraint(
+                "CK_CustomerBillingDeliveries_OccurredAt",
+                "\"OccurredAtUtc\" >= \"PeriodStartUtc\" AND \"OccurredAtUtc\" <= \"PeriodEndUtc\"");
+            table.HasCheckConstraint(
                 "CK_CustomerBillingDeliveries_AttemptCount",
                 "\"AttemptCount\" >= 0");
             table.HasCheckConstraint(

@@ -14,6 +14,42 @@ namespace StayFlow.Api.Tests;
 public sealed class BillingServiceTests
 {
     [Fact]
+    public async Task SubscriptionWebhook_SelectsRecurringBaseItemAfterUsageItemWhenRefreshUnavailable()
+    {
+        var fixture = await CreateFixtureAsync(provider: new TestBillingProvider { SnapshotUnavailable = true });
+        var payload = JsonSerializer.Serialize(new
+        {
+            id = "evt_subscription_usage_first",
+            type = "customer.subscription.updated",
+            created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            data = new
+            {
+                @object = new
+                {
+                    id = "sub_test_123",
+                    customer = "cus_test_123",
+                    subscription = "sub_test_123",
+                    status = "active",
+                    items = new
+                    {
+                        data = new[]
+                        {
+                            new { id = "si_usage", price = new { id = "price_usage", recurring = new { usage_type = "metered" } } },
+                            new { id = "si_base", price = new { id = "price_professional", recurring = new { usage_type = "licensed" } } }
+                        }
+                    }
+                }
+            }
+        });
+
+        await fixture.Service.ProcessStripeWebhookAsync(payload, fixture.ValidSignatureHeader, CancellationToken.None);
+
+        var subscription = await fixture.DbContext.TenantSubscriptions.Include(item => item.SubscriptionPlan).SingleAsync();
+        Assert.Equal("price_professional", subscription.ExternalPriceId);
+        Assert.Equal(SubscriptionPlanNames.Professional, subscription.SubscriptionPlan.Name);
+    }
+
+    [Fact]
     public async Task ProcessStripeWebhookAsync_SecondDelivery_IsIdempotent()
     {
         var fixture = await CreateFixtureAsync(
@@ -489,7 +525,11 @@ public sealed class BillingServiceTests
         var billingProvider = provider ?? (billingOptionsValue.Provider.Equals("Stripe", StringComparison.OrdinalIgnoreCase)
             ? new TestBillingProvider()
             : new DevelopmentBillingProvider(billingOptions));
-        var entitlementService = new SubscriptionEntitlementService(dbContext, NullLogger<SubscriptionEntitlementService>.Instance);
+        var entitlementService = new SubscriptionEntitlementService(
+            dbContext,
+            new StayFlow.Api.Services.CustomerBillingDeliveryCoordinator(
+                new StayFlow.Api.Services.CustomerBillingDeliveryStore(dbContext)),
+            NullLogger<SubscriptionEntitlementService>.Instance);
 
         var service = new BillingService(
             dbContext,
@@ -545,6 +585,7 @@ public sealed class BillingServiceTests
     {
         public string ProviderName => "Stripe";
 
+        public bool SnapshotUnavailable { get; init; }
         public string? LastCheckoutPriceId { get; private set; }
 
         public Task<string> EnsureCustomerAsync(BillingCustomerRequest request, CancellationToken cancellationToken)
@@ -596,7 +637,9 @@ public sealed class BillingServiceTests
                 DateTimeOffset.UtcNow));
 
         public Task<BillingProviderSubscriptionSnapshot> GetSubscriptionSnapshotAsync(string subscriptionId, CancellationToken cancellationToken)
-            => Task.FromResult(new BillingProviderSubscriptionSnapshot(
+            => SnapshotUnavailable
+                ? Task.FromException<BillingProviderSubscriptionSnapshot>(new HttpRequestException("test snapshot unavailable"))
+                : Task.FromResult(new BillingProviderSubscriptionSnapshot(
                 subscriptionId,
                 "active",
                 "price_professional",

@@ -18,6 +18,7 @@ public sealed class QuotaRetryClassificationTests
     [Theory]
     [InlineData("IX_UsageOperations_CompanyId_Metric_PeriodStartUtc_IdempotencyKey")]
     [InlineData("IX_UsageRecords_CompanyId_Metric_PeriodStartUtc")]
+    [InlineData("UX_CustomerBillingDeliveries_BillingOperationProviderKind")]
     public void QuotaUniqueIndexes_AreRetryable(string constraintName)
     {
         var exception = new DbUpdateException(

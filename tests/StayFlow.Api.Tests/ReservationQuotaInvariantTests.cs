@@ -314,7 +314,11 @@ public sealed class ReservationQuotaInvariantTests
         });
         await dbContext.SaveChangesAsync();
 
-        var entitlementService = new SubscriptionEntitlementService(dbContext, NullLogger<SubscriptionEntitlementService>.Instance);
+        var entitlementService = new SubscriptionEntitlementService(
+            dbContext,
+            new StayFlow.Api.Services.CustomerBillingDeliveryCoordinator(
+                new StayFlow.Api.Services.CustomerBillingDeliveryStore(dbContext)),
+            NullLogger<SubscriptionEntitlementService>.Instance);
         var reservationService = new ReservationService(
             new ReservationRepository(dbContext),
             new HarnessTenantContext(companyId),

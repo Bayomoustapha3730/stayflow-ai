@@ -310,7 +310,11 @@ public sealed class SubscriptionEntitlementServiceQuotaTests
         await dbContext.SaveChangesAsync();
 
         return new Harness(
-            new SubscriptionEntitlementService(dbContext, NullLogger<SubscriptionEntitlementService>.Instance),
+            new SubscriptionEntitlementService(
+                dbContext,
+                new StayFlow.Api.Services.CustomerBillingDeliveryCoordinator(
+                    new StayFlow.Api.Services.CustomerBillingDeliveryStore(dbContext)),
+                NullLogger<SubscriptionEntitlementService>.Instance),
             dbContext,
             companyId,
             periodStartUtc,
@@ -378,7 +382,11 @@ public sealed class SubscriptionEntitlementServiceQuotaTests
         await dbContext.SaveChangesAsync();
 
         return new ResourceHarness(
-            new SubscriptionEntitlementService(dbContext, NullLogger<SubscriptionEntitlementService>.Instance),
+            new SubscriptionEntitlementService(
+                dbContext,
+                new StayFlow.Api.Services.CustomerBillingDeliveryCoordinator(
+                    new StayFlow.Api.Services.CustomerBillingDeliveryStore(dbContext)),
+                NullLogger<SubscriptionEntitlementService>.Instance),
             dbContext,
             companyId);
     }

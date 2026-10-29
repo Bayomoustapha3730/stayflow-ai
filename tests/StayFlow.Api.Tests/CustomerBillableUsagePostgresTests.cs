@@ -171,7 +171,11 @@ public sealed class CustomerBillableUsagePostgresTests : IAsyncLifetime
     private async Task<UsageConsumptionResult> ConsumeAsync(Guid companyId, string key)
     {
         await using var context = new ApplicationDbContext(dbOptions);
-        var service = new SubscriptionEntitlementService(context, NullLogger<SubscriptionEntitlementService>.Instance);
+        var service = new SubscriptionEntitlementService(
+            context,
+            new StayFlow.Api.Services.CustomerBillingDeliveryCoordinator(
+                new StayFlow.Api.Services.CustomerBillingDeliveryStore(context)),
+            NullLogger<SubscriptionEntitlementService>.Instance);
         return await service.ConsumeQuotaAsync(
             companyId,
             UsageMetric.AiTokens,

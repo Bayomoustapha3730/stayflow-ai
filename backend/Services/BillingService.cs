@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using StayFlow.Api.Common;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Billing;
+using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services.Billing;
 
@@ -754,25 +755,17 @@ public sealed class BillingService(
             subscription.TrialEndsAtUtc = DateTimeOffset.FromUnixTimeSeconds(trialEndElement.GetInt64());
         }
 
-        if (data.TryGetProperty("items", out var itemsElement)
-            && itemsElement.TryGetProperty("data", out var itemData)
-            && itemData.ValueKind == JsonValueKind.Array
-            && itemData.GetArrayLength() > 0)
+        if (data.TryGetProperty("items", out _))
         {
-            var first = itemData[0];
-            if (first.TryGetProperty("price", out var priceElement)
-                && priceElement.TryGetProperty("id", out var priceIdElement))
+            subscription.ExternalPriceId = StripeBillingProvider.GetBasePlanPriceId(data, billingOptions.Value)
+                ?? throw new ExternalDependencyException(
+                    "Stripe subscription webhook does not identify one configured recurring base-plan item.",
+                    "stripe_base_subscription_item_missing");
+            var mappedPlan = await ResolvePlanByPriceIdAsync(subscription.ExternalPriceId, cancellationToken);
+            if (mappedPlan is not null)
             {
-                subscription.ExternalPriceId = priceIdElement.GetString();
-                if (!string.IsNullOrWhiteSpace(subscription.ExternalPriceId))
-                {
-                    var mappedPlan = await ResolvePlanByPriceIdAsync(subscription.ExternalPriceId, cancellationToken);
-                    if (mappedPlan is not null)
-                    {
-                        subscription.SubscriptionPlanId = mappedPlan.Id;
-                        subscription.SubscriptionPlan = mappedPlan;
-                    }
-                }
+                subscription.SubscriptionPlanId = mappedPlan.Id;
+                subscription.SubscriptionPlan = mappedPlan;
             }
         }
 

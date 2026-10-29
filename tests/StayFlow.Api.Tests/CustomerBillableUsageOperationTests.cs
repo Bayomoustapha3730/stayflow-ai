@@ -139,6 +139,7 @@ public sealed class CustomerBillableUsageOperationTests
         Assert.Equal(harness.PlanId, original.SubscriptionPlanId);
         Assert.Equal(1, await harness.DbContext.UsageOperations.CountAsync());
         Assert.Equal(1, await harness.DbContext.CustomerBillableUsageOperations.CountAsync());
+        Assert.Empty(await harness.DbContext.CustomerBillingDeliveries.ToListAsync());
         Assert.Equal(CustomerBillableUsageState.NotBillable, original.BillingState);
         Assert.Equal(CustomerBillableUsageReason.WithinIncludedAllowance, original.BillingReason);
         Assert.Equal(99, original.UsageBefore);
@@ -380,7 +381,11 @@ public sealed class CustomerBillableUsageOperationTests
 
         await dbContext.SaveChangesAsync();
         return new Harness(
-            new SubscriptionEntitlementService(dbContext, NullLogger<SubscriptionEntitlementService>.Instance),
+            new SubscriptionEntitlementService(
+                dbContext,
+                new StayFlow.Api.Services.CustomerBillingDeliveryCoordinator(
+                    new StayFlow.Api.Services.CustomerBillingDeliveryStore(dbContext)),
+                NullLogger<SubscriptionEntitlementService>.Instance),
             dbContext,
             companyId,
             planId,

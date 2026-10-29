@@ -10,6 +10,7 @@ Configure the `Billing` section in environment-specific configuration or secret 
     "Provider": "Stripe",
     "StripeSecretKey": "sk_live_...",
     "StripeWebhookSigningSecret": "whsec_...",
+    "StripeApiVersion": "2024-06-20",
     "CheckoutSuccessUrl": "https://app.example.com/host/settings/billing?checkout=success",
     "CheckoutCancelUrl": "https://app.example.com/host/settings/billing?checkout=cancel",
     "BillingPortalReturnUrl": "https://app.example.com/host/settings/billing",
@@ -30,6 +31,7 @@ Configure the `Billing` section in environment-specific configuration or secret 
 2. Configure a webhook endpoint:
 
 - URL: `https://<api-host>/api/billing/webhook/stripe`
+- API version: `2024-06-20` (must match the custom HTTP provider pin).
 - Events:
   - `checkout.session.completed`
   - `customer.subscription.created`
@@ -41,6 +43,15 @@ Configure the `Billing` section in environment-specific configuration or secret 
 3. Copy endpoint signing secret into `Billing:StripeWebhookSigningSecret`.
 4. Enable Billing Portal in Stripe Dashboard.
 5. Ensure allowed portal flows include payment method update.
+
+Usage billing is a separate, disabled readiness path. Keep
+`Billing:UsageBilling:Enabled=false` and
+`Billing:UsageBilling:Worker:Enabled=false`, with `Metrics` empty and
+`OpenPeriodInvoiceSafetyVerified=false`. Do not provision usage resources or
+enable usage billing as part of ordinary subscription configuration.
+See the [usage billing runbook](../operations/BillingStripeRunbook.md#usage-billing-readiness-disabled-by-default)
+for exact version-aware mappings, external resource attestations, late-usage
+guardrails, and manual indeterminate-event resolution.
 
 ## Secrets Management
 

@@ -11,6 +11,92 @@ namespace StayFlow.Api.Tests;
 
 public sealed class CustomerBillingDeliveryTests
 {
+    private static readonly Guid TestPlanId = Guid.Parse("10000000-0000-0000-0000-000000000001");
+    private static readonly Guid TestPriceVersionId = Guid.Parse("20000000-0000-0000-0000-000000000001");
+
+    [Theory]
+    [InlineData(5, CustomerBillingDeliveryState.Prepared)]
+    [InlineData(0, CustomerBillingDeliveryState.Suppressed)]
+    public async Task ProductionUsageReplay_PreparesHistoricalFactOnceWithoutConsumingAgain(
+        int chargeAmount, CustomerBillingDeliveryState expectedState)
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated, CustomerBillableUsageReason.Calculated, chargeAmount, relational: false);
+        await using var context = new ApplicationDbContext(harness.Options);
+        var operation = await context.UsageOperations.SingleAsync();
+        var service = new SubscriptionEntitlementService(context,
+            new CustomerBillingDeliveryCoordinator(new CustomerBillingDeliveryStore(context)),
+            NullLogger<SubscriptionEntitlementService>.Instance);
+
+        var first = await service.ConsumeQuotaAsync(harness.CompanyId, UsageMetric.AiRequests,
+            operation.Quantity, operation.IdempotencyKey, CancellationToken.None);
+        var replay = await service.ConsumeQuotaAsync(harness.CompanyId, UsageMetric.AiRequests,
+            operation.Quantity, operation.IdempotencyKey, CancellationToken.None);
+
+        Assert.True(first.WasIdempotentReplay);
+        Assert.True(replay.WasIdempotentReplay);
+        var delivery = await context.CustomerBillingDeliveries.SingleAsync();
+        Assert.Equal(expectedState, delivery.DeliveryState);
+        Assert.Equal(harness.BillingOperationId, delivery.CustomerBillableUsageOperationId);
+        Assert.Single(await context.UsageOperations.ToListAsync());
+        Assert.Single(await context.CustomerBillableUsageOperations.ToListAsync());
+        Assert.Empty(await context.UsageRecords.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ProductionAdmission_CoordinatorFailureDoesNotPersistUsageOrBilling()
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated, CustomerBillableUsageReason.Calculated, 5m, relational: false);
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            context.PlanEntitlements.Add(new PlanEntitlement
+            {
+                Id = Guid.NewGuid(),
+                SubscriptionPlanId = harness.PlanId,
+                Key = UsageMetric.AiRequests.ToQuotaEntitlementKey(),
+                IsEnabled = true,
+                QuotaLimit = 100
+            });
+            await context.SaveChangesAsync();
+            var service = new SubscriptionEntitlementService(context,
+                new FailingCoordinator(), NullLogger<SubscriptionEntitlementService>.Instance);
+
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.ConsumeQuotaAsync(harness.CompanyId, UsageMetric.AiRequests, 1, "failed-new-usage", CancellationToken.None));
+
+            Assert.Equal("coordinator failure", error.Message);
+        }
+
+        await using var verification = new ApplicationDbContext(harness.Options);
+        Assert.Empty(await verification.UsageRecords.ToListAsync());
+        Assert.Single(await verification.UsageOperations.ToListAsync());
+        Assert.Single(await verification.CustomerBillableUsageOperations.ToListAsync());
+        Assert.Empty(await verification.CustomerBillingDeliveries.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Coordinator_StagesDeliveryInOperationTransactionAndRollbackLeavesNoDelivery()
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated, CustomerBillableUsageReason.Calculated, 5m);
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            await using var transaction = await context.Database.BeginTransactionAsync();
+            var operation = await context.CustomerBillableUsageOperations.SingleAsync();
+            var result = await new CustomerBillingDeliveryCoordinator(new CustomerBillingDeliveryStore(context))
+                .PrepareAsync(operation, At(10), CancellationToken.None);
+
+            Assert.Equal(CustomerBillingDeliveryPreparationStatus.Prepared, result.Status);
+            Assert.Empty(await context.CustomerBillingDeliveries.AsNoTracking().ToListAsync());
+            await context.SaveChangesAsync();
+            Assert.Single(await context.CustomerBillingDeliveries.AsNoTracking().ToListAsync());
+            await transaction.RollbackAsync();
+        }
+
+        Assert.Equal(0, await CountDeliveriesAsync(harness.Options));
+    }
+
     [Fact]
     public async Task Coordinator_PreparesEligibleCalculatedChargeWithStableHistoricalSnapshots()
     {
@@ -39,9 +125,10 @@ public sealed class CustomerBillingDeliveryTests
         Assert.Equal(harness.CompanyId, first.Delivery.CompanyId);
         Assert.Equal(harness.SubscriptionId, first.Delivery.TenantSubscriptionId);
         Assert.Equal(harness.PlanId, first.Delivery.SubscriptionPlanId);
-        Assert.Equal(UsageMetric.AiTokens, first.Delivery.Metric);
+        Assert.Equal(UsageMetric.AiRequests, first.Delivery.Metric);
         Assert.Equal(At(0), first.Delivery.PeriodStartUtc);
         Assert.Equal(At(28), first.Delivery.PeriodEndUtc);
+        Assert.Equal(At(0).AddHours(1), first.Delivery.OccurredAtUtc);
         Assert.Equal(CustomerBillableUsageState.Calculated, first.Delivery.BillingStateSnapshot);
         Assert.Equal(CustomerBillableUsageReason.Calculated, first.Delivery.BillingReasonSnapshot);
         Assert.Equal(3, first.Delivery.BillableQuantitySnapshot);
@@ -74,6 +161,27 @@ public sealed class CustomerBillingDeliveryTests
         Assert.Equal(CustomerBillingDeliveryReason.ZeroChargeSuppressed, result.Delivery.DeliveryReason);
         Assert.False(await new CustomerBillingDeliveryStore(context)
             .TryStartDispatchAsync(result.Delivery.Id, At(11)));
+    }
+
+    [Fact]
+    public async Task Store_StagingSameOperationTwiceBeforeSaveReusesOneDelivery()
+    {
+        await using var harness = await CreateHarnessAsync(
+            CustomerBillableUsageState.Calculated,
+            CustomerBillableUsageReason.Calculated,
+            chargeAmount: 5m);
+        await using var context = new ApplicationDbContext(harness.Options);
+        var operation = await context.CustomerBillableUsageOperations.SingleAsync();
+        var store = new CustomerBillingDeliveryStore(context);
+
+        var first = await store.StageAsync(operation, At(10), CancellationToken.None);
+        var replay = await store.StageAsync(operation, At(11), CancellationToken.None);
+
+        Assert.NotNull(first);
+        Assert.NotNull(replay);
+        Assert.Equal(first.Id, replay.Id);
+        await context.SaveChangesAsync();
+        Assert.Equal(1, await CountDeliveriesAsync(harness.Options));
     }
 
     [Theory]
@@ -228,6 +336,13 @@ public sealed class CustomerBillingDeliveryTests
         await using (var context = new ApplicationDbContext(harness.Options))
         {
             var delivery = await context.CustomerBillingDeliveries.SingleAsync(item => item.Id == deliveryId);
+            context.Entry(delivery).Property(item => item.OccurredAtUtc).CurrentValue = At(2);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync());
+        }
+
+        await using (var context = new ApplicationDbContext(harness.Options))
+        {
+            var delivery = await context.CustomerBillingDeliveries.SingleAsync(item => item.Id == deliveryId);
             context.CustomerBillingDeliveries.Remove(delivery);
             await Assert.ThrowsAsync<InvalidOperationException>(() => context.SaveChangesAsync());
         }
@@ -266,7 +381,7 @@ public sealed class CustomerBillingDeliveryTests
             {
                 Id = Guid.NewGuid(),
                 CompanyId = harness.CompanyId,
-                Metric = UsageMetric.AiTokens.ToStorageValue(),
+                Metric = UsageMetric.AiRequests.ToStorageValue(),
                 IdempotencyKey = $"second-delivery-{Guid.NewGuid():N}",
                 PeriodStartUtc = original.PeriodStartUtc,
                 Quantity = 1
@@ -276,7 +391,7 @@ public sealed class CustomerBillingDeliveryTests
                 usageOperation,
                 harness.SubscriptionId,
                 harness.PlanId,
-                UsageMetric.AiTokens,
+                UsageMetric.AiRequests,
                 At(1),
                 At(28),
                 1,
@@ -324,7 +439,7 @@ public sealed class CustomerBillingDeliveryTests
         {
             var newerVersion = CustomerUsagePriceVersion.Create(new CustomerUsagePriceVersionDraft(
                 harness.PlanId,
-                UsageMetric.AiTokens,
+                UsageMetric.AiRequests,
                 CustomerUsageBillingMode.PerUnitOverage,
                 1m,
                 99m,
@@ -395,6 +510,7 @@ public sealed class CustomerBillingDeliveryTests
         Assert.Equal(delivery.BillableQuantitySnapshot, transport.LastRequest.BillableQuantity);
         Assert.Equal(delivery.ChargeAmountSnapshot, transport.LastRequest.ChargeAmount);
         Assert.Equal(delivery.PeriodStartUtc, transport.LastRequest.PeriodStartUtc);
+        Assert.Equal(At(0).AddHours(1), transport.LastRequest.OccurredAtUtc);
     }
 
     [Fact]
@@ -724,13 +840,30 @@ public sealed class CustomerBillingDeliveryTests
                 Enabled = enabled,
                 Metrics = new Dictionary<string, CustomerUsageBillingMetricOptions>(StringComparer.Ordinal)
                 {
-                    [UsageMetric.AiTokens.ToString()] = new()
+                    [UsageMetric.AiRequests.ToString()] = new()
                     {
                         Transport = "StripeMeter",
-                        MeterEventName = "ai_tokens",
                         CustomerPayloadKey = "stripe_customer_id",
                         ValuePayloadKey = "value",
-                        BillableQuantityIsExternalUnit = true
+                        BillableQuantityIsExternalUnit = true,
+                        PriceMappings = new Dictionary<string, CustomerUsageBillingPriceMappingOptions>(StringComparer.Ordinal)
+                        {
+                            [CustomerUsageBillingOptionsValidator.PriceMappingKey(TestPlanId, TestPriceVersionId)] = new()
+                            {
+                                ResourcesVerified = true,
+                                MeterId = "mtr_test123",
+                                MeterEventName = "ai_requests",
+                                UsagePriceId = "price_test123",
+                                Currency = "USD",
+                                UnitQuantity = 1m,
+                                UnitPrice = 2m,
+                                StripeUnitAmountMinor = 200m,
+                                RateSemantics = "LinearPerBillableUnit",
+                                MappingIdentity = CustomerUsageBillingOptionsValidator.ExpectedMappingIdentity(
+                                    TestPlanId, UsageMetric.AiRequests, TestPriceVersionId,
+                                    "mtr_test123", "ai_requests", "price_test123")
+                            }
+                        }
                     }
                 }
             }),
@@ -741,15 +874,19 @@ public sealed class CustomerBillingDeliveryTests
         CustomerBillableUsageState billingState,
         CustomerBillableUsageReason billingReason,
         decimal? chargeAmount,
-        long billableQuantity = 1)
+        long billableQuantity = 1,
+        bool relational = true)
     {
         var connection = new SqliteConnection($"Data Source=customer-billing-delivery-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        var builder = new DbContextOptionsBuilder<ApplicationDbContext>();
+        var options = relational
+            ? builder.UseSqlite(connection).Options
+            : builder.UseInMemoryDatabase($"delivery-production-{Guid.NewGuid():N}").Options;
         var companyId = Guid.NewGuid();
-        var planId = Guid.NewGuid();
+        var planId = TestPlanId;
         var subscriptionId = Guid.NewGuid();
-        var priceVersionId = Guid.NewGuid();
+        var priceVersionId = TestPriceVersionId;
         var billingOperationId = Guid.NewGuid();
         var periodStart = At(0);
         var periodEnd = At(28);
@@ -787,7 +924,7 @@ public sealed class CustomerBillingDeliveryTests
             };
             var priceVersion = CustomerUsagePriceVersion.Create(new CustomerUsagePriceVersionDraft(
                 planId,
-                UsageMetric.AiTokens,
+                UsageMetric.AiRequests,
                 CustomerUsageBillingMode.PerUnitOverage,
                 1m,
                 2m,
@@ -799,7 +936,7 @@ public sealed class CustomerBillingDeliveryTests
             {
                 Id = Guid.NewGuid(),
                 CompanyId = companyId,
-                Metric = UsageMetric.AiTokens.ToStorageValue(),
+                Metric = UsageMetric.AiRequests.ToStorageValue(),
                 IdempotencyKey = $"delivery-{billingOperationId:N}",
                 PeriodStartUtc = periodStart,
                 Quantity = 3
@@ -809,7 +946,7 @@ public sealed class CustomerBillingDeliveryTests
                 usageOperation,
                 subscriptionId,
                 planId,
-                UsageMetric.AiTokens,
+                UsageMetric.AiRequests,
                 periodStart.AddHours(1),
                 periodEnd,
                 3,
@@ -889,6 +1026,17 @@ public sealed class CustomerBillingDeliveryTests
         }
     }
 
+    private sealed class FailingCoordinator : ICustomerBillingDeliveryCoordinator
+    {
+        public Task<CustomerBillingDeliveryPreparationResult> PrepareAsync(
+            CustomerBillableUsageOperation operation, DateTimeOffset preparedAtUtc, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("coordinator failure");
+
+        public Task<CustomerBillingDeliveryPreparationResult> PrepareAsync(
+            Guid billingOperationId, DateTimeOffset preparedAtUtc, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("coordinator failure");
+    }
+
     private sealed class DeliveredWriteFailingStore(ICustomerBillingDeliveryStore inner) : ICustomerBillingDeliveryStore
     {
         public Task<CustomerBillableUsageOperation?> GetBillingOperationAsync(
@@ -898,6 +1046,12 @@ public sealed class CustomerBillingDeliveryTests
 
         public Task<CustomerBillingDelivery> PrepareAsync(Guid billingOperationId, DateTimeOffset preparedAtUtc) =>
             inner.PrepareAsync(billingOperationId, preparedAtUtc);
+
+        public Task<CustomerBillingDelivery?> StageAsync(
+            CustomerBillableUsageOperation operation,
+            DateTimeOffset preparedAtUtc,
+            CancellationToken cancellationToken) =>
+            inner.StageAsync(operation, preparedAtUtc, cancellationToken);
 
         public Task<CustomerBillingDelivery?> GetByIdAsync(Guid deliveryId, CancellationToken cancellationToken) =>
             inner.GetByIdAsync(deliveryId, cancellationToken);

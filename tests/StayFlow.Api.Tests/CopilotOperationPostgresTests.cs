@@ -159,7 +159,10 @@ public sealed class CopilotOperationPostgresTests : IAsyncLifetime
     }
 
     private static SubscriptionEntitlementService NewService(ApplicationDbContext db)
-        => new(db, NullLogger<SubscriptionEntitlementService>.Instance);
+        => new(
+            db,
+            new CustomerBillingDeliveryCoordinator(new CustomerBillingDeliveryStore(db)),
+            NullLogger<SubscriptionEntitlementService>.Instance);
 
     private async Task SeedAsync(ApplicationDbContext db)
     {

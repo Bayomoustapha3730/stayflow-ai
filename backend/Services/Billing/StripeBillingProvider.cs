@@ -103,10 +103,10 @@ public sealed class StripeBillingProvider(
     public async Task<BillingProviderSubscriptionSnapshot> ChangeSubscriptionPlanAsync(ChangeSubscriptionPlanProviderRequest request, CancellationToken cancellationToken)
     {
         var subscription = await GetSubscriptionDocumentAsync(request.SubscriptionId, cancellationToken);
-        var itemId = GetSubscriptionItemId(subscription);
+        var itemId = GetSubscriptionItemId(subscription, options.Value);
         if (string.IsNullOrWhiteSpace(itemId))
         {
-            throw new ExternalDependencyException("Stripe subscription item was not found.", "stripe_subscription_item_missing");
+            throw new ExternalDependencyException("Stripe base-plan subscription item was not found uniquely.", "stripe_base_subscription_item_missing");
         }
 
         var form = new Dictionary<string, string>
@@ -117,7 +117,7 @@ public sealed class StripeBillingProvider(
         };
 
         var updated = await PostFormAsync($"subscriptions/{request.SubscriptionId}", form, cancellationToken);
-        return ParseSubscriptionSnapshot(updated.RootElement);
+        return ParseSubscriptionSnapshot(updated.RootElement, options.Value);
     }
 
     public async Task<BillingProviderSubscriptionSnapshot> CancelSubscriptionAsync(CancelSubscriptionProviderRequest request, CancellationToken cancellationToken)
@@ -130,11 +130,11 @@ public sealed class StripeBillingProvider(
             };
 
             var updated = await PostFormAsync($"subscriptions/{request.SubscriptionId}", form, cancellationToken);
-            return ParseSubscriptionSnapshot(updated.RootElement);
+            return ParseSubscriptionSnapshot(updated.RootElement, options.Value);
         }
 
         var deleted = await DeleteAsync($"subscriptions/{request.SubscriptionId}", cancellationToken);
-        return ParseSubscriptionSnapshot(deleted.RootElement);
+        return ParseSubscriptionSnapshot(deleted.RootElement, options.Value);
     }
 
     public async Task<BillingProviderSubscriptionSnapshot> ResumeSubscriptionAsync(ResumeSubscriptionProviderRequest request, CancellationToken cancellationToken)
@@ -145,13 +145,13 @@ public sealed class StripeBillingProvider(
         };
 
         var updated = await PostFormAsync($"subscriptions/{request.SubscriptionId}", form, cancellationToken);
-        return ParseSubscriptionSnapshot(updated.RootElement);
+        return ParseSubscriptionSnapshot(updated.RootElement, options.Value);
     }
 
     public async Task<BillingProviderSubscriptionSnapshot> GetSubscriptionSnapshotAsync(string subscriptionId, CancellationToken cancellationToken)
     {
         var document = await GetSubscriptionDocumentAsync(subscriptionId, cancellationToken);
-        return ParseSubscriptionSnapshot(document.RootElement);
+        return ParseSubscriptionSnapshot(document.RootElement, options.Value);
     }
 
     public BillingWebhookEnvelope ValidateAndParseWebhook(string rawBody, string signatureHeader)
@@ -183,6 +183,13 @@ public sealed class StripeBillingProvider(
 
         using var document = JsonDocument.Parse(rawBody);
         var root = document.RootElement;
+        if (root.TryGetProperty("api_version", out var apiVersion)
+            && apiVersion.GetString() != BillingOptions.SupportedStripeApiVersion)
+        {
+            throw new ForbiddenOperationException(
+                "Stripe webhook API version does not match the supported payload schema.",
+                "stripe_webhook_api_version_mismatch");
+        }
         var eventId = root.GetProperty("id").GetString() ?? string.Empty;
         var eventType = root.GetProperty("type").GetString() ?? string.Empty;
         var created = root.GetProperty("created").GetInt64();
@@ -317,6 +324,11 @@ public sealed class StripeBillingProvider(
 
     private HttpClient CreateAuthorizedClient()
     {
+        if (options.Value.StripeApiVersion != BillingOptions.SupportedStripeApiVersion)
+        {
+            throw new ExternalDependencyException("Stripe API version is not supported.", "stripe_api_version_invalid");
+        }
+
         var key = options.Value.StripeSecretKey;
         if (string.IsNullOrWhiteSpace(key))
         {
@@ -326,23 +338,15 @@ public sealed class StripeBillingProvider(
         var client = httpClientFactory.CreateClient(nameof(StripeBillingProvider));
         client.BaseAddress = new Uri(StripeApiBase + "/", UriKind.Absolute);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        client.DefaultRequestHeaders.Remove("Stripe-Version");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Stripe-Version", options.Value.StripeApiVersion);
         return client;
     }
 
-    private static string? GetSubscriptionItemId(JsonDocument subscription)
+    internal static string? GetSubscriptionItemId(JsonDocument subscription, BillingOptions options)
     {
-        if (!subscription.RootElement.TryGetProperty("items", out var items))
-        {
-            return null;
-        }
-
-        if (!items.TryGetProperty("data", out var itemData) || itemData.ValueKind != JsonValueKind.Array || itemData.GetArrayLength() == 0)
-        {
-            return null;
-        }
-
-        var first = itemData[0];
-        if (!first.TryGetProperty("id", out var idElement))
+        var item = FindBasePlanSubscriptionItem(subscription.RootElement, options);
+        if (item is null || !item.Value.TryGetProperty("id", out var idElement))
         {
             return null;
         }
@@ -350,7 +354,38 @@ public sealed class StripeBillingProvider(
         return idElement.GetString();
     }
 
-    private static BillingProviderSubscriptionSnapshot ParseSubscriptionSnapshot(JsonElement root)
+    internal static string? GetBasePlanPriceId(JsonElement subscription, BillingOptions options)
+    {
+        var item = FindBasePlanSubscriptionItem(subscription, options);
+        return item?.GetProperty("price").GetProperty("id").GetString();
+    }
+
+    private static JsonElement? FindBasePlanSubscriptionItem(JsonElement subscription, BillingOptions options)
+    {
+        if (!subscription.TryGetProperty("items", out var items)
+            || !items.TryGetProperty("data", out var itemData)
+            || itemData.ValueKind != JsonValueKind.Array
+            || itemData.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var configuredBasePriceIds = options.PlanPriceIds.Values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .ToHashSet(StringComparer.Ordinal);
+        var matchingItems = itemData.EnumerateArray()
+            .Where(item => item.TryGetProperty("price", out var price)
+                && price.TryGetProperty("id", out var priceId)
+                && priceId.ValueKind == JsonValueKind.String
+                && price.TryGetProperty("recurring", out var recurring)
+                && recurring.TryGetProperty("usage_type", out var usageType)
+                && usageType.GetString() == "licensed"
+                && configuredBasePriceIds.Contains(priceId.GetString()!))
+            .ToArray();
+        return matchingItems.Length == 1 ? matchingItems[0] : null;
+    }
+
+    private static BillingProviderSubscriptionSnapshot ParseSubscriptionSnapshot(JsonElement root, BillingOptions options)
     {
         var id = root.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
         if (string.IsNullOrWhiteSpace(id))
@@ -377,18 +412,17 @@ public sealed class StripeBillingProvider(
             && cancelElement.GetBoolean();
 
         string? priceId = null;
-        if (root.TryGetProperty("items", out var items)
-            && items.TryGetProperty("data", out var itemData)
-            && itemData.ValueKind == JsonValueKind.Array
-            && itemData.GetArrayLength() > 0)
+        var basePlanItem = FindBasePlanSubscriptionItem(root, options);
+        if (basePlanItem is null
+            || !basePlanItem.Value.TryGetProperty("price", out var priceElement)
+            || !priceElement.TryGetProperty("id", out var priceIdElement)
+            || string.IsNullOrWhiteSpace(priceIdElement.GetString()))
         {
-            var first = itemData[0];
-            if (first.TryGetProperty("price", out var priceElement)
-                && priceElement.TryGetProperty("id", out var priceIdElement))
-            {
-                priceId = priceIdElement.GetString();
-            }
+            throw new ExternalDependencyException(
+                "Stripe subscription does not contain one configured base-plan item.",
+                "stripe_base_subscription_item_missing");
         }
+        priceId = priceIdElement.GetString();
 
         var createdAt = root.TryGetProperty("created", out var createdElement) && createdElement.ValueKind == JsonValueKind.Number
             ? DateTimeOffset.FromUnixTimeSeconds(createdElement.GetInt64())

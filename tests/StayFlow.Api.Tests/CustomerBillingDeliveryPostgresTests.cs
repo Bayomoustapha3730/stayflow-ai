@@ -11,6 +11,8 @@ namespace StayFlow.Api.Tests;
 
 public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
 {
+    private static readonly Guid TestPlanId = Guid.Parse("10000000-0000-0000-0000-000000000002");
+    private static readonly Guid TestPriceVersionId = Guid.Parse("20000000-0000-0000-0000-000000000002");
     private readonly string databaseName = $"stayflow_billing_delivery_{Guid.NewGuid():N}";
     private string maintenanceConnectionString = string.Empty;
     private DbContextOptions<ApplicationDbContext> dbOptions = null!;
@@ -71,6 +73,37 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
             $"DROP DATABASE IF EXISTS \"{databaseName}\"",
             maintenanceConnection);
         await dropCommand.ExecuteNonQueryAsync();
+    }
+
+    [PostgresFact]
+    public async Task ProductionUsageReplay_ConcurrentOutboxRepairCreatesOneDelivery()
+    {
+        await SeedBillingOperationAsync();
+        await using var seed = new ApplicationDbContext(dbOptions);
+        var usage = await seed.UsageOperations.SingleAsync();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        async Task<UsageConsumptionResult> ReplayAsync()
+        {
+            await using var context = new ApplicationDbContext(dbOptions);
+            var service = new SubscriptionEntitlementService(context,
+                new CustomerBillingDeliveryCoordinator(new CustomerBillingDeliveryStore(context)),
+                NullLogger<SubscriptionEntitlementService>.Instance);
+            await start.Task;
+            return await service.ConsumeQuotaAsync(usage.CompanyId, UsageMetric.AiRequests,
+                usage.Quantity, usage.IdempotencyKey, CancellationToken.None);
+        }
+
+        var first = ReplayAsync();
+        var second = ReplayAsync();
+        start.SetResult();
+        var results = await Task.WhenAll(first, second);
+
+        Assert.All(results, result => Assert.True(result.WasIdempotentReplay));
+        await using var verification = new ApplicationDbContext(dbOptions);
+        Assert.Single(await verification.CustomerBillingDeliveries.ToListAsync());
+        Assert.Single(await verification.CustomerBillableUsageOperations.ToListAsync());
+        Assert.Single(await verification.UsageOperations.ToListAsync());
+        Assert.Empty(await verification.UsageRecords.ToListAsync());
     }
 
     [PostgresFact]
@@ -281,13 +314,30 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
                 Enabled = true,
                 Metrics = new Dictionary<string, CustomerUsageBillingMetricOptions>(StringComparer.Ordinal)
                 {
-                    [UsageMetric.AiTokens.ToString()] = new()
+                    [UsageMetric.AiRequests.ToString()] = new()
                     {
                         Transport = "StripeMeter",
-                        MeterEventName = "ai_tokens",
                         CustomerPayloadKey = "customer",
                         ValuePayloadKey = "value",
-                        BillableQuantityIsExternalUnit = true
+                        BillableQuantityIsExternalUnit = true,
+                        PriceMappings = new Dictionary<string, CustomerUsageBillingPriceMappingOptions>(StringComparer.Ordinal)
+                        {
+                            [CustomerUsageBillingOptionsValidator.PriceMappingKey(TestPlanId, TestPriceVersionId)] = new()
+                            {
+                                ResourcesVerified = true,
+                                MeterId = "mtr_test123",
+                                MeterEventName = "ai_requests",
+                                UsagePriceId = "price_test123",
+                                Currency = "USD",
+                                UnitQuantity = 1m,
+                                UnitPrice = 2m,
+                                StripeUnitAmountMinor = 200m,
+                                RateSemantics = "LinearPerBillableUnit",
+                                MappingIdentity = CustomerUsageBillingOptionsValidator.ExpectedMappingIdentity(
+                                    TestPlanId, UsageMetric.AiRequests, TestPriceVersionId,
+                                    "mtr_test123", "ai_requests", "price_test123")
+                            }
+                        }
                     }
                 }
             }),
@@ -312,9 +362,9 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
     private async Task<Guid> SeedBillingOperationAsync()
     {
         var companyId = Guid.NewGuid();
-        var planId = Guid.NewGuid();
+        var planId = TestPlanId;
         var subscriptionId = Guid.NewGuid();
-        var priceVersionId = Guid.NewGuid();
+        var priceVersionId = TestPriceVersionId;
         var periodStart = At(0);
         var periodEnd = At(28);
         await using var context = new ApplicationDbContext(dbOptions);
@@ -349,7 +399,7 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
         };
         var priceVersion = CustomerUsagePriceVersion.Create(new CustomerUsagePriceVersionDraft(
             planId,
-            UsageMetric.AiTokens,
+            UsageMetric.AiRequests,
             CustomerUsageBillingMode.PerUnitOverage,
             1m,
             2m,
@@ -361,7 +411,7 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
         {
             Id = Guid.NewGuid(),
             CompanyId = companyId,
-            Metric = UsageMetric.AiTokens.ToStorageValue(),
+            Metric = UsageMetric.AiRequests.ToStorageValue(),
             IdempotencyKey = $"delivery-{Guid.NewGuid():N}",
             PeriodStartUtc = periodStart,
             Quantity = 3
@@ -371,7 +421,7 @@ public sealed class CustomerBillingDeliveryPostgresTests : IAsyncLifetime
             usageOperation,
             subscriptionId,
             planId,
-            UsageMetric.AiTokens,
+            UsageMetric.AiRequests,
             periodStart.AddHours(1),
             periodEnd,
             3,

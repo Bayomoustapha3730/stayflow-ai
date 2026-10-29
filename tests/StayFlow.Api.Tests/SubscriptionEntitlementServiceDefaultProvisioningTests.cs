@@ -161,6 +161,8 @@ public sealed class SubscriptionEntitlementServiceDefaultProvisioningTests
 
         var service = new SubscriptionEntitlementService(
             dbContext,
+            new StayFlow.Api.Services.CustomerBillingDeliveryCoordinator(
+                new StayFlow.Api.Services.CustomerBillingDeliveryStore(dbContext)),
             NullLogger<SubscriptionEntitlementService>.Instance);
 
         return new Harness(service, dbContext, companyId, freePlanId, starterPlanId);

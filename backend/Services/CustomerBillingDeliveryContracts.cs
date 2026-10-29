@@ -21,6 +21,11 @@ public interface ICustomerBillingDeliveryStore
 
     Task<CustomerBillingDelivery> PrepareAsync(Guid billingOperationId, DateTimeOffset preparedAtUtc);
 
+    Task<CustomerBillingDelivery?> StageAsync(
+        CustomerBillableUsageOperation operation,
+        DateTimeOffset preparedAtUtc,
+        CancellationToken cancellationToken);
+
     Task<CustomerBillingDelivery?> GetByIdAsync(Guid deliveryId, CancellationToken cancellationToken);
 
     Task<CustomerBillingDelivery?> GetByBillingOperationAsync(
@@ -92,6 +97,11 @@ public interface ICustomerBillingDeliveryStore
 
 public interface ICustomerBillingDeliveryCoordinator
 {
+    Task<CustomerBillingDeliveryPreparationResult> PrepareAsync(
+        CustomerBillableUsageOperation operation,
+        DateTimeOffset preparedAtUtc,
+        CancellationToken cancellationToken);
+
     Task<CustomerBillingDeliveryPreparationResult> PrepareAsync(
         Guid billingOperationId,
         DateTimeOffset preparedAtUtc,

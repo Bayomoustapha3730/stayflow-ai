@@ -167,6 +167,8 @@ public static class ServiceCollectionExtensions
                 && !string.IsNullOrWhiteSpace(options.BillingPortalReturnUrl),
                 "Billing URLs must be configured.")
             .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.Billing.BillingOptions>,
+            Services.Billing.BillingOptionsValidator>();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Services.Billing.CustomerUsageBillingOptions>,
             Services.Billing.CustomerUsageBillingOptionsValidator>();
         services.AddOptions<Services.Billing.CustomerUsageBillingOptions>()

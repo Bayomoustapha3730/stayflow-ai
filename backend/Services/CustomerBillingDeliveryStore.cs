@@ -33,16 +33,7 @@ public sealed class CustomerBillingDeliveryStore(ApplicationDbContext dbContext)
             throw new InvalidOperationException("The customer billing operation is not eligible for external delivery.");
         }
 
-        var isZeroCharge = operation.ChargeAmount == 0m;
-        var delivery = CustomerBillingDelivery.Create(
-            operation,
-            isZeroCharge ? CustomerBillingDeliveryState.Suppressed : CustomerBillingDeliveryState.Prepared,
-            isZeroCharge
-                ? CustomerBillingDeliveryReason.ZeroChargeSuppressed
-                : CustomerBillingDeliveryReason.Prepared,
-            preparedAtUtc);
-        dbContext.CustomerBillingDeliveries.Add(delivery);
-
+        var delivery = (await StageAsync(operation, preparedAtUtc, CancellationToken.None))!;
         try
         {
             await dbContext.SaveChangesAsync(CancellationToken.None);
@@ -61,6 +52,46 @@ public sealed class CustomerBillingDeliveryStore(ApplicationDbContext dbContext)
 
             throw;
         }
+    }
+
+    public async Task<CustomerBillingDelivery?> StageAsync(
+        CustomerBillableUsageOperation operation,
+        DateTimeOffset preparedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        ValidateUtc(preparedAtUtc, nameof(preparedAtUtc));
+
+        var existingLocal = dbContext.CustomerBillingDeliveries.Local.FirstOrDefault(delivery =>
+            delivery.CustomerBillableUsageOperationId == operation.Id
+            && delivery.DeliveryProvider == CustomerBillingDeliveryProvider.Stripe
+            && delivery.DeliveryKind == CustomerBillingDeliveryKind.PendingExternalBilling);
+        if (existingLocal is not null)
+        {
+            return existingLocal;
+        }
+
+        var existing = await GetByBillingOperationAsync(operation.Id, cancellationToken);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        if (!IsExternallyBillable(operation))
+        {
+            return null;
+        }
+
+        var isZeroCharge = operation.ChargeAmount == 0m;
+        var delivery = CustomerBillingDelivery.Create(
+            operation,
+            isZeroCharge ? CustomerBillingDeliveryState.Suppressed : CustomerBillingDeliveryState.Prepared,
+            isZeroCharge
+                ? CustomerBillingDeliveryReason.ZeroChargeSuppressed
+                : CustomerBillingDeliveryReason.Prepared,
+            preparedAtUtc);
+        dbContext.CustomerBillingDeliveries.Add(delivery);
+        return delivery;
     }
 
     public Task<CustomerBillingDelivery?> GetByIdAsync(
@@ -354,10 +385,11 @@ public sealed class CustomerBillingDeliveryStore(ApplicationDbContext dbContext)
 
     private static bool IsExternallyBillable(CustomerBillableUsageOperation operation) =>
         operation.BillingState == CustomerBillableUsageState.Calculated
+        && operation.BillingReason == CustomerBillableUsageReason.Calculated
         && operation.ChargeAmount is not null
         && operation.Currency == "USD"
         && operation.CustomerUsagePriceVersionId is not null
-        && operation.BillableQuantity >= 0;
+        && operation.BillableQuantity > 0;
 
     private static readonly CustomerBillingDeliveryFailureCategory[] RetryableFailureCategories =
     [

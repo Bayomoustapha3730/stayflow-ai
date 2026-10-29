@@ -185,6 +185,7 @@ public sealed class ApplicationDbContext(
             nameof(CustomerBillingDelivery.Metric),
             nameof(CustomerBillingDelivery.PeriodStartUtc),
             nameof(CustomerBillingDelivery.PeriodEndUtc),
+            nameof(CustomerBillingDelivery.OccurredAtUtc),
             nameof(CustomerBillingDelivery.DeliveryProvider),
             nameof(CustomerBillingDelivery.DeliveryKind),
             nameof(CustomerBillingDelivery.BillingStateSnapshot),
