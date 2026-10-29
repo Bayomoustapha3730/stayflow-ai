@@ -87,6 +87,9 @@ pairs (not colon-delimited keys, because configuration binding reserves colons).
 Each mapping requires:
 
 - `MeterId`, `MeterEventName`, and `UsagePriceId`, unique across immutable routes.
+  Meter IDs accept `mtr_` followed by an alphanumeric suffix, or `mtr_test_`
+  followed by an alphanumeric suffix. Identifier acceptance alone does not
+  verify the resource or satisfy `ResourcesVerified`.
 - `Currency=USD`, `UnitQuantity`, and `UnitPrice`, exactly matching the durable
   billable operation's pricing snapshot.
 - `StripeUnitAmountMinor`, the exact per-billable-unit rate in USD cents,

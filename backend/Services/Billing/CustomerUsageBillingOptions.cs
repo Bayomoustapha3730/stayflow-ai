@@ -42,6 +42,7 @@ public sealed class CustomerUsageBillingOptionsValidator : IValidateOptions<Cust
 {
     private static readonly Regex StripeKeyPattern = new("^[A-Za-z0-9_]{1,100}$", RegexOptions.CultureInvariant);
     private static readonly Regex StripeIdPattern = new("^(mtr|price)_[A-Za-z0-9]+$", RegexOptions.CultureInvariant);
+    private static readonly Regex StripeMeterIdPattern = new(@"\Amtr_(?:test_)?[A-Za-z0-9]+\z", RegexOptions.CultureInvariant);
     private static readonly HashSet<UsageMetric> ExternallySupportedMetrics =
     [
         UsageMetric.Reservations,
@@ -201,8 +202,7 @@ public sealed class CustomerUsageBillingOptionsValidator : IValidateOptions<Cust
         {
             errors.Add($"{prefix}:ResourcesVerified requires operational verification of the external meter, price, subscription item, and immutable rate contract.");
         }
-        if (!StripeIdPattern.IsMatch(meterId)
-            || !meterId.StartsWith("mtr_", StringComparison.Ordinal))
+        if (!StripeMeterIdPattern.IsMatch(meterId))
         {
             errors.Add($"{prefix}:MeterId must be a Stripe meter ID.");
         }

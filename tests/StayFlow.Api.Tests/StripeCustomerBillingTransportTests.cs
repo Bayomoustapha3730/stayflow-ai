@@ -15,6 +15,61 @@ public sealed class StripeCustomerBillingTransportTests
     private static readonly Guid TestPlanId = Guid.Parse("10000000-0000-0000-0000-000000000003");
     private static readonly Guid TestPriceVersionId = Guid.Parse("20000000-0000-0000-0000-000000000003");
 
+    [Theory]
+    [InlineData("mtr_test_61Vf7xPobjbV78dGn418JaYiexAe686y")]
+    [InlineData("mtr_abc123")]
+    [InlineData("mtr_test123")]
+    public void SupportedMeterIdentifiers_PassOptionsValidation(string meterId)
+    {
+        var result = new CustomerUsageBillingOptionsValidator().Validate(null, OptionsWithMeterId(meterId));
+
+        Assert.True(result.Succeeded, string.Join(Environment.NewLine, result.Failures ?? []));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("mtr")]
+    [InlineData("mtr_")]
+    [InlineData("mtr-test_abc")]
+    [InlineData("meter_test_abc")]
+    [InlineData("prod_test_abc")]
+    [InlineData("price_test_abc")]
+    [InlineData("cus_test_abc")]
+    [InlineData("sub_test_abc")]
+    [InlineData("https://example.com/mtr_test_abc")]
+    [InlineData("mtr_test_abc/def")]
+    [InlineData("mtr_test_abc def")]
+    [InlineData("mtr_test_")]
+    [InlineData("mtr_test__abc")]
+    [InlineData("mtr_test_abc_def")]
+    [InlineData("mtr_test_abc\n")]
+    [InlineData("mtr_abc\n")]
+    [InlineData("mtr_test_abc\r")]
+    [InlineData("mtr_test_abc\t")]
+    [InlineData("mtr_test_abc\0")]
+    public void MalformedMeterIdentifiers_FailOptionsValidation(string? meterId)
+    {
+        var result = new CustomerUsageBillingOptionsValidator().Validate(null, OptionsWithMeterId(meterId));
+
+        Assert.False(result.Succeeded);
+        Assert.Contains(result.Failures!, failure => failure.EndsWith(":MeterId must be a Stripe meter ID.", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidTestMeterIdentifier_DoesNotAttestUnverifiedResources()
+    {
+        var options = OptionsWithMeterId("mtr_test_61Vf7xPobjbV78dGn418JaYiexAe686y");
+        options.Metrics["Reservations"].PriceMappings.Values.Single().ResourcesVerified = false;
+
+        var result = new CustomerUsageBillingOptionsValidator().Validate(null, options);
+
+        Assert.False(result.Succeeded);
+        Assert.Single(result.Failures!);
+        Assert.Contains(":ResourcesVerified requires operational verification", result.Failures!.Single(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void VersionAwareMapping_RoundTripsThroughRealJsonConfigurationBinding()
     {
@@ -591,6 +646,17 @@ public sealed class StripeCustomerBillingTransportTests
             Options.Create(usageOptions),
             harness.Context,
             new FixedTimeProvider(dispatchTime ?? At(10)));
+
+    private static CustomerUsageBillingOptions OptionsWithMeterId(string? meterId)
+    {
+        var metric = Mapping();
+        var price = metric.PriceMappings.Values.Single();
+        price.MeterId = meterId!;
+        price.MappingIdentity = CustomerUsageBillingOptionsValidator.ExpectedMappingIdentity(
+            TestPlanId, UsageMetric.Reservations, TestPriceVersionId,
+            price.MeterId, price.MeterEventName, price.UsagePriceId);
+        return new CustomerUsageBillingOptions { Metrics = { ["Reservations"] = metric } };
+    }
 
     private static CustomerUsageBillingOptions EnabledOptions() => new()
     {
