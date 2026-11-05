@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Net;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using StayFlow.Api.Configuration;
 using StayFlow.Api.Exceptions;
 using StayFlow.Api.Services.Billing;
 
@@ -68,7 +70,8 @@ public sealed class StripeBillingProviderTests
         };
         var provider = new StripeBillingProvider(
             new RecordingHttpClientFactory(handler),
-            Options.Create(options));
+            Options.Create(options),
+            CreateStripeTestEnvironmentGuard(false));
 
         var result = await provider.ChangeSubscriptionPlanAsync(
             new ChangeSubscriptionPlanProviderRequest("sub_test", "price_professional", null),
@@ -144,6 +147,57 @@ public sealed class StripeBillingProviderTests
             provider.ValidateAndParseWebhook(payload, $"t={timestamp},v1=bad_signature"));
     }
 
+    [Theory]
+    [InlineData("\"livemode\":true")]
+    [InlineData("\"livemode\":null")]
+    [InlineData("\"livemode\":\"false\"")]
+    [InlineData("\"livemode\":false,\"livemode\":true")]
+    [InlineData("")]
+    public void StripeTestEnvironment_RejectsLiveOrAmbiguousSignedWebhookMode(string livemode)
+    {
+        var provider = CreateStripeProvider("whsec_test_value", stripeTestEnvironment: true);
+        var modeField = string.IsNullOrEmpty(livemode) ? string.Empty : $",{livemode}";
+        var payload = $"{{\"id\":\"evt_mode\",\"type\":\"invoice.paid\",\"created\":1730000000{modeField},\"data\":{{\"object\":{{\"id\":\"in_1\"}}}}}}";
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var signature = ComputeStripeSignature("whsec_test_value", timestamp, payload);
+
+        var error = Assert.Throws<ForbiddenOperationException>(() =>
+            provider.ValidateAndParseWebhook(payload, $"t={timestamp},v1={signature}"));
+
+        Assert.Equal("stripe_webhook_mode_mismatch", error.ErrorCode);
+    }
+
+    [Fact]
+    public void StripeTestEnvironment_AcceptsSignedTestWebhook()
+    {
+        var provider = CreateStripeProvider("whsec_test_value", stripeTestEnvironment: true);
+        const string payload = """{"id":"evt_test","type":"invoice.paid","created":1730000000,"livemode":false,"data":{"object":{"id":"in_1"}}}""";
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var signature = ComputeStripeSignature("whsec_test_value", timestamp, payload);
+
+        var envelope = provider.ValidateAndParseWebhook(payload, $"t={timestamp},v1={signature}");
+
+        Assert.Equal("evt_test", envelope.EventId);
+    }
+
+    [Fact]
+    public async Task StripeTestEnvironment_DeniesExternalWritesBeforeHttpRequest()
+    {
+        using var handler = new SubscriptionChangeHandler();
+        var provider = new StripeBillingProvider(
+            new RecordingHttpClientFactory(handler),
+            Options.Create(new BillingOptions { StripeSecretKey = "sk_test_value" }),
+            CreateStripeTestEnvironmentGuard(true));
+
+        var error = await Assert.ThrowsAsync<ExternalDependencyException>(() =>
+            provider.CreateCheckoutSessionAsync(
+                new CheckoutSessionRequest(Guid.NewGuid(), "cus_test", "price_test", "https://ok", "https://cancel", null, null),
+                CancellationToken.None));
+
+        Assert.Equal("stripe_test_mode_unverified", error.ErrorCode);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public void DevelopmentProvider_ValidateAndParseWebhook_ParsesDurablePayload()
     {
@@ -167,7 +221,7 @@ public sealed class StripeBillingProviderTests
         Assert.Equal("sub_dev_1", envelope.DataObject.GetProperty("id").GetString());
     }
 
-    private static StripeBillingProvider CreateStripeProvider(string secret)
+    private static StripeBillingProvider CreateStripeProvider(string secret, bool stripeTestEnvironment = false)
     {
         var options = Options.Create(new BillingOptions
         {
@@ -175,7 +229,35 @@ public sealed class StripeBillingProviderTests
             StripeSecretKey = "sk_test_123"
         });
 
-        return new StripeBillingProvider(new NoOpHttpClientFactory(), options);
+        return new StripeBillingProvider(
+            new NoOpHttpClientFactory(),
+            options,
+            CreateStripeTestEnvironmentGuard(stripeTestEnvironment));
+    }
+
+    private static StripeTestEnvironmentGuard CreateStripeTestEnvironmentGuard(bool enabled)
+    {
+        var values = enabled
+            ? new Dictionary<string, string?>
+            {
+                ["StayFlow:EnvironmentIdentity"] = "StripeTest",
+                ["StayFlow:StripeTest:Database:ApprovedHost"] = "pg-test.internal",
+                ["StayFlow:StripeTest:Database:ApprovedDatabase"] = "stayflow_test",
+                ["ConnectionStrings:DefaultConnection"] = "Host=pg-test.internal;Database=stayflow_test;Username=test",
+                ["Billing:Provider"] = "Stripe",
+                ["Billing:StripeTestModeExpected"] = "true",
+                ["Billing:StripeSecretKey"] = "sk_test_placeholder",
+                ["Billing:StripeWebhookSigningSecret"] = "whsec_test_placeholder",
+                ["Billing:StripeApiVersion"] = BillingOptions.SupportedStripeApiVersion,
+                ["Billing:PlanPriceIds:Starter"] = "price_test_starter",
+                ["Billing:PlanPriceIds:Professional"] = "price_test_professional",
+                ["Billing:UsageBilling:Enabled"] = "false",
+                ["Billing:UsageBilling:Worker:Enabled"] = "false",
+                ["Billing:UsageBilling:OpenPeriodInvoiceSafetyVerified"] = "false"
+            }
+            : new Dictionary<string, string?>();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        return StripeTestEnvironmentGuard.ValidateAndCreate(configuration, "Production");
     }
 
     private static string ComputeStripeSignature(string secret, long timestamp, string rawBody)

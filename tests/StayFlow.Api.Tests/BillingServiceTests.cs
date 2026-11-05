@@ -1,10 +1,15 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
+using StayFlow.Api.Configuration;
 using StayFlow.Api.Data;
 using StayFlow.Api.DTOs.Billing;
+using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services;
 using StayFlow.Api.Services.Billing;
@@ -73,6 +78,63 @@ public sealed class BillingServiceTests
 
         Assert.False(first.WasDuplicate);
         Assert.True(second.WasDuplicate);
+    }
+
+    [Fact]
+    public async Task StripeTestWebhookWithLiveMode_IsRejectedBeforeDatabaseMutation()
+    {
+        const string webhookSecret = "whsec_unit_test";
+        var options = new BillingOptions
+        {
+            Provider = "Stripe",
+            StripeSecretKey = "sk_test_placeholder",
+            StripeWebhookSigningSecret = webhookSecret,
+            PlanPriceIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Starter"] = "price_test_starter",
+                ["Professional"] = "price_test_professional"
+            }
+        };
+        var environmentConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["StayFlow:EnvironmentIdentity"] = "StripeTest",
+                ["StayFlow:StripeTest:Database:ApprovedHost"] = "pg-test.internal",
+                ["StayFlow:StripeTest:Database:ApprovedDatabase"] = "stayflow_test",
+                ["ConnectionStrings:DefaultConnection"] = "Host=pg-test.internal;Database=stayflow_test;Username=test",
+                ["Billing:Provider"] = "Stripe",
+                ["Billing:StripeTestModeExpected"] = "true",
+                ["Billing:StripeSecretKey"] = "sk_test_placeholder",
+                ["Billing:StripeWebhookSigningSecret"] = webhookSecret,
+                ["Billing:StripeApiVersion"] = BillingOptions.SupportedStripeApiVersion,
+                ["Billing:PlanPriceIds:Starter"] = "price_test_starter",
+                ["Billing:PlanPriceIds:Professional"] = "price_test_professional",
+                ["Billing:UsageBilling:Enabled"] = "false",
+                ["Billing:UsageBilling:Worker:Enabled"] = "false",
+                ["Billing:UsageBilling:OpenPeriodInvoiceSafetyVerified"] = "false"
+            })
+            .Build();
+        var provider = new StripeBillingProvider(
+            new NoOpHttpClientFactory(),
+            Options.Create(options),
+            StripeTestEnvironmentGuard.ValidateAndCreate(environmentConfiguration, "Production"));
+        var fixture = await CreateFixtureAsync(configuredOptions: options, provider: provider);
+        var payload = JsonSerializer.Serialize(new
+        {
+            id = "evt_live_mode",
+            type = "invoice.paid",
+            created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            livemode = true,
+            data = new { @object = new { id = "in_test" } }
+        });
+        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var signature = ComputeStripeSignature(webhookSecret, timestamp, payload);
+
+        var error = await Assert.ThrowsAsync<ForbiddenOperationException>(() =>
+            fixture.Service.ProcessStripeWebhookAsync(payload, $"t={timestamp},v1={signature}", CancellationToken.None));
+
+        Assert.Equal("stripe_webhook_mode_mismatch", error.ErrorCode);
+        Assert.Empty(await fixture.DbContext.BillingWebhookEvents.ToListAsync());
     }
 
     [Fact]
@@ -563,6 +625,13 @@ public sealed class BillingServiceTests
         BillingPortalReturnUrl = "https://example.test/portal"
     };
 
+    private static string ComputeStripeSignature(string secret, long timestamp, string payload)
+    {
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes($"{timestamp}.{payload}")))
+            .ToLowerInvariant();
+    }
+
     private sealed record Fixture(
         BillingService Service,
         ApplicationDbContext DbContext,
@@ -664,5 +733,10 @@ public sealed class BillingServiceTests
                 "hash",
                 dataObject);
         }
+    }
+
+    private sealed class NoOpHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new();
     }
 }

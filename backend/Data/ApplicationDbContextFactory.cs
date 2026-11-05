@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Configuration;
+using StayFlow.Api.Configuration;
 
 namespace StayFlow.Api.Data;
 
@@ -8,15 +9,31 @@ public sealed class ApplicationDbContextFactory : IDesignTimeDbContextFactory<Ap
 {
     public ApplicationDbContext CreateDbContext(string[] args)
     {
-        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Development";
+        var hostConfiguration = new ConfigurationBuilder()
+            .AddEnvironmentVariables("ASPNETCORE_")
+            .AddEnvironmentVariables("DOTNET_")
+            .AddCommandLine(args)
+            .Build();
+        var environment = hostConfiguration["environment"] ?? "Development";
         var basePath = ResolveBasePath();
 
-        var configuration = new ConfigurationBuilder()
+        var configurationBuilder = new ConfigurationBuilder()
+            .AddConfiguration(hostConfiguration)
             .SetBasePath(basePath)
             .AddJsonFile("appsettings.json", optional: false)
-            .AddJsonFile($"appsettings.{environment}.json", optional: true)
+            .AddJsonFile($"appsettings.{environment}.json", optional: true);
+
+        if (string.Equals(environment, "Development", StringComparison.OrdinalIgnoreCase))
+        {
+            configurationBuilder.AddUserSecrets<ApplicationDbContextFactory>(optional: true);
+        }
+
+        var configuration = configurationBuilder
             .AddEnvironmentVariables()
+            .AddCommandLine(args)
             .Build();
+
+        StripeTestEnvironmentGuard.ValidateAndCreate(configuration, environment);
 
         var connectionString = configuration.GetConnectionString("DefaultConnection")
             ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is not configured.");

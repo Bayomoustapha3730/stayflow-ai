@@ -4,7 +4,9 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using StayFlow.Api.Configuration;
 using StayFlow.Api.Data;
+using StayFlow.Api.Exceptions;
 using StayFlow.Api.Models;
 using StayFlow.Api.Services.Billing;
 
@@ -142,7 +144,7 @@ public sealed class StripeCustomerBillingTransportTests
         using var http = new RecordingHttpClientFactory();
         var transport = new StripeCustomerBillingTransport(http,
             Options.Create(new BillingOptions { Provider = "Stripe", StripeApiVersion = "" }),
-            Options.Create(EnabledOptions()), harness.Context, new FixedTimeProvider(At(10)));
+            Options.Create(EnabledOptions()), harness.Context, new FixedTimeProvider(At(10)), CreateGuard());
 
         var result = await transport.SendAsync(harness.Request, CancellationToken.None);
 
@@ -615,6 +617,50 @@ public sealed class StripeCustomerBillingTransportTests
     }
 
     [Fact]
+    public async Task StripeTestEnvironment_DeniesMeterEventBeforeHttpRequest()
+    {
+        await using var harness = await CreateHarnessAsync();
+        using var http = new RecordingHttpClientFactory();
+        var options = EnabledOptions();
+        var markedConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["StayFlow:EnvironmentIdentity"] = "StripeTest",
+                ["StayFlow:StripeTest:Database:ApprovedHost"] = "pg-test.internal",
+                ["StayFlow:StripeTest:Database:ApprovedDatabase"] = "stayflow_test",
+                ["ConnectionStrings:DefaultConnection"] = "Host=pg-test.internal;Database=stayflow_test;Username=test",
+                ["Billing:Provider"] = "Stripe",
+                ["Billing:StripeTestModeExpected"] = "true",
+                ["Billing:StripeSecretKey"] = "sk_test_placeholder",
+                ["Billing:StripeWebhookSigningSecret"] = "whsec_test_placeholder",
+                ["Billing:StripeApiVersion"] = BillingOptions.SupportedStripeApiVersion,
+                ["Billing:PlanPriceIds:Starter"] = "price_test_starter",
+                ["Billing:PlanPriceIds:Professional"] = "price_test_professional",
+                ["Billing:UsageBilling:Enabled"] = "false",
+                ["Billing:UsageBilling:Worker:Enabled"] = "false",
+                ["Billing:UsageBilling:OpenPeriodInvoiceSafetyVerified"] = "false"
+            })
+            .Build();
+        var transport = new StripeCustomerBillingTransport(
+            http,
+            Options.Create(new BillingOptions
+            {
+                Provider = "Stripe",
+                StripeSecretKey = "sk_test_placeholder"
+            }),
+            Options.Create(options),
+            harness.Context,
+            new FixedTimeProvider(At(10)),
+            StripeTestEnvironmentGuard.ValidateAndCreate(markedConfiguration, "Production"));
+
+        var error = await Assert.ThrowsAsync<ExternalDependencyException>(() =>
+            transport.SendAsync(harness.Request, CancellationToken.None));
+
+        Assert.Equal("stripe_test_mode_unverified", error.ErrorCode);
+        Assert.Equal(0, http.RequestCount);
+    }
+
+    [Fact]
     public async Task DevelopmentTransport_IsDeterministicAndNeverUsesHttp()
     {
         await using var harness = await CreateHarnessAsync();
@@ -645,7 +691,13 @@ public sealed class StripeCustomerBillingTransportTests
             }),
             Options.Create(usageOptions),
             harness.Context,
-            new FixedTimeProvider(dispatchTime ?? At(10)));
+            new FixedTimeProvider(dispatchTime ?? At(10)),
+            CreateGuard());
+
+    private static StripeTestEnvironmentGuard CreateGuard() =>
+        StripeTestEnvironmentGuard.ValidateAndCreate(
+            new ConfigurationBuilder().Build(),
+            "Production");
 
     private static CustomerUsageBillingOptions OptionsWithMeterId(string? meterId)
     {

@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using StayFlow.Api.Configuration;
 using StayFlow.Api.Data;
 using StayFlow.Api.Models;
 
@@ -13,7 +14,8 @@ public sealed class StripeCustomerBillingTransport(
     IOptions<BillingOptions> billingOptions,
     IOptions<CustomerUsageBillingOptions> usageBillingOptions,
     ApplicationDbContext dbContext,
-    TimeProvider timeProvider) : ICustomerBillingExternalTransport
+    TimeProvider timeProvider,
+    StripeTestEnvironmentGuard stripeTestEnvironment) : ICustomerBillingExternalTransport
 {
     private const string StripeApiBase = "https://api.stripe.com/v1/";
     private static readonly TimeSpan MaximumEventAge = TimeSpan.FromDays(35);
@@ -24,6 +26,7 @@ public sealed class StripeCustomerBillingTransport(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        stripeTestEnvironment.EnsureExternalWriteAuthorized();
         var usageOptions = usageBillingOptions.Value;
         if (!usageOptions.Enabled)
         {

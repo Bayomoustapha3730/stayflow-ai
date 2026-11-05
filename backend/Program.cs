@@ -14,6 +14,10 @@ using System.Text.Json;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
+var stripeTestEnvironment = StripeTestEnvironmentGuard.ValidateAndCreate(
+    builder.Configuration,
+    builder.Environment.EnvironmentName);
+builder.Services.AddSingleton(stripeTestEnvironment);
 
 builder.WebHost.ConfigureKestrel((context, options) =>
 {

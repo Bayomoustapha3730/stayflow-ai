@@ -3,13 +3,15 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using StayFlow.Api.Configuration;
 using StayFlow.Api.Exceptions;
 
 namespace StayFlow.Api.Services.Billing;
 
 public sealed class StripeBillingProvider(
     IHttpClientFactory httpClientFactory,
-    IOptions<BillingOptions> options) : IBillingProvider
+    IOptions<BillingOptions> options,
+    StripeTestEnvironmentGuard stripeTestEnvironment) : IBillingProvider
 {
     private const string StripeApiBase = "https://api.stripe.com/v1";
     private const int MaxHttpRetryAttempts = 3;
@@ -18,6 +20,7 @@ public sealed class StripeBillingProvider(
 
     public async Task<string> EnsureCustomerAsync(BillingCustomerRequest request, CancellationToken cancellationToken)
     {
+        stripeTestEnvironment.EnsureExternalWriteAuthorized();
         var form = new Dictionary<string, string>
         {
             ["name"] = request.CompanyName,
@@ -37,6 +40,7 @@ public sealed class StripeBillingProvider(
 
     public async Task<string> CreateCheckoutSessionAsync(CheckoutSessionRequest request, CancellationToken cancellationToken)
     {
+        stripeTestEnvironment.EnsureExternalWriteAuthorized();
         var form = new Dictionary<string, string>
         {
             ["mode"] = "subscription",
@@ -65,6 +69,7 @@ public sealed class StripeBillingProvider(
 
     public async Task<string> CreateBillingPortalSessionAsync(BillingPortalRequest request, CancellationToken cancellationToken)
     {
+        stripeTestEnvironment.EnsureExternalWriteAuthorized();
         var form = new Dictionary<string, string>
         {
             ["customer"] = request.CustomerId,
@@ -83,6 +88,7 @@ public sealed class StripeBillingProvider(
 
     public async Task<string> CreatePaymentMethodPortalSessionAsync(BillingPortalRequest request, CancellationToken cancellationToken)
     {
+        stripeTestEnvironment.EnsureExternalWriteAuthorized();
         var form = new Dictionary<string, string>
         {
             ["customer"] = request.CustomerId,
@@ -102,6 +108,7 @@ public sealed class StripeBillingProvider(
 
     public async Task<BillingProviderSubscriptionSnapshot> ChangeSubscriptionPlanAsync(ChangeSubscriptionPlanProviderRequest request, CancellationToken cancellationToken)
     {
+        stripeTestEnvironment.EnsureExternalWriteAuthorized();
         var subscription = await GetSubscriptionDocumentAsync(request.SubscriptionId, cancellationToken);
         var itemId = GetSubscriptionItemId(subscription, options.Value);
         if (string.IsNullOrWhiteSpace(itemId))
@@ -122,6 +129,7 @@ public sealed class StripeBillingProvider(
 
     public async Task<BillingProviderSubscriptionSnapshot> CancelSubscriptionAsync(CancelSubscriptionProviderRequest request, CancellationToken cancellationToken)
     {
+        stripeTestEnvironment.EnsureExternalWriteAuthorized();
         if (request.AtPeriodEnd)
         {
             var form = new Dictionary<string, string>
@@ -139,6 +147,7 @@ public sealed class StripeBillingProvider(
 
     public async Task<BillingProviderSubscriptionSnapshot> ResumeSubscriptionAsync(ResumeSubscriptionProviderRequest request, CancellationToken cancellationToken)
     {
+        stripeTestEnvironment.EnsureExternalWriteAuthorized();
         var form = new Dictionary<string, string>
         {
             ["cancel_at_period_end"] = "false"
@@ -183,6 +192,7 @@ public sealed class StripeBillingProvider(
 
         using var document = JsonDocument.Parse(rawBody);
         var root = document.RootElement;
+        stripeTestEnvironment.ValidateWebhookMode(root);
         if (root.TryGetProperty("api_version", out var apiVersion)
             && apiVersion.GetString() != BillingOptions.SupportedStripeApiVersion)
         {
