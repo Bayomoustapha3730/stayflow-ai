@@ -1,0 +1,110 @@
+name: Provision StripeTest Infrastructure
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: stayflow-stripetest-infrastructure
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  provision:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: stripetest-infra
+    env:
+      AZURE_CLIENT_ID: ${{ vars.STRIPETEST_INFRA_AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.STRIPETEST_EXPECTED_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.STRIPETEST_EXPECTED_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.STRIPETEST_RESOURCE_GROUP }}
+      STRIPETEST_RESOURCE_GROUP: ${{ vars.STRIPETEST_RESOURCE_GROUP }}
+      STRIPETEST_REGION: ${{ vars.STRIPETEST_REGION }}
+      STRIPETEST_ACR_NAME: ${{ vars.STRIPETEST_ACR_NAME }}
+      STRIPETEST_ACR_RESOURCE_GROUP: ${{ vars.STRIPETEST_ACR_RESOURCE_GROUP }}
+      STRIPETEST_ACR_LOGIN_SERVER: ${{ vars.STRIPETEST_ACR_LOGIN_SERVER }}
+      STRIPETEST_ACR_RESOURCE_ID: ${{ vars.STRIPETEST_ACR_RESOURCE_ID }}
+      STRIPETEST_POSTGRES_SERVER_NAME: ${{ vars.STRIPETEST_POSTGRES_SERVER_NAME }}
+      STRIPETEST_DATABASE_HOST: ${{ vars.STRIPETEST_DATABASE_HOST }}
+      STRIPETEST_DATABASE_NAME: ${{ vars.STRIPETEST_DATABASE_NAME }}
+      STRIPETEST_EXPECTED_SUBSCRIPTION_ID: ${{ vars.STRIPETEST_EXPECTED_SUBSCRIPTION_ID }}
+      STRIPETEST_EXPECTED_TENANT_ID: ${{ vars.STRIPETEST_EXPECTED_TENANT_ID }}
+      STRIPETEST_POSTGRES_ADMIN_PASSWORD: ${{ secrets.STRIPETEST_POSTGRES_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate reviewed target manifest
+        run: |
+          set -euo pipefail
+          python3 infra/stripetest/policy.py --check-target
+          python3 infra/stripetest/policy.py --check-safety
+          test -n "$AZURE_CLIENT_ID"
+          test -n "$AZURE_TENANT_ID"
+          test -n "$AZURE_SUBSCRIPTION_ID"
+          test -n "$AZURE_RESOURCE_GROUP"
+          test -n "$STRIPETEST_POSTGRES_ADMIN_PASSWORD"
+
+      - name: Run offline StripeTest policy regression tests
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+            -s tests/infrastructure \
+            -p 'test_stripetest_config.py'
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Azure target and approved registry
+        run: |
+          set -euo pipefail
+          ACTUAL_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+          ACTUAL_TENANT_ID="$(az account show --query tenantId -o tsv)"
+          test "$ACTUAL_SUBSCRIPTION_ID" = "$AZURE_SUBSCRIPTION_ID"
+          test "$ACTUAL_TENANT_ID" = "$AZURE_TENANT_ID"
+          ACTUAL_REGION="$(az group show --name "$AZURE_RESOURCE_GROUP" --query location -o tsv)"
+          test "${ACTUAL_REGION,,}" = "${STRIPETEST_REGION,,}"
+          ACR_DETAILS="$(az acr show \
+            --name "$STRIPETEST_ACR_NAME" \
+            --resource-group "$STRIPETEST_ACR_RESOURCE_GROUP" \
+            --query '[id,loginServer]' -o tsv)"
+          ACTUAL_ACR_ID="${ACR_DETAILS%%$'\n'*}"
+          ACTUAL_ACR_LOGIN_SERVER="${ACR_DETAILS#*$'\n'}"
+          test "${ACTUAL_ACR_ID,,}" = "${STRIPETEST_ACR_RESOURCE_ID,,}"
+          test "${ACTUAL_ACR_LOGIN_SERVER,,}" = "${STRIPETEST_ACR_LOGIN_SERVER,,}"
+
+      - name: Validate Bicep offline on runner
+        run: |
+          set -euo pipefail
+          az bicep build --file infra/stripetest/main.bicep --stdout > /dev/null
+
+      - name: Provision dedicated infrastructure
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.STRIPETEST_POSTGRES_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          PARAMETER_FILE="$(mktemp)"
+          trap 'rm -f "$PARAMETER_FILE"' EXIT
+          python3 - "$PARAMETER_FILE" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          parameters = json.loads(Path("infra/stripetest/main.parameters.json").read_text())
+          parameters["parameters"]["postgresAdminPassword"] = {
+              "value": os.environ["POSTGRES_ADMIN_PASSWORD"]
+          }
+          Path(sys.argv[1]).write_text(json.dumps(parameters))
+          PY
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/stripetest/main.bicep \
+            --parameters "@$PARAMETER_FILE"

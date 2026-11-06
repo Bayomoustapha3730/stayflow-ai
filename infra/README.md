@@ -31,3 +31,9 @@ az deployment group create \
 - Use immutable image SHAs, not `latest`.
 - Keep staging and production parameter files separate.
 - Store secrets in Key Vault or GitHub environment secrets, not in source control.
+
+## Isolated StripeTest
+
+The dedicated, non-production StripeTest design and its manual-only infrastructure/application
+workflows are documented in [infra/stripetest/README.md](stripetest/README.md). Its target files
+contain unresolved placeholders and must not be deployed until separately reviewed and approved.

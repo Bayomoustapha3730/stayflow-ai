@@ -1,0 +1,262 @@
+name: Deploy StayFlow StripeTest Application
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: stayflow-stripetest-application
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    needs: validate-private-configuration
+    runs-on: ubuntu-latest
+    environment: stripetest-images
+    outputs:
+      backend_image: ${{ steps.backend.outputs.image }}
+      frontend_image: ${{ steps.frontend.outputs.image }}
+    env:
+      AZURE_CLIENT_ID: ${{ vars.STRIPETEST_ACR_PUSH_AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.STRIPETEST_EXPECTED_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.STRIPETEST_EXPECTED_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.STRIPETEST_RESOURCE_GROUP }}
+      STRIPETEST_RESOURCE_GROUP: ${{ vars.STRIPETEST_RESOURCE_GROUP }}
+      STRIPETEST_REGION: ${{ vars.STRIPETEST_REGION }}
+      STRIPETEST_ACR_NAME: ${{ vars.STRIPETEST_ACR_NAME }}
+      STRIPETEST_ACR_RESOURCE_GROUP: ${{ vars.STRIPETEST_ACR_RESOURCE_GROUP }}
+      STRIPETEST_ACR_LOGIN_SERVER: ${{ vars.STRIPETEST_ACR_LOGIN_SERVER }}
+      STRIPETEST_ACR_RESOURCE_ID: ${{ vars.STRIPETEST_ACR_RESOURCE_ID }}
+      STRIPETEST_POSTGRES_SERVER_NAME: ${{ vars.STRIPETEST_POSTGRES_SERVER_NAME }}
+      STRIPETEST_DATABASE_HOST: ${{ vars.STRIPETEST_DATABASE_HOST }}
+      STRIPETEST_DATABASE_NAME: ${{ vars.STRIPETEST_DATABASE_NAME }}
+      STRIPETEST_EXPECTED_SUBSCRIPTION_ID: ${{ vars.STRIPETEST_EXPECTED_SUBSCRIPTION_ID }}
+      STRIPETEST_EXPECTED_TENANT_ID: ${{ vars.STRIPETEST_EXPECTED_TENANT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate reviewed target and safety contract
+        run: |
+          set -euo pipefail
+          python3 infra/stripetest/policy.py --check-target
+          test -n "$AZURE_CLIENT_ID"
+
+      - name: Login with ACR-push-only identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify the approved registry target
+        run: |
+          set -euo pipefail
+          test "$(az account show --query id -o tsv)" = "$AZURE_SUBSCRIPTION_ID"
+          test "$(az account show --query tenantId -o tsv)" = "$AZURE_TENANT_ID"
+          ACTUAL_REGION="$(az group show --name "$AZURE_RESOURCE_GROUP" --query location -o tsv)"
+          test "${ACTUAL_REGION,,}" = "${STRIPETEST_REGION,,}"
+          ACR_DETAILS="$(az acr show \
+            --name "$STRIPETEST_ACR_NAME" \
+            --resource-group "$STRIPETEST_ACR_RESOURCE_GROUP" \
+            --query '[id,loginServer]' -o tsv)"
+          ACTUAL_ACR_ID="${ACR_DETAILS%%$'\n'*}"
+          ACTUAL_ACR_LOGIN_SERVER="${ACR_DETAILS#*$'\n'}"
+          test "${ACTUAL_ACR_ID,,}" = "${STRIPETEST_ACR_RESOURCE_ID,,}"
+          test "${ACTUAL_ACR_LOGIN_SERVER,,}" = "${STRIPETEST_ACR_LOGIN_SERVER,,}"
+
+      - name: Build and push backend image
+        id: backend
+        env:
+          STRIPETEST_IMAGE_KIND: backend
+          STRIPETEST_IMAGE_METADATA_FILE: ${{ runner.temp }}/backend-image-metadata.json
+        run: |
+          set -euo pipefail
+          az acr login --name "$STRIPETEST_ACR_NAME"
+          IMAGE_TAG="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --push \
+            --tag "${STRIPETEST_ACR_LOGIN_SERVER}/stayflow-api:${IMAGE_TAG}" \
+            --metadata-file "$STRIPETEST_IMAGE_METADATA_FILE" \
+            --file backend/Dockerfile .
+          IMAGE="$(python3 infra/stripetest/policy.py --image-from-metadata)"
+          STRIPETEST_IMAGE_REFERENCE="$IMAGE" python3 infra/stripetest/policy.py --check-image-reference
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push frontend image
+        id: frontend
+        env:
+          STRIPETEST_IMAGE_KIND: frontend
+          STRIPETEST_IMAGE_METADATA_FILE: ${{ runner.temp }}/frontend-image-metadata.json
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --platform linux/amd64 \
+            --push \
+            --tag "${STRIPETEST_ACR_LOGIN_SERVER}/stayflow-web:${IMAGE_TAG}" \
+            --metadata-file "$STRIPETEST_IMAGE_METADATA_FILE" \
+            --file frontend/Dockerfile .
+          IMAGE="$(python3 infra/stripetest/policy.py --image-from-metadata)"
+          STRIPETEST_IMAGE_REFERENCE="$IMAGE" python3 infra/stripetest/policy.py --check-image-reference
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+  validate-private-configuration:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, x64, stripetest-private]
+    environment: stripetest-private-preflight
+    env:
+      AZURE_CLIENT_ID: ${{ vars.STRIPETEST_PREFLIGHT_AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.STRIPETEST_EXPECTED_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.STRIPETEST_EXPECTED_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.STRIPETEST_RESOURCE_GROUP }}
+      STRIPETEST_RESOURCE_GROUP: ${{ vars.STRIPETEST_RESOURCE_GROUP }}
+      STRIPETEST_REGION: ${{ vars.STRIPETEST_REGION }}
+      STRIPETEST_ACR_NAME: ${{ vars.STRIPETEST_ACR_NAME }}
+      STRIPETEST_ACR_RESOURCE_GROUP: ${{ vars.STRIPETEST_ACR_RESOURCE_GROUP }}
+      STRIPETEST_ACR_LOGIN_SERVER: ${{ vars.STRIPETEST_ACR_LOGIN_SERVER }}
+      STRIPETEST_ACR_RESOURCE_ID: ${{ vars.STRIPETEST_ACR_RESOURCE_ID }}
+      STRIPETEST_POSTGRES_SERVER_NAME: ${{ vars.STRIPETEST_POSTGRES_SERVER_NAME }}
+      STRIPETEST_DATABASE_HOST: ${{ vars.STRIPETEST_DATABASE_HOST }}
+      STRIPETEST_DATABASE_NAME: ${{ vars.STRIPETEST_DATABASE_NAME }}
+      STRIPETEST_EXPECTED_SUBSCRIPTION_ID: ${{ vars.STRIPETEST_EXPECTED_SUBSCRIPTION_ID }}
+      STRIPETEST_EXPECTED_TENANT_ID: ${{ vars.STRIPETEST_EXPECTED_TENANT_ID }}
+      STRIPETEST_KEY_VAULT_NAME: ${{ vars.STRIPETEST_KEY_VAULT_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate reviewed target
+        run: |
+          set -euo pipefail
+          python3 infra/stripetest/policy.py --check-target
+          test -n "$AZURE_CLIENT_ID"
+          test "$STRIPETEST_KEY_VAULT_NAME" = "$(python3 -c 'import json; print(json.load(open("infra/stripetest/target.json"))["resources"]["keyVault"])')"
+
+      - name: Login with private-preflight-only identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate private test secrets without logging values
+        run: |
+          set -euo pipefail
+          test "$(az account show --query id -o tsv)" = "$AZURE_SUBSCRIPTION_ID"
+          test "$(az account show --query tenantId -o tsv)" = "$AZURE_TENANT_ID"
+          while IFS= read -r secret_name; do
+            secret_value="$(az keyvault secret show \
+              --vault-name "$STRIPETEST_KEY_VAULT_NAME" \
+              --name "$secret_name" \
+              --query value -o tsv)"
+            test -n "$secret_value"
+            unset secret_value
+          done < <(python3 -c 'import json; print("\n".join(json.load(open("infra/stripetest/target.json"))["secretNames"]))')
+          STRIPETEST_CONNECTION_STRING="$(az keyvault secret show \
+            --vault-name "$STRIPETEST_KEY_VAULT_NAME" \
+            --name stripetest-database-connection \
+            --query value -o tsv)"
+          export STRIPETEST_CONNECTION_STRING
+          python3 infra/stripetest/policy.py --check-connection
+          unset STRIPETEST_CONNECTION_STRING
+          STRIPETEST_STRIPE_SECRET_KEY="$(az keyvault secret show \
+            --vault-name "$STRIPETEST_KEY_VAULT_NAME" \
+            --name stripetest-stripe-secret-key \
+            --query value -o tsv)"
+          export STRIPETEST_STRIPE_SECRET_KEY
+          python3 infra/stripetest/policy.py --check-stripe-secret
+          unset STRIPETEST_STRIPE_SECRET_KEY
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: [build, validate-private-configuration]
+    runs-on: ubuntu-latest
+    environment: stripetest
+    env:
+      AZURE_CLIENT_ID: ${{ vars.STRIPETEST_DEPLOY_AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.STRIPETEST_EXPECTED_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.STRIPETEST_EXPECTED_SUBSCRIPTION_ID }}
+      AZURE_RESOURCE_GROUP: ${{ vars.STRIPETEST_RESOURCE_GROUP }}
+      STRIPETEST_RESOURCE_GROUP: ${{ vars.STRIPETEST_RESOURCE_GROUP }}
+      STRIPETEST_REGION: ${{ vars.STRIPETEST_REGION }}
+      STRIPETEST_ACR_NAME: ${{ vars.STRIPETEST_ACR_NAME }}
+      STRIPETEST_ACR_RESOURCE_GROUP: ${{ vars.STRIPETEST_ACR_RESOURCE_GROUP }}
+      STRIPETEST_ACR_LOGIN_SERVER: ${{ vars.STRIPETEST_ACR_LOGIN_SERVER }}
+      STRIPETEST_ACR_RESOURCE_ID: ${{ vars.STRIPETEST_ACR_RESOURCE_ID }}
+      STRIPETEST_POSTGRES_SERVER_NAME: ${{ vars.STRIPETEST_POSTGRES_SERVER_NAME }}
+      STRIPETEST_DATABASE_HOST: ${{ vars.STRIPETEST_DATABASE_HOST }}
+      STRIPETEST_DATABASE_NAME: ${{ vars.STRIPETEST_DATABASE_NAME }}
+      STRIPETEST_EXPECTED_SUBSCRIPTION_ID: ${{ vars.STRIPETEST_EXPECTED_SUBSCRIPTION_ID }}
+      STRIPETEST_EXPECTED_TENANT_ID: ${{ vars.STRIPETEST_EXPECTED_TENANT_ID }}
+      BACKEND_IMAGE: ${{ needs.build.outputs.backend_image }}
+      FRONTEND_IMAGE: ${{ needs.build.outputs.frontend_image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate target, safety flags, and exact image digests
+        env:
+          STRIPETEST_BACKEND_IMAGE: ${{ needs.build.outputs.backend_image }}
+          STRIPETEST_FRONTEND_IMAGE: ${{ needs.build.outputs.frontend_image }}
+        run: |
+          set -euo pipefail
+          python3 infra/stripetest/policy.py --check-target
+          python3 infra/stripetest/policy.py --check-safety
+          STRIPETEST_IMAGE_KIND=backend STRIPETEST_IMAGE_REFERENCE="$STRIPETEST_BACKEND_IMAGE" \
+            python3 infra/stripetest/policy.py --check-image-reference
+          STRIPETEST_IMAGE_KIND=frontend STRIPETEST_IMAGE_REFERENCE="$STRIPETEST_FRONTEND_IMAGE" \
+            python3 infra/stripetest/policy.py --check-image-reference
+          test -n "$AZURE_CLIENT_ID"
+
+      - name: Login with deployment-only identity
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Azure target and direct AcrPull assignment
+        run: |
+          set -euo pipefail
+          test "$(az account show --query id -o tsv)" = "$AZURE_SUBSCRIPTION_ID"
+          test "$(az account show --query tenantId -o tsv)" = "$AZURE_TENANT_ID"
+          ACTUAL_REGION="$(az group show --name "$AZURE_RESOURCE_GROUP" --query location -o tsv)"
+          test "${ACTUAL_REGION,,}" = "${STRIPETEST_REGION,,}"
+          ACR_DETAILS="$(az acr show \
+            --name "$STRIPETEST_ACR_NAME" \
+            --resource-group "$STRIPETEST_ACR_RESOURCE_GROUP" \
+            --query '[id,loginServer]' -o tsv)"
+          ACTUAL_ACR_ID="${ACR_DETAILS%%$'\n'*}"
+          ACTUAL_ACR_LOGIN_SERVER="${ACR_DETAILS#*$'\n'}"
+          test "${ACTUAL_ACR_ID,,}" = "${STRIPETEST_ACR_RESOURCE_ID,,}"
+          test "${ACTUAL_ACR_LOGIN_SERVER,,}" = "${STRIPETEST_ACR_LOGIN_SERVER,,}"
+          IMAGE_PULL_IDENTITY_NAME="$(python3 -c 'import json; print(json.load(open("infra/stripetest/target.json"))["resources"]["imagePullIdentity"])')"
+          STRIPETEST_IMAGE_PULL_IDENTITY_PRINCIPAL_ID="$(az identity show \
+            --name "$IMAGE_PULL_IDENTITY_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query principalId -o tsv)"
+          export STRIPETEST_IMAGE_PULL_IDENTITY_PRINCIPAL_ID
+          az role assignment list \
+            --scope "$STRIPETEST_ACR_RESOURCE_ID" \
+            --assignee-object-id "$STRIPETEST_IMAGE_PULL_IDENTITY_PRINCIPAL_ID" \
+            --output json |
+            python3 infra/stripetest/policy.py --check-acr-pull-role
+
+      - name: Validate application Bicep offline on runner
+        run: |
+          set -euo pipefail
+          az bicep build --file infra/stripetest/application.bicep --stdout > /dev/null
+
+      - name: Deploy StripeTest application by immutable image digest
+        run: |
+          set -euo pipefail
+          az deployment group create \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --template-file infra/stripetest/application.bicep \
+            --parameters @infra/stripetest/application.parameters.json \
+            --parameters imageSha="$GITHUB_SHA" \
+              backendImage="$BACKEND_IMAGE" \
+              frontendImage="$FRONTEND_IMAGE"

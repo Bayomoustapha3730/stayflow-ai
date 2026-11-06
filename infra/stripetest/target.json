@@ -1,0 +1,46 @@
+{
+  "subscriptionId": "REPLACE_WITH_APPROVED_NONPRODUCTION_SUBSCRIPTION_ID",
+  "tenantId": "REPLACE_WITH_APPROVED_TENANT_ID",
+  "resourceGroupName": "REPLACE_WITH_DEDICATED_STRIPETEST_RESOURCE_GROUP",
+  "location": "eastus",
+  "containerRegistry": {
+    "name": "REPLACE_WITH_APPROVED_NONPRODUCTION_ACR_NAME",
+    "resourceGroupName": "REPLACE_WITH_APPROVED_NONPRODUCTION_ACR_RESOURCE_GROUP",
+    "loginServer": "REPLACE_WITH_APPROVED_NONPRODUCTION_ACR_LOGIN_SERVER",
+    "resourceId": "REPLACE_WITH_APPROVED_NONPRODUCTION_ACR_RESOURCE_ID",
+    "repositories": {
+      "backend": "stayflow-api",
+      "frontend": "stayflow-web"
+    }
+  },
+  "database": {
+    "serverName": "REPLACE_WITH_UNIQUE_STRIPETEST_POSTGRES_SERVER_NAME",
+    "host": "REPLACE_WITH_STRIPETEST_POSTGRES_SERVER_FQDN",
+    "name": "stayflow_stripe_test"
+  },
+  "resources": {
+    "containerAppsEnvironment": "REPLACE_WITH_STRIPETEST_CONTAINER_APPS_ENVIRONMENT",
+    "backendApp": "REPLACE_WITH_STRIPETEST_BACKEND_APP",
+    "frontendApp": "REPLACE_WITH_STRIPETEST_FRONTEND_APP",
+    "keyVault": "REPLACE_WITH_UNIQUE_STRIPETEST_KEY_VAULT",
+    "logAnalytics": "REPLACE_WITH_STRIPETEST_LOG_ANALYTICS",
+    "applicationInsights": "REPLACE_WITH_STRIPETEST_APPLICATION_INSIGHTS",
+    "virtualNetwork": "REPLACE_WITH_STRIPETEST_VNET",
+    "runtimeIdentity": "REPLACE_WITH_STRIPETEST_RUNTIME_IDENTITY",
+    "imagePullIdentity": "REPLACE_WITH_STRIPETEST_IMAGE_PULL_IDENTITY"
+  },
+  "network": {
+    "virtualNetworkAddressPrefix": "REPLACE_WITH_APPROVED_NONOVERLAPPING_VNET_CIDR",
+    "containerAppsSubnetAddressPrefix": "REPLACE_WITH_APPROVED_CONTAINER_APPS_SUBNET_CIDR",
+    "postgresSubnetAddressPrefix": "REPLACE_WITH_APPROVED_POSTGRES_SUBNET_CIDR",
+    "privateEndpointSubnetAddressPrefix": "REPLACE_WITH_APPROVED_PRIVATE_ENDPOINT_SUBNET_CIDR"
+  },
+  "secretNames": [
+    "stripetest-database-connection",
+    "stripetest-jwt-signing-key",
+    "stripetest-stripe-secret-key",
+    "stripetest-stripe-webhook-signing-secret",
+    "stripetest-starter-price-id",
+    "stripetest-professional-price-id"
+  ]
+}

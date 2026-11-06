@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "eastus"
+    },
+    "containerAppsEnvironmentName": {
+      "value": "REPLACE_WITH_STRIPETEST_CONTAINER_APPS_ENVIRONMENT"
+    },
+    "postgresServerName": {
+      "value": "REPLACE_WITH_UNIQUE_STRIPETEST_POSTGRES_SERVER_NAME"
+    },
+    "postgresDatabaseName": {
+      "value": "stayflow_stripe_test"
+    },
+    "postgresAdminUser": {
+      "value": "stripetestprovisioner"
+    },
+    "postgresStorageGb": {
+      "value": 32
+    },
+    "keyVaultName": {
+      "value": "REPLACE_WITH_UNIQUE_STRIPETEST_KEY_VAULT"
+    },
+    "logAnalyticsName": {
+      "value": "REPLACE_WITH_STRIPETEST_LOG_ANALYTICS"
+    },
+    "applicationInsightsName": {
+      "value": "REPLACE_WITH_STRIPETEST_APPLICATION_INSIGHTS"
+    },
+    "virtualNetworkName": {
+      "value": "REPLACE_WITH_STRIPETEST_VNET"
+    },
+    "virtualNetworkAddressPrefix": {
+      "value": "REPLACE_WITH_APPROVED_NONOVERLAPPING_VNET_CIDR"
+    },
+    "containerAppsSubnetAddressPrefix": {
+      "value": "REPLACE_WITH_APPROVED_CONTAINER_APPS_SUBNET_CIDR"
+    },
+    "postgresSubnetAddressPrefix": {
+      "value": "REPLACE_WITH_APPROVED_POSTGRES_SUBNET_CIDR"
+    },
+    "privateEndpointSubnetAddressPrefix": {
+      "value": "REPLACE_WITH_APPROVED_PRIVATE_ENDPOINT_SUBNET_CIDR"
+    },
+    "runtimeIdentityName": {
+      "value": "REPLACE_WITH_STRIPETEST_RUNTIME_IDENTITY"
+    },
+    "imagePullIdentityName": {
+      "value": "REPLACE_WITH_STRIPETEST_IMAGE_PULL_IDENTITY"
+    },
+    "containerRegistryName": {
+      "value": "REPLACE_WITH_APPROVED_NONPRODUCTION_ACR_NAME"
+    },
+    "containerRegistryResourceGroupName": {
+      "value": "REPLACE_WITH_APPROVED_NONPRODUCTION_ACR_RESOURCE_GROUP"
+    }
+  }
+}

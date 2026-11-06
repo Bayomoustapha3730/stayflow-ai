@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "imageSha": {
+      "value": "REPLACE_WITH_COMMIT_SHA"
+    },
+    "backendImage": {
+      "value": ""
+    },
+    "frontendImage": {
+      "value": ""
+    },
+    "containerRegistryName": {
+      "value": "REPLACE_WITH_APPROVED_NONPRODUCTION_ACR_NAME"
+    },
+    "containerRegistryResourceGroupName": {
+      "value": "REPLACE_WITH_APPROVED_NONPRODUCTION_ACR_RESOURCE_GROUP"
+    },
+    "containerAppsEnvironmentName": {
+      "value": "REPLACE_WITH_STRIPETEST_CONTAINER_APPS_ENVIRONMENT"
+    },
+    "keyVaultName": {
+      "value": "REPLACE_WITH_UNIQUE_STRIPETEST_KEY_VAULT"
+    },
+    "applicationInsightsName": {
+      "value": "REPLACE_WITH_STRIPETEST_APPLICATION_INSIGHTS"
+    },
+    "runtimeIdentityName": {
+      "value": "REPLACE_WITH_STRIPETEST_RUNTIME_IDENTITY"
+    },
+    "imagePullIdentityName": {
+      "value": "REPLACE_WITH_STRIPETEST_IMAGE_PULL_IDENTITY"
+    },
+    "postgresServerName": {
+      "value": "REPLACE_WITH_UNIQUE_STRIPETEST_POSTGRES_SERVER_NAME"
+    },
+    "postgresDatabaseName": {
+      "value": "stayflow_stripe_test"
+    },
+    "backendContainerAppName": {
+      "value": "REPLACE_WITH_STRIPETEST_BACKEND_APP"
+    },
+    "frontendContainerAppName": {
+      "value": "REPLACE_WITH_STRIPETEST_FRONTEND_APP"
+    }
+  }
+}
