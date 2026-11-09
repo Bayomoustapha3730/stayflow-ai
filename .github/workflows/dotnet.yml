@@ -53,6 +53,9 @@ jobs:
     - name: Build
       run: dotnet build --no-restore
     - name: Test
+      env:
+        STAYFLOW_TEST_POSTGRES_CONNECTION: >-
+          Host=localhost;Port=5432;Database=postgres;Username=postgres;Password=postgres
       run: dotnet test --no-build --verbosity normal
     - name: Generate idempotent migration script
       run: ./scripts/generate-migration-script.sh /tmp/stayflow-migrations.sql
