@@ -32,10 +32,29 @@ external owners are reviewed. Keep real credentials out of these files.
 The application runtime identity and ACR image-pull identity are separate user-assigned
 identities. The runtime identity receives `Key Vault Secrets User` on the dedicated vault; the
 image-pull identity receives `AcrPull` scoped to the approved non-production registry. The
-workflows use separate OIDC identities for provisioning, ACR push, private configuration
+ACR assignment is deployed by `acr-pull-role-assignment.bicep` as a module in the registry's
+resource group, allowing the main resource-group deployment to assign the role at the separate
+registry scope without broadening permissions. Its role-assignment name is derived from the
+registry resource ID, image-pull identity name, and role definition ID; the Key Vault assignment
+uses the vault resource ID, runtime identity name, and role definition ID. These inputs are known
+at deployment start and do not depend on generated principal IDs.
+Workflows use separate OIDC identities for provisioning, ACR push, private configuration
 preflight, and application deployment. Configure federated credentials and narrowly scoped Azure
-RBAC externally; the provisioning identity requires role-assignment rights at the Key Vault and ACR
-scopes. The ACR-push identity must not have application deployment or Key Vault permissions. The
+RBAC externally. The provisioning identity requires both:
+
+* Permission to create or update ARM nested resource-group deployments in the resource group
+  containing the approved non-production ACR. The ACR role-assignment module is deployed there.
+* Permission to create the `AcrPull` role assignment scoped to the approved registry.
+
+These are distinct permissions at distinct scopes. Use least-privilege custom roles or
+appropriately scoped built-in roles, subject to Azure RBAC validation. Do not grant subscription-wide
+`Owner` or `User Access Administrator` solely to satisfy these requirements, and do not grant the
+deployment identity general write access to unrelated registries or production resources. Before
+provisioning, verify the ACR resource group, exact registry resource ID, and provisioning identity
+against the approved target. Both permissions are external Azure prerequisites; this documentation
+does not grant either permission.
+
+The ACR-push identity must not have application deployment or Key Vault permissions. The
 private-preflight identity is read-only on the dedicated vault and has no deployment or registry
 push role. The application deployment identity does not need Key Vault data-plane access or ACR
 push permissions; it needs resource-group deployment rights and read access to verify the
@@ -181,6 +200,8 @@ Run the local policy tests without Azure or external services:
 python3 -m unittest discover -s tests/infrastructure -p 'test_*.py'
 ```
 
-When Bicep tooling is already available, validate both templates and parameter files with
-`az bicep build` / `az bicep build-params`. Do not run deployment commands as part of offline
-validation.
+Compile the infrastructure and application templates with Bicep CLI 0.48.1 and `--no-restore`;
+keep compiler output artifacts outside the repository. The pinned PostgreSQL API versions may
+emit BCP081 because that CLI version has no local resource-type schemas for those versions.
+Compilation still validates Bicep syntax and emits templates, but cannot type-check those
+PostgreSQL resource properties. Do not run deployment commands as part of offline validation.

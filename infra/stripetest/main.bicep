@@ -313,18 +313,18 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-07-01' e
   scope: resourceGroup(containerRegistryResourceGroupName)
 }
 
-resource imagePullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(containerRegistry.id, imagePullIdentity.properties.principalId, acrPullRoleDefinitionId)
-  scope: containerRegistry
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleDefinitionId)
-    principalId: imagePullIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
+module imagePullRoleAssignment './acr-pull-role-assignment.bicep' = {
+  name: guid(subscription().id, containerRegistryResourceGroupName, containerRegistryName, imagePullIdentityName, acrPullRoleDefinitionId)
+  scope: resourceGroup(containerRegistryResourceGroupName)
+  params: {
+    containerRegistryName: containerRegistryName
+    imagePullIdentityName: imagePullIdentityName
+    imagePullIdentityPrincipalId: imagePullIdentity.properties.principalId
   }
 }
 
 resource keyVaultSecretsRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(keyVault.id, runtimeIdentity.properties.principalId, keyVaultSecretsUserRoleDefinitionId)
+  name: guid(keyVault.id, runtimeIdentityName, keyVaultSecretsUserRoleDefinitionId)
   scope: keyVault
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleDefinitionId)

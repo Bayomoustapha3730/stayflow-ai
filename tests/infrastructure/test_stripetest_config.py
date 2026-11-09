@@ -370,14 +370,45 @@ class StripeTestInfrastructureTests(unittest.TestCase):
         self.assertIn("Microsoft.Network/privateEndpoints@", template)
         self.assertIn("Microsoft.Network/privateDnsZones@", template)
 
+    def test_role_assignments_use_deployment_start_known_names_and_acr_scope_module(self):
+        template = (ROOT / "infra/stripetest/main.bicep").read_text()
+        acr_module = (ROOT / "infra/stripetest/acr-pull-role-assignment.bicep").read_text()
+
+        self.assertIn("module imagePullRoleAssignment './acr-pull-role-assignment.bicep'", template)
+        self.assertIn("scope: resourceGroup(containerRegistryResourceGroupName)", template)
+        self.assertIn("imagePullIdentityPrincipalId: imagePullIdentity.properties.principalId", template)
+        self.assertIn(
+            "name: guid(keyVault.id, runtimeIdentityName, keyVaultSecretsUserRoleDefinitionId)",
+            template,
+        )
+        self.assertIn(
+            "name: guid(containerRegistry.id, imagePullIdentityName, acrPullRoleDefinitionId)",
+            acr_module,
+        )
+        self.assertNotRegex(
+            template + acr_module,
+            r"name:\s*guid\([^)]*properties\.principalId",
+        )
+        self.assertIn("scope: containerRegistry", acr_module)
+        self.assertIn("principalId: imagePullIdentityPrincipalId", acr_module)
+        self.assertIn("7f951dda-4ed3-4680-a7ca-43fe172d538d", acr_module)
+
+    def test_fractional_container_cpu_allocations_are_expressed_as_valid_bicep_json_numbers(self):
+        template = (ROOT / "infra/stripetest/application.bicep").read_text()
+
+        self.assertIn("cpu: json('0.5')", template)
+        self.assertIn("cpu: json('0.25')", template)
+
     def test_application_template_has_no_cross_template_role_symbol(self):
         app_template = (ROOT / "infra/stripetest/application.bicep").read_text()
         infra_template = (ROOT / "infra/stripetest/main.bicep").read_text()
+        acr_module = (ROOT / "infra/stripetest/acr-pull-role-assignment.bicep").read_text()
 
         self.assertNotIn("imagePullRoleAssignment", app_template)
-        self.assertIn("resource imagePullRoleAssignment", infra_template)
-        self.assertIn("scope: containerRegistry", infra_template)
-        self.assertIn("principalId: imagePullIdentity.properties.principalId", infra_template)
+        self.assertIn("module imagePullRoleAssignment", infra_template)
+        self.assertIn("resource imagePullRoleAssignment", acr_module)
+        self.assertIn("scope: containerRegistry", acr_module)
+        self.assertIn("principalId: imagePullIdentityPrincipalId", acr_module)
 
 
 if __name__ == "__main__":

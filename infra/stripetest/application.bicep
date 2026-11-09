@@ -153,7 +153,7 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'backend'
           image: backendImage
           resources: {
-            cpu: 0.5
+            cpu: json('0.5')
             memory: '1Gi'
           }
           env: [
@@ -349,7 +349,7 @@ resource frontendApp 'Microsoft.App/containerApps@2023-05-01' = {
           name: 'frontend'
           image: frontendImage
           resources: {
-            cpu: 0.25
+            cpu: json('0.25')
             memory: '0.5Gi'
           }
           env: [
