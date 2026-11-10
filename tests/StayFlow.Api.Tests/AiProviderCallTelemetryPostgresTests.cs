@@ -92,7 +92,8 @@ public sealed class AiProviderCallTelemetryPostgresTests : IAsyncLifetime
         await store.PrepareAsync(
             new AiProviderCallPreparation(callId, companyId, null, null, "OpenAI", "requested-model"),
             CancellationToken.None);
-        var dispatchStartedAt = DateTimeOffset.UtcNow;
+        var now = DateTimeOffset.UtcNow;
+        var dispatchStartedAt = now.AddTicks(-(now.Ticks % 10));
 
         var claims = await Task.WhenAll(
             new AiProviderCallTelemetryStore(dbOptions).TryStartDispatchAsync(

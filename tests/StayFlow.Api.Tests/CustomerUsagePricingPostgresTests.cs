@@ -48,7 +48,8 @@ public sealed class CustomerUsagePricingPostgresTests : IAsyncLifetime
 
         var testDatabaseBuilder = new NpgsqlConnectionStringBuilder(maintenanceConnectionString)
         {
-            Database = databaseName
+            Database = databaseName,
+            Pooling = false
         };
         dbOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseNpgsql(testDatabaseBuilder.ConnectionString)
