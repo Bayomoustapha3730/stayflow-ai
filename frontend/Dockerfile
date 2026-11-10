@@ -19,8 +19,7 @@ WORKDIR /usr/share/nginx/html
 
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist ./
-COPY frontend/docker-entrypoint.d/30-runtime-config.sh /docker-entrypoint.d/30-runtime-config.sh
-RUN chmod +x /docker-entrypoint.d/30-runtime-config.sh
+COPY --chmod=755 frontend/docker-entrypoint.d/30-runtime-config.sh /docker-entrypoint.d/30-runtime-config.sh
 
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
