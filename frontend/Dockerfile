@@ -14,7 +14,7 @@ ENV VITE_STAYFLOW_API_URL=$VITE_STAYFLOW_API_URL \
     VITE_STAYFLOW_ENVIRONMENT=$VITE_STAYFLOW_ENVIRONMENT
 RUN npm run build
 
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:stable-alpine AS runtime
 WORKDIR /usr/share/nginx/html
 
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
