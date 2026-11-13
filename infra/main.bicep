@@ -68,6 +68,16 @@ param whatsappWebhookSecret string = ''
 @description('Allowed frontend origins for CORS.')
 param allowedOrigins array = []
 
+var corsAllowedOriginsEnv = [for (origin, index) in allowedOrigins: {
+  name: 'Cors__AllowedOrigins__${index}'
+  value: origin
+}]
+
+var securityAllowedOriginsEnv = [for (origin, index) in allowedOrigins: {
+  name: 'ProductionHardening__Security__AllowedOrigins__${index}'
+  value: origin
+}]
+
 @description('Backend minimum replica count.')
 param backendMinReplicas int = 1
 
@@ -362,14 +372,8 @@ resource backendApp 'Microsoft.App/containerApps@2023-05-01' = {
                 value: string(actionNotificationDeliveryRetryDelayMinutes)
               }
             ],
-            [for (origin, index) in allowedOrigins: {
-              name: 'Cors__AllowedOrigins__${index}'
-              value: origin
-            }],
-            [for (origin, index) in allowedOrigins: {
-              name: 'ProductionHardening__Security__AllowedOrigins__${index}'
-              value: origin
-            }]
+            corsAllowedOriginsEnv,
+            securityAllowedOriginsEnv
           )
           probes: [
             {
