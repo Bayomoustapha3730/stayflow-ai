@@ -153,6 +153,7 @@ jobs:
       with:
         inlineScript: |
           set -euo pipefail
+          az bicep install
           az bicep version
           az bicep build --file infra/main.bicep --stdout > /dev/null
           if az bicep --help | grep -q '\blint\b'; then
