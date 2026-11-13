@@ -16,6 +16,7 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     # Ephemeral PostgreSQL for ConciergeActionOrchestratorPaymentRetryTests, which needs real
     # unique-constraint enforcement (EF InMemory doesn't enforce it). Reachable at localhost:5432
@@ -88,10 +89,23 @@ jobs:
         find scripts -maxdepth 1 -type f -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
         bash -n tests/deployment/smoke.sh
     - name: Install ShellCheck
+      timeout-minutes: 5
+      env:
+        DEBIAN_FRONTEND: noninteractive
       run: |
         set -euo pipefail
-        sudo apt-get update
-        sudo apt-get install -y shellcheck
+        if ! command -v shellcheck >/dev/null 2>&1; then
+          timeout 180s sudo apt-get \
+            -o Acquire::Retries=2 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+
+          timeout 90s sudo apt-get install \
+            -y --no-install-recommends shellcheck
+        fi
+
+        shellcheck --version
     - name: ShellCheck
       shell: bash
       run: |
@@ -139,6 +153,7 @@ jobs:
       with:
         inlineScript: |
           set -euo pipefail
+          az bicep install
           az bicep version
           az bicep build --file infra/main.bicep --stdout > /dev/null
           if az bicep --help | grep -q '\blint\b'; then
@@ -146,8 +161,30 @@ jobs:
           else
             echo "az bicep lint is unavailable in this environment; validating parameter files via build-params"
           fi
-          az bicep build-params --file infra/parameters/staging.json --stdout > /dev/null
-          az bicep build-params --file infra/parameters/production.json --stdout > /dev/null
+          az bicep build --file infra/main.bicep --stdout > /tmp/stayflow-arm-template.json
+          python3 -c '
+          import json
+          from pathlib import Path
+
+          template = json.loads(Path("/tmp/stayflow-arm-template.json").read_text())
+          declared = set(template["parameters"])
+          schema = "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#"
+
+          for filename in ("infra/parameters/staging.json", "infra/parameters/production.json"):
+              data = json.loads(Path(filename).read_text())
+              if data.get("$schema") != schema:
+                  raise SystemExit(f"Invalid ARM schema: {filename}")
+              params = data.get("parameters")
+              if not isinstance(params, dict):
+                  raise SystemExit(f"Invalid parameters object: {filename}")
+              for name, entry in params.items():
+                  if not isinstance(entry, dict) or set(entry) not in ({"value"}, {"reference"}):
+                      raise SystemExit(f"Invalid parameter entry: {filename}: {name}")
+              unknown = set(params) - declared
+              if unknown:
+                  raise SystemExit(f"Unknown parameters: {filename}: {sorted(unknown)}")
+              print(f"PASS: {filename}")
+          '
     - name: Secret scan
       shell: bash
       run: |
