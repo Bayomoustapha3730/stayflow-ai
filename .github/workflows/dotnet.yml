@@ -161,8 +161,30 @@ jobs:
           else
             echo "az bicep lint is unavailable in this environment; validating parameter files via build-params"
           fi
-          az bicep build-params --file infra/parameters/staging.json --stdout > /dev/null
-          az bicep build-params --file infra/parameters/production.json --stdout > /dev/null
+          az bicep build --file infra/main.bicep --stdout > /tmp/stayflow-arm-template.json
+          python3 -c '
+          import json
+          from pathlib import Path
+
+          template = json.loads(Path("/tmp/stayflow-arm-template.json").read_text())
+          declared = set(template["parameters"])
+          schema = "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#"
+
+          for filename in ("infra/parameters/staging.json", "infra/parameters/production.json"):
+              data = json.loads(Path(filename).read_text())
+              if data.get("$schema") != schema:
+                  raise SystemExit(f"Invalid ARM schema: {filename}")
+              params = data.get("parameters")
+              if not isinstance(params, dict):
+                  raise SystemExit(f"Invalid parameters object: {filename}")
+              for name, entry in params.items():
+                  if not isinstance(entry, dict) or set(entry) not in ({"value"}, {"reference"}):
+                      raise SystemExit(f"Invalid parameter entry: {filename}: {name}")
+              unknown = set(params) - declared
+              if unknown:
+                  raise SystemExit(f"Unknown parameters: {filename}: {sorted(unknown)}")
+              print(f"PASS: {filename}")
+          '
     - name: Secret scan
       shell: bash
       run: |
